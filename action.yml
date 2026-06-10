@@ -1,0 +1,53 @@
+name: 'Maestro Instrumentation'
+description: "Apply Maestro's locked instrumentation config to your JAR build"
+author: 'Oteligence'
+branding:
+  icon: 'activity'
+  color: 'blue'
+
+inputs:
+  api-key:
+    description: 'Maestro API key — use a GitHub Secret, not inline'
+    required: true
+  project:
+    description: 'Maestro project name (e.g. banking-app) or project UID (proj_...)'
+    required: true
+  service:
+    description: 'Service name within the project (e.g. fund-transfer)'
+    required: true
+  environment:
+    description: 'Target env: dev / staging / prod / <custom>'
+    required: true
+  jars:
+    description: 'Glob path to the service JAR (e.g. target/*.jar). v0 expects exactly one match.'
+    required: true
+  api-url:
+    description: 'Override Maestro API base URL (advanced — for testing). Must be https://'
+    required: false
+    default: 'https://api.oteligence.com'
+  timeout-seconds:
+    description: 'Max wait for each Maestro job to complete'
+    required: false
+    default: '300'
+  fail-on-warnings:
+    description: 'Fail the step if this run made peer services stale (default: false)'
+    required: false
+    default: 'false'
+
+outputs:
+  extension-dir:
+    description: 'Local path to the extracted OTel agent + extension JAR bundle'
+  config-path:
+    description: 'Local path to the resolved javaagent.config'
+  collector-config-path:
+    description: 'Local path to the resolved collector config (deploy to your Collector, not the app image)'
+  locked-version:
+    description: 'The locked version applied (e.g. 22) — use for image labels'
+  jar-sha:
+    description: 'SHA256 of the uploaded JAR (or cache hit)'
+  job-id:
+    description: 'Maestro build job ID — for audit / log lookup'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'

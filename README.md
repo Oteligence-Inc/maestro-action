@@ -1,0 +1,132 @@
+# Maestro Instrumentation — GitHub Action
+
+Wire [Maestro](https://oteligence.com) into your CI/CD so every JAR build is
+instrumented with your **locked** observability rules — server-side, deterministic —
+and the resulting OpenTelemetry agent + extension JAR are emitted for `docker build`.
+
+This is the client for **Step 6** of the Maestro flow. The whole instrumentation
+pipeline (bytecode scan, cross-service graph, scoring, ByteBuddy hooks, config
+resolution) runs on Maestro; this Action is a thin orchestrator.
+
+> **Status: v0 pilot.** Single JAR per invocation; happy-path + retries + staleness
+> warning. See [Limitations](#limitations).
+
+## Quick start
+
+1. In the Maestro wizard, **lock** the target environment (Step 5 → Save & Lock).
+2. Create a per-environment **API key** and add it to each service repo as the
+   `MAESTRO_API_KEY` GitHub Secret.
+3. Add the step to your deploy workflow **after** `mvn package`:
+
+```yaml
+# .github/workflows/deploy.yml  (in each service repo)
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - run: mvn -B package -DskipTests
+
+      - id: maestro
+        uses: oteligence/maestro-action@v1
+        with:
+          api-key: ${{ secrets.MAESTRO_API_KEY }}
+          project: 'banking-app'                # same across all service repos
+          service: 'fund-transfer'              # this repo's service name
+          environment: ${{ github.ref == 'refs/heads/main' && 'prod' || (github.ref == 'refs/heads/staging' && 'staging' || 'dev') }}
+          jars: 'target/*.jar'
+
+      # Consume the outputs in your image build
+      - run: |
+          cp -r "${{ steps.maestro.outputs.extension-dir }}" ./otel
+          cp "${{ steps.maestro.outputs.config-path }}" ./otel/javaagent.config
+          docker build --build-arg OTEL_DIR=otel -t myapp:${{ steps.maestro.outputs.locked-version }} .
+```
+
+Deploy the `collector-config-path` file to your OpenTelemetry **Collector** — not into
+the app image.
+
+## Inputs
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `api-key` | yes | — | Maestro API key. **Use a GitHub Secret**, never inline. |
+| `project` | yes | — | Project name (e.g. `banking-app`) or `proj_` UID. |
+| `service` | yes | — | Service name within the project. |
+| `environment` | yes | — | Target env: `dev` / `staging` / `prod` / custom. |
+| `jars` | yes | — | Glob to the JAR (e.g. `target/*.jar`). v0 expects exactly one match. |
+| `api-url` | no | `https://api.oteligence.com` | Override base URL. Must be `https://` and an `*.oteligence.com` host unless `MAESTRO_ALLOW_CUSTOM_API_URL=1`. |
+| `timeout-seconds` | no | `300` | Max wait for each Maestro job. |
+| `fail-on-warnings` | no | `false` | Fail the step if this run made peer services stale. |
+
+## Outputs
+
+| Output | Description |
+|---|---|
+| `extension-dir` | Local dir with the extracted OTel agent + extension JAR. |
+| `config-path` | Resolved `javaagent.config`. |
+| `collector-config-path` | Resolved collector config (deploy to your Collector). |
+| `locked-version` | The locked version applied (e.g. `22`). |
+| `jar-sha` | SHA-256 of the uploaded JAR. |
+| `job-id` | Maestro build job ID, for audit. |
+
+## What it does (the 9-step flow)
+
+1. Exchange the API key for a short-lived JWT (`POST /api/auth/cli/token`).
+2. Resolve the project UID + the env's **locked config** and locked-version UID.
+3–5. Upload the changed JAR (referencing the env's other services by SHA) and confirm.
+6. Submit `MULTI_JAR_ANALYSIS` (re-applies locked rules; refreshes the cross-service
+   staleness signatures), then `MULTI_JAR_EXPLORER_BUILD` (generates the extension from
+   the locked selection).
+7. Poll each job to completion.
+8. Download + extract the bundle and configs → step outputs.
+9. Register the JAR's SHA for this `(env, service)` (silent; the lock is unchanged).
+
+After step 9 the Action calls `GET .../staleness` and emits a **`::warning`** naming any
+**peer** services *this run* made stale (so they can be re-built). This is the only
+staleness signal that reaches CI/CD-only users.
+
+## Cross-service staleness
+
+When this service's change alters the cross-service call graph, peer services' deployed
+extensions can become **stale**. The Action surfaces that as a workflow warning:
+
+```
+This run changed the cross-service graph and made these peer services stale:
+order-service. Re-run each one's CI to refresh its instrumentation.
+```
+
+Set `fail-on-warnings: true` to make that a hard failure instead.
+
+## Troubleshooting
+
+| Message | Cause / fix |
+|---|---|
+| `API key is invalid or has been revoked` | Create a new key in Maestro and update the `MAESTRO_API_KEY` secret. |
+| `Env "X" … has not been locked yet` | Complete Step 5 (Save & Lock) in the wizard before running CI. |
+| `Project "X" not found` | Use the exact project name, or its `proj_` UID. |
+| `does not match service: "X"` (409) | The JAR's detected service differs from the `service:` input — fix the input. |
+| `matched N files` | v0 expects one JAR; narrow the `jars` glob. |
+| `Job … still running after Ns` | Raise `timeout-seconds`, or check the job in Maestro. |
+
+## Limitations (v0 pilot)
+
+- **One JAR per invocation.** Monorepos: add one step per service.
+- **Backend flags required:** the server must have `maestro.staleness.enabled`
+  (job-processor) and `maestro.batch-dedup.enabled` (file-service) on for the staleness
+  warning + peer-by-SHA references to work.
+- Per-service `javaagent.config` enrichment (`agentConfigContextByService`) from the
+  analysis preview is **not** forwarded yet — the locked selection drives the build.
+- Deferred to v1: artifact-hash verification, OIDC auth, GitHub Check / Slack surfaces,
+  release automation, integration/E2E against staging.
+
+## Development
+
+```bash
+npm install
+npm run typecheck   # tsc --noEmit
+npm test            # jest (HTTP mocked with nock)
+npm run build       # ncc bundle → dist/index.js (committed; runtime entrypoint)
+```

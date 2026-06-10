@@ -1,0 +1,7 @@
+node_modules/
+lib/
+*.log
+.DS_Store
+coverage/
+# NOTE: dist/ is intentionally NOT ignored — JavaScript actions run the committed
+# bundle at dist/index.js. The release workflow regenerates and commits it.
