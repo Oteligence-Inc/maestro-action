@@ -1,0 +1,57 @@
+name: Release
+
+# Tag-driven release (Build Spec §10). Push a semver tag (v0.1.0, v1.0.0, …) and this:
+#   1. re-runs typecheck + tests + bundle
+#   2. verifies the tagged commit's dist/ matches source (CI already enforces this on the
+#      branch; this is the release-time backstop — never bundle locally and forget to commit)
+#   3. creates a GitHub Release with auto-generated notes
+#   4. moves the floating major tag (v1.0.0 -> also updates v1) so consumers can pin `@v1`
+#
+# Pre-req: commit a fresh `npm run build` on the branch BEFORE tagging (CI guards this).
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # create releases + move the major tag
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need history/tags to move the major tag
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: Verify dist/ on the tag matches source
+        run: |
+          if [ -n "$(git status --porcelain dist/)" ]; then
+            echo "::error::dist/ on tag ${GITHUB_REF_NAME} is stale. Commit a fresh 'npm run build' before tagging."
+            git --no-pager diff -- dist/
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+
+      - name: Move the floating major tag
+        run: |
+          MAJOR="${GITHUB_REF_NAME%%.*}"            # v1.2.3 -> v1
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git tag -f "$MAJOR" "$GITHUB_REF_NAME"
+          git push origin -f "refs/tags/$MAJOR"
+          echo "Moved $MAJOR -> $GITHUB_REF_NAME"

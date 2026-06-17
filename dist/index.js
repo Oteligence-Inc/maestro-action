@@ -29927,7 +29927,10 @@ async function resolveProjectUid(api, project) {
         throw new errors_1.UserError(`API key does not have access to project "${project}".`);
     }
     (0, api_1.expectOk)(res, '/api/auth/tenant-projects');
-    const content = res.body?.data?.content ?? [];
+    // oteligence-auth returns PagedResponse directly ({ content, page }) — there is no `data`
+    // envelope on this endpoint (unlike job-manager's APIResponse). Read top-level `content`,
+    // tolerating a `data.content` wrapper in case a gateway ever adds one.
+    const content = res.body?.content ?? res.body?.data?.content ?? [];
     const match = content.find((p) => p.projectName === project);
     if (!match) {
         throw new errors_1.UserError(`Project "${project}" not found for this API key's tenant. Pass the exact project name, or its proj_ UID.`);

@@ -1,0 +1,88 @@
+name: E2E
+
+# End-to-end smoke of the Action via the GitHub action contract (action.yml + INPUT_*
+# injection + step outputs) — NOT a hand-rolled `node dist/index.js` call. This is the
+# layer that proves the bits a direct node run skips.
+#
+# Two ways to run it:
+#
+#  A) Locally with `act` (no GitHub, no publish) — the recommended pre-publish gate:
+#       1. install Docker Desktop + nektos/act
+#       2. copy a built JAR into the repo so the container can see it:
+#            cp ../demo-jars/ecommerce-microservices/jars/order-service-0.0.1-SNAPSHOT.jar fixtures/service.jar
+#       3. from services/maestro-action/ :
+#            act workflow_dispatch -W .github/workflows/e2e.yml \
+#              -s MAESTRO_API_KEY=ak_xxx \
+#              -s MAESTRO_API_URL=https://<your-ngrok-host> \
+#              --input jars=fixtures/service.jar
+#     `uses: ./` resolves to this repo's action.yml, so act runs the freshly-built dist/.
+#
+#  B) On GitHub against staging — nightly + manual. Needs repo secrets MAESTRO_API_KEY and
+#     MAESTRO_API_URL, plus a JAR available in the workspace (provide via a checkout/build
+#     of a fixture service, or an uploaded artifact step before the action).
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: 'Maestro project'
+        default: 'ecom-sr'
+      service:
+        description: 'Service name (= spring.application.name)'
+        default: 'order-service'
+      environment:
+        description: 'Target env'
+        default: 'dev'
+      jars:
+        description: 'Glob/path to one built JAR in the workspace'
+        default: 'fixtures/service.jar'
+      timeout-seconds:
+        description: 'Max wait per Maestro job (build can exceed 270s)'
+        default: '600'
+      fail-on-warnings:
+        description: 'Fail if this run made peers stale'
+        default: 'false'
+  schedule:
+    - cron: '0 3 * * *' # nightly staging smoke
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      # The Action is https-only + *.oteligence.com-allow-listed; staging/ngrok hosts need this.
+      MAESTRO_ALLOW_CUSTOM_API_URL: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build # ensure `uses: ./` runs the current source, not a stale bundle
+
+      - id: maestro
+        uses: ./
+        with:
+          api-key: ${{ secrets.MAESTRO_API_KEY }}
+          api-url: ${{ secrets.MAESTRO_API_URL }}
+          project: ${{ inputs.project || 'ecom-sr' }}
+          service: ${{ inputs.service || 'order-service' }}
+          environment: ${{ inputs.environment || 'dev' }}
+          jars: ${{ inputs.jars || 'fixtures/service.jar' }}
+          timeout-seconds: ${{ inputs.timeout-seconds || '600' }}
+          fail-on-warnings: ${{ inputs.fail-on-warnings || 'false' }}
+
+      - name: Assert outputs + artifacts
+        run: |
+          echo "locked-version = ${{ steps.maestro.outputs.locked-version }}"
+          echo "jar-sha        = ${{ steps.maestro.outputs.jar-sha }}"
+          echo "job-id         = ${{ steps.maestro.outputs.job-id }}"
+          test -n "${{ steps.maestro.outputs.locked-version }}" || { echo "::error::no locked-version output"; exit 1; }
+          test -d "${{ steps.maestro.outputs.extension-dir }}"  || { echo "::error::extension-dir missing"; exit 1; }
+          test -f "${{ steps.maestro.outputs.config-path }}"    || { echo "::error::config-path missing"; exit 1; }
+          echo "E2E outputs + artifacts OK."

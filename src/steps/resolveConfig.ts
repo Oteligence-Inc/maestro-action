@@ -45,14 +45,18 @@ export async function resolveLockedConfig(api: MaestroApi, inputs: Inputs): Prom
 async function resolveProjectUid(api: MaestroApi, project: string): Promise<string> {
   if (project.startsWith('proj_')) return project; // already a UID
 
-  const res = await api.get<{ data?: { content?: Array<{ uid: string; projectName: string }> } }>(
-    '/api/auth/tenant-projects?page=0&size=100',
-  );
+  const res = await api.get<{
+    content?: Array<{ uid: string; projectName: string }>;
+    data?: { content?: Array<{ uid: string; projectName: string }> };
+  }>('/api/auth/tenant-projects?page=0&size=100');
   if (res.statusCode === 401 || res.statusCode === 403) {
     throw new UserError(`API key does not have access to project "${project}".`);
   }
   expectOk(res, '/api/auth/tenant-projects');
-  const content = res.body?.data?.content ?? [];
+  // oteligence-auth returns PagedResponse directly ({ content, page }) — there is no `data`
+  // envelope on this endpoint (unlike job-manager's APIResponse). Read top-level `content`,
+  // tolerating a `data.content` wrapper in case a gateway ever adds one.
+  const content = res.body?.content ?? res.body?.data?.content ?? [];
   const match = content.find((p) => p.projectName === project);
   if (!match) {
     throw new UserError(

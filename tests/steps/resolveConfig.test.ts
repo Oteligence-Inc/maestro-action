@@ -19,7 +19,8 @@ it('resolves project name → uid, locked config, and the latest version uid', a
   nock(BASE)
     .get('/api/auth/tenant-projects')
     .query(true)
-    .reply(200, { success: true, data: { content: [{ uid: 'proj_1', projectName: 'banking-app' }] } });
+    // Real oteligence-auth shape: PagedResponse returned directly — top-level `content`, no `data` envelope.
+    .reply(200, { content: [{ uid: 'proj_1', projectName: 'banking-app' }], page: { number: 0, size: 100, totalElements: 1 } });
   nock(BASE)
     .get('/api/job-manager/projects/proj_1/envs/dev/locked')
     .reply(200, { data: { version: 22, goals: ['debug_latency'], selection: [], apm: 'datadog' } });
@@ -50,13 +51,29 @@ it('maps a 404 on locked to a "not locked yet" UserError', async () => {
   nock(BASE)
     .get('/api/auth/tenant-projects')
     .query(true)
-    .reply(200, { data: { content: [{ uid: 'proj_1', projectName: 'banking-app' }] } });
+    .reply(200, { content: [{ uid: 'proj_1', projectName: 'banking-app' }], page: { number: 0, size: 100, totalElements: 1 } });
   nock(BASE).get('/api/job-manager/projects/proj_1/envs/dev/locked').reply(404, { message: 'no locked version yet' });
 
   await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/has not been locked yet/);
 });
 
+it('tolerates a data-wrapped tenant-projects envelope if a gateway adds one', async () => {
+  nock(BASE)
+    .get('/api/auth/tenant-projects')
+    .query(true)
+    .reply(200, { data: { content: [{ uid: 'proj_1', projectName: 'banking-app' }] } });
+  nock(BASE)
+    .get('/api/job-manager/projects/proj_1/envs/dev/locked')
+    .reply(200, { data: { version: 5, goals: [], selection: [] } });
+  nock(BASE)
+    .get('/api/job-manager/projects/proj_1/envs/dev/versions')
+    .reply(200, { data: [{ uid: 'lv_5', versionNum: 5 }] });
+
+  const cfg = await resolveLockedConfig(client(), inputs);
+  expect(cfg.projectUid).toBe('proj_1');
+});
+
 it('throws when the project name is unknown to the tenant', async () => {
-  nock(BASE).get('/api/auth/tenant-projects').query(true).reply(200, { data: { content: [] } });
+  nock(BASE).get('/api/auth/tenant-projects').query(true).reply(200, { content: [], page: { number: 0, size: 100, totalElements: 0 } });
   await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/not found/);
 });

@@ -1,0 +1,44 @@
+name: CI
+
+# Lint/typecheck/test/build on every push + PR. No backend needed — the HTTP layer
+# is mocked with nock. Also guards that the committed dist/ bundle matches src/
+# (GitHub runs dist/index.js from the tagged ref, so a stale bundle ships stale code).
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20' # matches action.yml `runs: using: node20`
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Bundle dist/
+        run: npm run build
+
+      - name: Verify committed dist/ is up to date
+        run: |
+          if [ -n "$(git status --porcelain dist/)" ]; then
+            echo "::error::dist/ is out of date — run 'npm run build' and commit dist/ before pushing."
+            git --no-pager diff -- dist/
+            exit 1
+          fi
+          echo "dist/ matches source."

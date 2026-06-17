@@ -130,3 +130,37 @@ npm run typecheck   # tsc --noEmit
 npm test            # jest (HTTP mocked with nock)
 npm run build       # ncc bundle → dist/index.js (committed; runtime entrypoint)
 ```
+
+## CI / workflows
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `.github/workflows/ci.yml` | push / PR | typecheck + test + build, and **fails if committed `dist/` is stale** |
+| `.github/workflows/e2e.yml` | manual / nightly | runs the Action via `uses: ./` against staging (or a custom host) and asserts outputs/artifacts |
+| `.github/workflows/release.yml` | push tag `v*` | re-test + verify `dist/`, create a GitHub Release, move the floating `v1` tag |
+
+### Test the GitHub layer locally with `act`
+
+`act` runs a real workflow (and the `action.yml`→`INPUT_*` plumbing) without GitHub:
+
+```bash
+# 1. install Docker Desktop + nektos/act
+# 2. provide a JAR the container can see
+cp ../demo-jars/ecommerce-microservices/jars/order-service-0.0.1-SNAPSHOT.jar fixtures/service.jar
+# 3. run the E2E workflow against your https endpoint (ngrok/caddy)
+act workflow_dispatch -W .github/workflows/e2e.yml \
+  -s MAESTRO_API_KEY=ak_xxx \
+  -s MAESTRO_API_URL=https://<your-ngrok-host> \
+  --input jars=fixtures/service.jar
+```
+
+### Releasing (v0 → v1)
+
+`dist/` is committed and run as-is by GitHub, so it must be fresh before tagging:
+
+```bash
+npm run build && git add dist/ && git commit -m "build: bundle dist"
+git tag v0.1.0 && git push origin v0.1.0   # release.yml builds, releases, moves `v0`
+```
+
+Consumers then pin `uses: oteligence/maestro-action@v1` (see the parent repos' `deploy.yml`).
