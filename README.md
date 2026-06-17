@@ -30,7 +30,7 @@ jobs:
       - run: mvn -B package -DskipTests
 
       - id: maestro
-        uses: oteligence/maestro-action@v1
+        uses: Oteligence-Inc/maestro-action@v1
         with:
           api-key: ${{ secrets.MAESTRO_API_KEY }}
           project: 'banking-app'                # same across all service repos
@@ -163,4 +163,4 @@ npm run build && git add dist/ && git commit -m "build: bundle dist"
 git tag v0.1.0 && git push origin v0.1.0   # release.yml builds, releases, moves `v0`
 ```
 
-Consumers then pin `uses: oteligence/maestro-action@v1` (see the parent repos' `deploy.yml`).
+Consumers then pin `uses: Oteligence-Inc/maestro-action@v1` (see the parent repos' `deploy.yml`).
