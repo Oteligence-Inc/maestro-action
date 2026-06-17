@@ -1,0 +1,13 @@
+# Normalize all text files to LF in the repo (Linux runners + the committed dist
+# bundle must be LF). Windows working copies can still check out CRLF locally, but
+# what's stored — and what GitHub Actions runs — stays LF.
+* text=auto eol=lf
+
+# Windows-only script: keep CRLF so it runs natively under PowerShell on Windows.
+*.ps1 text eol=crlf
+
+# Binary assets — never normalize or diff.
+*.jar binary
+*.png binary
+*.zip binary
+*.tzst binary
