@@ -29406,19 +29406,33 @@ const poll_1 = __nccwpck_require__(9858);
 const download_1 = __nccwpck_require__(9579);
 const register_1 = __nccwpck_require__(7042);
 const staleness_1 = __nccwpck_require__(4289);
+const reportDeployRun_1 = __nccwpck_require__(8013);
 const errors_1 = __nccwpck_require__(17);
 /**
  * Maestro CI/CD GitHub Action — orchestrates the Step-6 9-step flow:
  * auth → resolve locked config → upload → analyse → build → download → register,
  * then emits a core.warning for any peer services this run made stale.
+ *
+ * Once the project is resolved, the run is reported to Maestro's deploy-run history
+ * (in_progress at start, completed+conclusion at the end) — best-effort, never fatal.
  */
 async function run() {
+    let inputs;
     try {
-        const inputs = (0, inputs_1.parseInputs)();
-        core.info(`Maestro: ${inputs.project}/${inputs.service} @ ${inputs.environment}`);
-        const api = new api_1.MaestroApi(inputs.apiUrl);
+        inputs = (0, inputs_1.parseInputs)();
+    }
+    catch (err) {
+        core.setFailed((0, errors_1.formatError)(err));
+        return;
+    }
+    core.info(`Maestro: ${inputs.project}/${inputs.service} @ ${inputs.environment}`);
+    const api = new api_1.MaestroApi(inputs.apiUrl);
+    let projectUid;
+    try {
         await (0, auth_1.auth)(api, inputs); // [1]
         const cfg = await (0, resolveConfig_1.resolveLockedConfig)(api, inputs); // [2]
+        projectUid = cfg.projectUid;
+        await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'in_progress', null); // deploy-run: start
         const upload = await (0, upload_1.uploadJar)(api, inputs, cfg); // [3-5]
         const analysisJobId = await (0, submitJob_1.submitAnalysis)(api, cfg, upload); // [6a]
         await (0, poll_1.pollJob)(api, analysisJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7a]
@@ -29435,9 +29449,11 @@ async function run() {
         core.setOutput('job-id', buildJobId);
         // v6 staleness signal — attributed to the analysis job that re-stamped current signatures.
         await (0, staleness_1.warnStalePeers)(api, inputs, cfg, analysisJobId, inputs.failOnWarnings);
+        await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'completed', 'success'); // deploy-run: done
         core.info('Maestro instrumentation complete.');
     }
     catch (err) {
+        await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'completed', 'failure'); // deploy-run: failed (best-effort)
         core.setFailed((0, errors_1.formatError)(err));
     }
 }
@@ -29841,6 +29857,126 @@ async function registerJarForEnv(api, inputs, cfg, upload, buildJobId) {
 
 /***/ }),
 
+/***/ 8013:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.reportDeployRun = reportDeployRun;
+const core = __importStar(__nccwpck_require__(7484));
+const resolveConfig_1 = __nccwpck_require__(749);
+/**
+ * Best-effort: report THIS GitHub workflow run to Maestro so it appears in the project's
+ * deploy-run history (GET /api/job-manager/projects/{projectUid}/deploy-runs). The backend
+ * upserts by (project, service, provider, runId), so we call it twice — once at start
+ * ({@code in_progress}) and once at the end ({@code completed} + conclusion) — and the two
+ * reports converge on one row.
+ *
+ * NEVER throws: recording is telemetry, and a reporting failure (or running outside GitHub
+ * Actions) must not fail the user's deploy. Run metadata comes from the standard GITHUB_*
+ * environment variables the runner sets.
+ */
+async function reportDeployRun(api, inputs, projectUid, status, conclusion) {
+    const runId = Number(process.env.GITHUB_RUN_ID);
+    // No project resolved yet, or not running inside a GitHub Actions run → nothing to report.
+    if (!projectUid || !Number.isFinite(runId) || runId <= 0)
+        return;
+    const repo = process.env.GITHUB_REPOSITORY;
+    const server = process.env.GITHUB_SERVER_URL || 'https://github.com';
+    const now = localDateTimeNow(); // LocalDateTime-compatible (no timezone offset)
+    const body = {
+        serviceName: inputs.service,
+        runId,
+        envName: inputs.environment,
+        provider: 'github',
+        repository: repo,
+        workflow: workflowFile(),
+        runNumber: intEnv('GITHUB_RUN_NUMBER'),
+        runAttempt: intEnv('GITHUB_RUN_ATTEMPT'),
+        refName: process.env.GITHUB_REF_NAME,
+        commitSha: process.env.GITHUB_SHA,
+        event: process.env.GITHUB_EVENT_NAME,
+        actor: process.env.GITHUB_ACTOR,
+        htmlUrl: repo ? `${server}/${repo}/actions/runs/${runId}` : undefined,
+        status,
+        conclusion,
+        startedAt: status === 'in_progress' ? now : undefined,
+        completedAt: status === 'completed' ? now : undefined,
+    };
+    try {
+        const res = await api.post(`${(0, resolveConfig_1.envBase)(projectUid)}/deploy-runs`, body);
+        if (res.statusCode >= 400) {
+            core.warning(`Maestro: deploy-run report returned ${res.statusCode} (non-fatal).`);
+        }
+        else {
+            core.info(`Maestro: reported deploy run ${runId} (${status}${conclusion ? '/' + conclusion : ''}).`);
+        }
+    }
+    catch (err) {
+        core.warning(`Maestro: failed to report deploy run (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+}
+/** YYYY-MM-DDTHH:mm:ss (no offset) — parseable by the backend's LocalDateTime field. */
+function localDateTimeNow() {
+    return new Date().toISOString().slice(0, 19);
+}
+function intEnv(name) {
+    const v = Number(process.env[name]);
+    return Number.isFinite(v) ? v : undefined;
+}
+/**
+ * The workflow file name (e.g. {@code maestro-deploy.yml}). GITHUB_WORKFLOW_REF looks like
+ * "owner/repo/.github/workflows/maestro-deploy.yml@refs/heads/main"; fall back to the
+ * human workflow name in GITHUB_WORKFLOW.
+ */
+function workflowFile() {
+    const ref = process.env.GITHUB_WORKFLOW_REF;
+    if (ref) {
+        const path = ref.split('@')[0];
+        const base = path.substring(path.lastIndexOf('/') + 1);
+        if (base)
+            return base;
+    }
+    return process.env.GITHUB_WORKFLOW;
+}
+
+
+/***/ }),
+
 /***/ 749:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -30082,6 +30218,7 @@ function extractJobId(body) {
 async function submitAnalysis(api, cfg, upload) {
     const locked = cfg.locked;
     const res = await api.post('/api/job-manager/jobs', {
+        projectUid: cfg.projectUid, // stamp the project so project-scoped reads (ci-runs) find this job
         jobType: 'MULTI_JAR_ANALYSIS',
         queuePriority: 'NORMAL',
         javaVersion: locked.javaVersion || '17',
@@ -30108,6 +30245,7 @@ async function submitAnalysis(api, cfg, upload) {
 async function submitBuild(api, cfg, upload, analysisJobId, profile) {
     const locked = cfg.locked;
     const res = await api.post('/api/job-manager/jobs', {
+        projectUid: cfg.projectUid, // stamp the project so project-scoped reads (ci-runs) find this job
         jobType: 'MULTI_JAR_EXPLORER_BUILD',
         queuePriority: 'NORMAL',
         javaVersion: locked.javaVersion || '17',
@@ -30143,6 +30281,8 @@ function buildProfileFromLocked(locked) {
         if (!svc || svc === 'undefined')
             continue;
         const tier = String(entry.tier || '').toLowerCase();
+        if (tier === 'skip')
+            continue; // skip-tier (FORCE_SKIP / deselected) must never be instrumented
         perService[svc] = perService[svc] || { selectedCount: 0 };
         perService[svc].selectedCount++;
         methodConfigurations[id] = { enabled: true, depth: tier === 'deep' ? 'deep' : 'standard' };

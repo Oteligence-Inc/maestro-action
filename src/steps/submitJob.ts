@@ -16,6 +16,7 @@ function extractJobId(body: any): string | undefined {
 export async function submitAnalysis(api: MaestroApi, cfg: ResolvedConfig, upload: UploadResult): Promise<string> {
   const locked = cfg.locked;
   const res = await api.post('/api/job-manager/jobs', {
+    projectUid: cfg.projectUid, // stamp the project so project-scoped reads (ci-runs) find this job
     jobType: 'MULTI_JAR_ANALYSIS',
     queuePriority: 'NORMAL',
     javaVersion: locked.javaVersion || '17',
@@ -48,6 +49,7 @@ export async function submitBuild(
 ): Promise<string> {
   const locked = cfg.locked;
   const res = await api.post('/api/job-manager/jobs', {
+    projectUid: cfg.projectUid, // stamp the project so project-scoped reads (ci-runs) find this job
     jobType: 'MULTI_JAR_EXPLORER_BUILD',
     queuePriority: 'NORMAL',
     javaVersion: locked.javaVersion || '17',
@@ -81,6 +83,7 @@ export function buildProfileFromLocked(locked: LockedSpec): BuildProfile {
     const svc = entry.service || id.split('::')[0];
     if (!svc || svc === 'undefined') continue;
     const tier = String(entry.tier || '').toLowerCase();
+    if (tier === 'skip') continue; // skip-tier (FORCE_SKIP / deselected) must never be instrumented
     perService[svc] = perService[svc] || { selectedCount: 0 };
     perService[svc].selectedCount++;
     methodConfigurations[id] = { enabled: true, depth: tier === 'deep' ? 'deep' : 'standard' };

@@ -54,6 +54,19 @@ describe('buildProfileFromLocked', () => {
     expect(() => buildProfileFromLocked({ ...locked, selection: [] })).toThrow(UserError);
     expect(() => buildProfileFromLocked({ ...locked, selection: [{ methodFqn: 'no-scope-sep' }] })).toThrow(UserError);
   });
+
+  it('excludes tier:"skip" entries so they are never instrumented', () => {
+    const p = buildProfileFromLocked({
+      ...locked,
+      selection: [
+        { methodFqn: 'order-service::com.x.Pay.charge', tier: 'deep', service: 'order-service' },
+        { methodFqn: 'order-service::com.x.Pay.skipMe', tier: 'skip', service: 'order-service' },
+      ],
+    });
+    expect(p.methodConfigurations['order-service::com.x.Pay.charge']).toEqual({ enabled: true, depth: 'deep' });
+    expect(p.methodConfigurations['order-service::com.x.Pay.skipMe']).toBeUndefined();
+    expect(p.perService['order-service'].selectedCount).toBe(1); // skip entry not counted
+  });
 });
 
 describe('submitAnalysis', () => {
@@ -69,6 +82,7 @@ describe('submitAnalysis', () => {
     const id = await submitAnalysis(client(), cfg, upload);
     expect(id).toBe('job_a');
     expect(seen.jobType).toBe('MULTI_JAR_ANALYSIS');
+    expect(seen.projectUid).toBe('proj_1'); // stamped so ci-runs (project-scoped) finds it
     expect(seen.lockedVersionUid).toBe('lv_9');
     expect(seen.requestJson.artifactGroupUid).toBe('grp_1');
     expect(seen.requestJson.goals).toEqual(['debug_latency', 'track_errors']);
@@ -95,6 +109,7 @@ describe('submitBuild', () => {
     const id = await submitBuild(client(), cfg, upload, 'job_a', profile);
     expect(id).toBe('build_1');
     expect(seen.jobType).toBe('MULTI_JAR_EXPLORER_BUILD');
+    expect(seen.projectUid).toBe('proj_1'); // stamped so ci-runs (project-scoped) finds it
     expect(seen.lockedVersionUid).toBe('lv_9');
     expect(seen.requestJson.analysisJobId).toBe('job_a');
     expect(seen.requestJson.profile.methodConfigurations).toBeDefined();
