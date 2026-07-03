@@ -29,7 +29,7 @@ export async function run(): Promise<void> {
     core.setFailed(formatError(err));
     return;
   }
-  core.info(`Maestro: ${inputs.project}/${inputs.service} @ ${inputs.environment}`);
+  core.info(`Maestro: ${inputs.project || inputs.projectId}/${inputs.service} @ ${inputs.environment}`);
   const api = new MaestroApi(inputs.apiUrl);
   let projectUid: string | undefined;
 

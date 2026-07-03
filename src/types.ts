@@ -3,7 +3,8 @@
 
 export interface Inputs {
   apiKey: string;
-  project: string; // human name OR a proj_ uid
+  project: string; // human project name (may be "" when projectId is supplied instead)
+  projectId: string; // project UID; wins over `project` when set. Resolves without a name lookup.
   service: string;
   environment: string;
   jarsGlob: string;

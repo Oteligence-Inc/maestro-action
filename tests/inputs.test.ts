@@ -1,4 +1,4 @@
-import { normaliseApiUrl } from '../src/inputs';
+import { normaliseApiUrl, parseInputs } from '../src/inputs';
 import { UserError } from '../src/util/errors';
 
 describe('normaliseApiUrl', () => {
@@ -29,5 +29,42 @@ describe('normaliseApiUrl', () => {
 
   it('rejects a host that merely contains oteligence.com as a substring', () => {
     expect(() => normaliseApiUrl('https://oteligence.com.evil.example')).toThrow(UserError);
+  });
+});
+
+describe('parseInputs — project / project-id', () => {
+  const ORIGINAL = { ...process.env };
+  afterEach(() => {
+    process.env = { ...ORIGINAL };
+  });
+  // @actions/core reads INPUT_<UPPER-NAME>. Set the always-required ones, vary project/project-id.
+  function seedRequired() {
+    process.env['INPUT_API-KEY'] = 'k';
+    process.env['INPUT_SERVICE'] = 'svc';
+    process.env['INPUT_ENVIRONMENT'] = 'dev';
+    process.env['INPUT_JARS'] = 'target/x.jar';
+    delete process.env['INPUT_PROJECT'];
+    delete process.env['INPUT_PROJECT-ID'];
+  }
+
+  it('throws when neither project nor project-id is provided', () => {
+    seedRequired();
+    expect(() => parseInputs()).toThrow(/project.*project-id/i);
+  });
+
+  it('accepts project-id alone (name empty)', () => {
+    seedRequired();
+    process.env['INPUT_PROJECT-ID'] = 'b6a6c970c2c54aa6a7816';
+    const i = parseInputs();
+    expect(i.projectId).toBe('b6a6c970c2c54aa6a7816');
+    expect(i.project).toBe('');
+  });
+
+  it('accepts project name alone (id empty)', () => {
+    seedRequired();
+    process.env['INPUT_PROJECT'] = 'otel-3July';
+    const i = parseInputs();
+    expect(i.project).toBe('otel-3July');
+    expect(i.projectId).toBe('');
   });
 });

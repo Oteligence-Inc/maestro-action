@@ -11,7 +11,14 @@ export function parseInputs(): Inputs {
   const apiKey = core.getInput('api-key', { required: true });
   core.setSecret(apiKey); // never let the key appear in logs
 
-  const project = core.getInput('project', { required: true });
+  // Either `project` (name) or `project-id` (UID) identifies the project — projectId wins.
+  // Not marked required individually; we enforce "at least one" below so a correct projectId
+  // still runs even if the name was forgotten or mistyped.
+  const project = core.getInput('project');
+  const projectId = core.getInput('project-id');
+  if (!project.trim() && !projectId.trim()) {
+    throw new UserError('Provide either "project" (name) or "project-id" (UID).');
+  }
   const service = core.getInput('service', { required: true });
   const environment = core.getInput('environment', { required: true });
   const jarsGlob = core.getInput('jars', { required: true });
@@ -26,7 +33,7 @@ export function parseInputs(): Inputs {
 
   const failOnWarnings = (core.getInput('fail-on-warnings') || 'false').toLowerCase() === 'true';
 
-  return { apiKey, project, service, environment, jarsGlob, apiUrl, timeoutSeconds, failOnWarnings };
+  return { apiKey, project, projectId, service, environment, jarsGlob, apiUrl, timeoutSeconds, failOnWarnings };
 }
 
 /** Strips a trailing slash, enforces https + the oteligence.com allow-list. */

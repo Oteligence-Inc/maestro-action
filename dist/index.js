@@ -29425,7 +29425,7 @@ async function run() {
         core.setFailed((0, errors_1.formatError)(err));
         return;
     }
-    core.info(`Maestro: ${inputs.project}/${inputs.service} @ ${inputs.environment}`);
+    core.info(`Maestro: ${inputs.project || inputs.projectId}/${inputs.service} @ ${inputs.environment}`);
     const api = new api_1.MaestroApi(inputs.apiUrl);
     let projectUid;
     try {
@@ -29516,7 +29516,14 @@ const errors_1 = __nccwpck_require__(17);
 function parseInputs() {
     const apiKey = core.getInput('api-key', { required: true });
     core.setSecret(apiKey); // never let the key appear in logs
-    const project = core.getInput('project', { required: true });
+    // Either `project` (name) or `project-id` (UID) identifies the project — projectId wins.
+    // Not marked required individually; we enforce "at least one" below so a correct projectId
+    // still runs even if the name was forgotten or mistyped.
+    const project = core.getInput('project');
+    const projectId = core.getInput('project-id');
+    if (!project.trim() && !projectId.trim()) {
+        throw new errors_1.UserError('Provide either "project" (name) or "project-id" (UID).');
+    }
     const service = core.getInput('service', { required: true });
     const environment = core.getInput('environment', { required: true });
     const jarsGlob = core.getInput('jars', { required: true });
@@ -29527,7 +29534,7 @@ function parseInputs() {
         throw new errors_1.UserError(`timeout-seconds must be a positive integer, got "${timeoutRaw}".`);
     }
     const failOnWarnings = (core.getInput('fail-on-warnings') || 'false').toLowerCase() === 'true';
-    return { apiKey, project, service, environment, jarsGlob, apiUrl, timeoutSeconds, failOnWarnings };
+    return { apiKey, project, projectId, service, environment, jarsGlob, apiUrl, timeoutSeconds, failOnWarnings };
 }
 /** Strips a trailing slash, enforces https + the oteligence.com allow-list. */
 function normaliseApiUrl(raw) {
@@ -30035,10 +30042,11 @@ function envPath(projectUid, env) {
  * - GET .../envs/{env}/versions[0].uid → the lockedVersionUid the jobs must carry (drives staleness)
  */
 async function resolveLockedConfig(api, inputs) {
-    const projectUid = await resolveProjectUid(api, inputs.project);
+    const projectUid = await resolveProjectUid(api, inputs.project, inputs.projectId);
+    const projectLabel = inputs.project?.trim() || `id ${projectUid}`;
     const lockedRes = await api.get(`${envPath(projectUid, inputs.environment)}/locked`);
     if (lockedRes.statusCode === 404) {
-        throw new errors_1.UserError(`Env "${inputs.environment}" in project "${inputs.project}" has not been locked yet. ` +
+        throw new errors_1.UserError(`Env "${inputs.environment}" in project "${projectLabel}" has not been locked yet. ` +
             'Open Maestro and complete Step 5 (Save & Lock) before running CI.');
     }
     (0, api_1.expectOk)(lockedRes, 'locked');
@@ -30055,23 +30063,52 @@ async function resolveLockedConfig(api, inputs) {
     core.info(`Locked version: v${locked.version} (${lockedVersionUid})`);
     return { projectUid, lockedVersionUid, locked };
 }
-async function resolveProjectUid(api, project) {
-    if (project.startsWith('proj_'))
-        return project; // already a UID
+/**
+ * Resolve the project UID from either a projectId (UID) or a project name.
+ *
+ * <b>projectId wins:</b> when a projectId is supplied it is used directly (all backend paths key
+ * on projectUid), so a forgotten/mistyped project NAME can't block a run. We still validate the id
+ * up front against this API key's tenant so a wrong id fails fast with a clear message rather than a
+ * confusing downstream 404. When only a name is given, resolve it by exact match (with a legacy
+ * {@code proj_} passthrough kept for back-compat). At least one of the two is guaranteed by parseInputs.
+ */
+async function resolveProjectUid(api, project, projectId) {
+    const id = (projectId || '').trim();
+    const name = (project || '').trim();
+    if (id) {
+        const projects = await fetchTenantProjects(api, id);
+        const match = projects.find((p) => p.uid === id);
+        if (!match) {
+            throw new errors_1.UserError(`project-id "${id}" was not found for this API key's tenant. ` +
+                'Copy the exact Project ID from Maestro (project settings / URL), or use the project name instead.');
+        }
+        if (name && match.projectName !== name) {
+            core.warning(`Both project-id and project name were given; using project-id "${id}" (project "${match.projectName}") ` +
+                `and ignoring the name "${name}".`);
+        }
+        return match.uid;
+    }
+    // No projectId → resolve by name. Legacy proj_ passthrough kept for back-compat.
+    if (name.startsWith('proj_'))
+        return name;
+    const projects = await fetchTenantProjects(api, name);
+    const match = projects.find((p) => p.projectName === name);
+    if (!match) {
+        throw new errors_1.UserError(`Project "${name}" not found for this API key's tenant. Pass the exact project name, or set "project-id".`);
+    }
+    return match.uid;
+}
+/** Fetch this API key's tenant projects. `ref` is only used for the access-denied message. */
+async function fetchTenantProjects(api, ref) {
     const res = await api.get('/api/auth/tenant-projects?page=0&size=100');
     if (res.statusCode === 401 || res.statusCode === 403) {
-        throw new errors_1.UserError(`API key does not have access to project "${project}".`);
+        throw new errors_1.UserError(`API key does not have access to project "${ref}".`);
     }
     (0, api_1.expectOk)(res, '/api/auth/tenant-projects');
     // oteligence-auth returns PagedResponse directly ({ content, page }) — there is no `data`
     // envelope on this endpoint (unlike job-manager's APIResponse). Read top-level `content`,
     // tolerating a `data.content` wrapper in case a gateway ever adds one.
-    const content = res.body?.content ?? res.body?.data?.content ?? [];
-    const match = content.find((p) => p.projectName === project);
-    if (!match) {
-        throw new errors_1.UserError(`Project "${project}" not found for this API key's tenant. Pass the exact project name, or its proj_ UID.`);
-    }
-    return match.uid;
+    return res.body?.content ?? res.body?.data?.content ?? [];
 }
 
 

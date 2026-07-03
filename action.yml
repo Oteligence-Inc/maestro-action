@@ -10,8 +10,11 @@ inputs:
     description: 'Maestro API key — use a GitHub Secret, not inline'
     required: true
   project:
-    description: 'Maestro project name (e.g. banking-app) or project UID (proj_...)'
-    required: true
+    description: 'Maestro project name (e.g. banking-app). Optional if project-id is given.'
+    required: false
+  project-id:
+    description: 'Maestro project UID. Wins over `project` when set — use it if the name may be wrong/forgotten. Provide project OR project-id (or both).'
+    required: false
   service:
     description: 'Service name within the project (e.g. fund-transfer)'
     required: true

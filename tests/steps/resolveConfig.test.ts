@@ -77,3 +77,52 @@ it('throws when the project name is unknown to the tenant', async () => {
   nock(BASE).get('/api/auth/tenant-projects').query(true).reply(200, { content: [], page: { number: 0, size: 100, totalElements: 0 } });
   await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/not found/);
 });
+
+// ── project-id (UID) resolution — wins over name, validated up front ──────────────
+it('uses project-id directly (validated against the tenant) and skips name resolution', async () => {
+  const UID = 'b6a6c970c2c54aa6a7816'; // real UID shape — no proj_ prefix
+  nock(BASE)
+    .get('/api/auth/tenant-projects')
+    .query(true)
+    .reply(200, { content: [{ uid: UID, projectName: 'otel-3July' }] });
+  nock(BASE)
+    .get(`/api/job-manager/projects/${UID}/envs/dev/locked`)
+    .reply(200, { data: { version: 3, goals: [], selection: [] } });
+  nock(BASE)
+    .get(`/api/job-manager/projects/${UID}/envs/dev/versions`)
+    .reply(200, { data: [{ uid: 'lv_3', versionNum: 3 }] });
+
+  const cfg = await resolveLockedConfig(client(), { projectId: UID, environment: 'dev' } as Inputs);
+  expect(cfg.projectUid).toBe(UID);
+  expect(cfg.lockedVersionUid).toBe('lv_3');
+});
+
+it('project-id wins over a wrong project name — resolves by id, ignores the name', async () => {
+  const UID = 'b6a6c970c2c54aa6a7816';
+  nock(BASE)
+    .get('/api/auth/tenant-projects')
+    .query(true)
+    .reply(200, { content: [{ uid: UID, projectName: 'otel-3July' }] });
+  nock(BASE)
+    .get(`/api/job-manager/projects/${UID}/envs/dev/locked`)
+    .reply(200, { data: { version: 3, goals: [], selection: [] } });
+  nock(BASE)
+    .get(`/api/job-manager/projects/${UID}/envs/dev/versions`)
+    .reply(200, { data: [{ uid: 'lv_3', versionNum: 3 }] });
+
+  const cfg = await resolveLockedConfig(
+    client(),
+    { project: 'TYPO-wrong-name', projectId: UID, environment: 'dev' } as Inputs,
+  );
+  expect(cfg.projectUid).toBe(UID); // id wins; the wrong name is ignored (with a warning)
+});
+
+it('throws a clear error when project-id is not in the tenant (validated up front)', async () => {
+  nock(BASE)
+    .get('/api/auth/tenant-projects')
+    .query(true)
+    .reply(200, { content: [{ uid: 'someone-else', projectName: 'other' }] });
+  await expect(
+    resolveLockedConfig(client(), { projectId: 'does-not-exist', environment: 'dev' } as Inputs),
+  ).rejects.toThrow(/project-id "does-not-exist" was not found/);
+});
