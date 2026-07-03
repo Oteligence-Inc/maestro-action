@@ -32,7 +32,7 @@ export interface LockedSpec {
 }
 
 export interface SelectionEntry {
-  /** Scoped FQN: "service::com.x.Class.method". */
+  /** BARE fqn "com.x.Class.method" (scope the build key via `service` — see buildProfileFromLocked). */
   methodFqn: string;
   tier?: string; // deep | high | standard | low | skip
   provenance?: string;

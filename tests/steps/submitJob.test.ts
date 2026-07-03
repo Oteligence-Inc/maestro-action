@@ -18,10 +18,11 @@ const locked: LockedSpec = {
   apm: 'datadog',
   javaVersion: '17',
   otelVersion: '2.21.0',
+  // Real persisted shape: BARE methodFqn + separate `service` (matches selection_json in the DB).
   selection: [
-    { methodFqn: 'order-service::com.x.Pay.charge', tier: 'deep', service: 'order-service' },
-    { methodFqn: 'order-service::com.x.Pay.refund', tier: 'standard' },
-    { methodFqn: 'payment-service::com.y.Acct.get', tier: 'high', service: 'payment-service' },
+    { methodFqn: 'com.x.Pay.charge', tier: 'deep', service: 'order-service', provenance: 'auto' },
+    { methodFqn: 'com.x.Pay.refund', tier: 'standard', service: 'order-service', provenance: 'auto' },
+    { methodFqn: 'com.y.Acct.get', tier: 'high', service: 'payment-service', provenance: 'auto' },
   ],
 };
 const cfg: ResolvedConfig = { projectUid: 'proj_1', lockedVersionUid: 'lv_9', locked };
@@ -37,11 +38,12 @@ const upload: UploadResult = {
 afterEach(() => nock.cleanAll());
 
 describe('buildProfileFromLocked', () => {
-  it('maps the locked selection to per-method configs + per-service counts', () => {
+  it('reconstructs SCOPED method keys from a BARE methodFqn + service (real persisted shape)', () => {
     const p = buildProfileFromLocked(locked);
     expect(p.version).toBe(1);
     expect(p.goals).toEqual(['debug_latency', 'track_errors']);
     expect(p.apm).toBe('datadog');
+    // methodConfigurations are keyed by "service::Class.method" — reconstructed from the two fields.
     expect(p.methodConfigurations['order-service::com.x.Pay.charge']).toEqual({ enabled: true, depth: 'deep' });
     // non-deep tiers collapse to "standard"
     expect(p.methodConfigurations['order-service::com.x.Pay.refund']).toEqual({ enabled: true, depth: 'standard' });
@@ -50,17 +52,34 @@ describe('buildProfileFromLocked', () => {
     expect(p.perService['payment-service'].selectedCount).toBe(1);
   });
 
+  it('regression: a fully bare-fqn selection is NOT treated as empty', () => {
+    // The bug: buildProfileFromLocked required methodFqn to already contain "::", so a locked
+    // version with bare fqns produced 0 methodConfigurations and wrongly threw "no selected methods".
+    const p = buildProfileFromLocked(locked);
+    expect(Object.keys(p.methodConfigurations)).toHaveLength(3);
+  });
+
+  it('tolerates an already-scoped methodFqn (defensive) with no separate service field', () => {
+    const p = buildProfileFromLocked({
+      ...locked,
+      selection: [{ methodFqn: 'order-service::com.x.Pay.charge', tier: 'deep' }],
+    });
+    expect(p.methodConfigurations['order-service::com.x.Pay.charge']).toEqual({ enabled: true, depth: 'deep' });
+    expect(p.perService['order-service'].selectedCount).toBe(1);
+  });
+
   it('throws when the locked selection has no usable methods', () => {
     expect(() => buildProfileFromLocked({ ...locked, selection: [] })).toThrow(UserError);
-    expect(() => buildProfileFromLocked({ ...locked, selection: [{ methodFqn: 'no-scope-sep' }] })).toThrow(UserError);
+    // bare fqn with no `service` → not resolvable to a scoped key → skipped → empty → throws
+    expect(() => buildProfileFromLocked({ ...locked, selection: [{ methodFqn: 'com.x.Orphan.m' }] })).toThrow(UserError);
   });
 
   it('excludes tier:"skip" entries so they are never instrumented', () => {
     const p = buildProfileFromLocked({
       ...locked,
       selection: [
-        { methodFqn: 'order-service::com.x.Pay.charge', tier: 'deep', service: 'order-service' },
-        { methodFqn: 'order-service::com.x.Pay.skipMe', tier: 'skip', service: 'order-service' },
+        { methodFqn: 'com.x.Pay.charge', tier: 'deep', service: 'order-service' },
+        { methodFqn: 'com.x.Pay.skipMe', tier: 'skip', service: 'order-service' },
       ],
     });
     expect(p.methodConfigurations['order-service::com.x.Pay.charge']).toEqual({ enabled: true, depth: 'deep' });

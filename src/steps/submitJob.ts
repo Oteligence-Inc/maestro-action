@@ -70,18 +70,27 @@ export async function submitBuild(
 
 /**
  * Build the MULTI_JAR_EXPLORER_BUILD profile from the locked selection. Mirrors the
- * wizard's hubGenerateBuild: each locked-selected method → an enabled methodConfiguration
- * (depth = "deep" for deep-tier methods, else "standard"), plus per-service counts and
- * the locked goals/apm. methodFqn is already scoped "service::Class.method".
+ * wizard's buildMethodConfigurations: each locked-selected method → an enabled
+ * methodConfiguration (depth = "deep" for deep-tier methods, else "standard"), plus
+ * per-service counts and the locked goals/apm.
+ *
+ * The backend keys methodConfigurations by the SCOPED fqn "service::Class.method" (same as
+ * the GUI's `${node.service}::${node.methodFqn}`), but the locked selection persists a BARE
+ * methodFqn ("com.x.Class.method") with `service` in a separate field — so we reconstruct the
+ * scoped key here. (An already-scoped methodFqn is tolerated defensively.)
  */
 export function buildProfileFromLocked(locked: LockedSpec): BuildProfile {
   const perService: Record<string, { selectedCount: number }> = {};
   const methodConfigurations: Record<string, { enabled: boolean; depth: string }> = {};
   for (const entry of locked.selection ?? []) {
-    const id = entry.methodFqn;
-    if (!id || !id.includes('::')) continue;
-    const svc = entry.service || id.split('::')[0];
+    const rawFqn = entry.methodFqn;
+    if (!rawFqn) continue;
+    const scopedAlready = rawFqn.includes('::');
+    const svc = entry.service || (scopedAlready ? rawFqn.slice(0, rawFqn.indexOf('::')) : undefined);
     if (!svc || svc === 'undefined') continue;
+    const bareFqn = scopedAlready ? rawFqn.slice(rawFqn.indexOf('::') + 2) : rawFqn;
+    if (!bareFqn) continue;
+    const id = `${svc}::${bareFqn}`;
     const tier = String(entry.tier || '').toLowerCase();
     if (tier === 'skip') continue; // skip-tier (FORCE_SKIP / deselected) must never be instrumented
     perService[svc] = perService[svc] || { selectedCount: 0 };
