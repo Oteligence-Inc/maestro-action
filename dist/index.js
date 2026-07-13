@@ -30512,12 +30512,18 @@ exports.UserError = UserError;
 class SubscriptionInactiveError extends UserError {
     constructor(body) {
         const status = typeof body?.status === 'string' ? body.status : undefined;
-        const url = typeof body?.billing_url === 'string' && body.billing_url
-            ? body.billing_url
-            : 'https://app.oteligence.com/billing';
+        // Only cite a billing URL the server actually provided — never hardcode a host (a run against a
+        // dev/self-hosted backend must not be pointed at prod billing). Fall back to a host-agnostic hint.
+        const url = typeof body?.billing_url === 'string' && body.billing_url ? body.billing_url : undefined;
         const statusClause = status ? ` (status: ${status})` : '';
-        super(`Maestro subscription is not active for this tenant${statusClause}. ` +
-            `Generate/deploy is blocked until billing is restored — update your card at ${url}`);
+        const urlClause = url
+            ? ` — update your card at ${url}`
+            : ' — restore billing from the Maestro dashboard';
+        super(
+        // Thrown from expectOk on ANY gated call (token exchange, resolve-config, generate, deploy), so
+        // keep the wording operation-agnostic.
+        `Maestro subscription is not active for this tenant${statusClause}. ` +
+            `This Maestro operation is blocked until billing is restored${urlClause}`);
         this.name = 'SubscriptionInactiveError';
     }
 }

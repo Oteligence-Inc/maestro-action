@@ -56,3 +56,25 @@ it('throws SubscriptionInactiveError on 402 subscription_inactive with status + 
   expect(message).toContain('SUSPENDED');
   expect(message).toContain('https://app.oteligence.com/billing');
 });
+
+it('does not cite a hardcoded prod billing host when the 402 body omits billing_url', async () => {
+  // A run against a dev/self-hosted backend must not be pointed at prod billing. With no billing_url
+  // the message falls back to a host-agnostic hint instead of a hardcoded URL.
+  nock(BASE).post('/api/auth/cli/token').reply(402, {
+    success: false,
+    code: 'subscription_inactive',
+    status: 'PAST_DUE',
+  });
+
+  let caught: unknown;
+  try {
+    await auth(new MaestroApi(BASE), inputs);
+  } catch (e) {
+    caught = e;
+  }
+  expect(caught).toBeInstanceOf(SubscriptionInactiveError);
+  const message = (caught as Error).message;
+  expect(message).toContain('PAST_DUE');
+  expect(message).not.toContain('app.oteligence.com');
+  expect(message).toMatch(/dashboard/i);
+});
