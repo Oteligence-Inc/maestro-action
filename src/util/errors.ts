@@ -21,6 +21,28 @@ export class UserError extends Error {
   }
 }
 
+/**
+ * The tenant's Maestro subscription is not active (HTTP 402 `subscription_inactive`). Fatal and
+ * user-fixable — the trial ended or payment lapsed. Surfaces the tenant status and the billing URL so
+ * the run log tells the user exactly how to restore access. A {@link UserError} so it exits non-zero
+ * without retry.
+ */
+export class SubscriptionInactiveError extends UserError {
+  constructor(body?: { status?: string; billing_url?: string }) {
+    const status = typeof body?.status === 'string' ? body.status : undefined;
+    const url =
+      typeof body?.billing_url === 'string' && body.billing_url
+        ? body.billing_url
+        : 'https://app.oteligence.com/billing';
+    const statusClause = status ? ` (status: ${status})` : '';
+    super(
+      `Maestro subscription is not active for this tenant${statusClause}. ` +
+        `Generate/deploy is blocked until billing is restored — update your card at ${url}`,
+    );
+    this.name = 'SubscriptionInactiveError';
+  }
+}
+
 /** A Maestro job ended in a non-COMPLETED terminal state. */
 export class JobFailed extends Error {
   constructor(jobId: string, status: string) {

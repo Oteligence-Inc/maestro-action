@@ -29330,6 +29330,12 @@ exports.MaestroApi = MaestroApi;
 /** Throw a friendly HttpError carrying ONLY the server's short `message` (never the raw body). */
 function expectOk(res, path) {
     if (res.statusCode >= 400) {
+        // v7: a 402 subscription_inactive is a distinct, user-fixable billing state — surface the tenant
+        // status + billing URL rather than a generic "HTTP 402". Every gated call (auth token exchange,
+        // resolve-config, generate, ...) routes through expectOk, so this covers them all.
+        if (res.statusCode === 402 && res.body?.code === 'subscription_inactive') {
+            throw new errors_1.SubscriptionInactiveError(res.body);
+        }
         throw new errors_1.HttpError(res.statusCode, path, messageOf(res.body));
     }
 }
@@ -30475,7 +30481,7 @@ async function uploadJar(api, inputs, cfg) {
 // Typed errors with user-facing messages (Build Spec §8). Server stack traces and
 // response bodies are never echoed — only safe, actionable text.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.JobTimeout = exports.JobFailed = exports.UserError = exports.HttpError = void 0;
+exports.JobTimeout = exports.JobFailed = exports.SubscriptionInactiveError = exports.UserError = exports.HttpError = void 0;
 exports.formatError = formatError;
 class HttpError extends Error {
     constructor(status, path, 
@@ -30497,6 +30503,25 @@ class UserError extends Error {
     }
 }
 exports.UserError = UserError;
+/**
+ * The tenant's Maestro subscription is not active (HTTP 402 `subscription_inactive`). Fatal and
+ * user-fixable — the trial ended or payment lapsed. Surfaces the tenant status and the billing URL so
+ * the run log tells the user exactly how to restore access. A {@link UserError} so it exits non-zero
+ * without retry.
+ */
+class SubscriptionInactiveError extends UserError {
+    constructor(body) {
+        const status = typeof body?.status === 'string' ? body.status : undefined;
+        const url = typeof body?.billing_url === 'string' && body.billing_url
+            ? body.billing_url
+            : 'https://app.oteligence.com/billing';
+        const statusClause = status ? ` (status: ${status})` : '';
+        super(`Maestro subscription is not active for this tenant${statusClause}. ` +
+            `Generate/deploy is blocked until billing is restored — update your card at ${url}`);
+        this.name = 'SubscriptionInactiveError';
+    }
+}
+exports.SubscriptionInactiveError = SubscriptionInactiveError;
 /** A Maestro job ended in a non-COMPLETED terminal state. */
 class JobFailed extends Error {
     constructor(jobId, status) {

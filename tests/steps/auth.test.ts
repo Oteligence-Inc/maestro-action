@@ -2,7 +2,7 @@ import nock from 'nock';
 jest.mock('@actions/core');
 import { MaestroApi } from '../../src/api';
 import { auth } from '../../src/steps/auth';
-import { UserError } from '../../src/util/errors';
+import { SubscriptionInactiveError, UserError } from '../../src/util/errors';
 import { Inputs } from '../../src/types';
 
 const BASE = 'https://api.oteligence.com';
@@ -34,4 +34,25 @@ it('throws a friendly UserError on 401', async () => {
 it('throws when no token is returned', async () => {
   nock(BASE).post('/api/auth/cli/token').reply(200, {});
   await expect(auth(new MaestroApi(BASE), inputs)).rejects.toBeInstanceOf(UserError);
+});
+
+it('throws SubscriptionInactiveError on 402 subscription_inactive with status + billing url', async () => {
+  nock(BASE).post('/api/auth/cli/token').reply(402, {
+    success: false,
+    code: 'subscription_inactive',
+    status: 'SUSPENDED',
+    billing_url: 'https://app.oteligence.com/billing',
+  });
+
+  let caught: unknown;
+  try {
+    await auth(new MaestroApi(BASE), inputs);
+  } catch (e) {
+    caught = e;
+  }
+  expect(caught).toBeInstanceOf(SubscriptionInactiveError);
+  const message = (caught as Error).message;
+  expect(message).toMatch(/subscription is not active/i);
+  expect(message).toContain('SUSPENDED');
+  expect(message).toContain('https://app.oteligence.com/billing');
 });
