@@ -29332,9 +29332,14 @@ function expectOk(res, path) {
     if (res.statusCode >= 400) {
         // v7: a 402 subscription_inactive is a distinct, user-fixable billing state — surface the tenant
         // status + billing URL rather than a generic "HTTP 402". Every gated call (auth token exchange,
-        // resolve-config, generate, ...) routes through expectOk, so this covers them all.
-        if (res.statusCode === 402 && res.body?.code === 'subscription_inactive') {
-            throw new errors_1.SubscriptionInactiveError(res.body);
+        // resolve-config, generate, ...) routes through expectOk, so this covers them all. Two wire shapes:
+        // auth returns { code, status, billing_url } FLAT; job-manager wraps it under an APIResponse `data`.
+        if (res.statusCode === 402) {
+            const nested = res.body?.data;
+            const gate = nested && typeof nested === 'object' && nested.code ? nested : res.body;
+            if (gate?.code === 'subscription_inactive') {
+                throw new errors_1.SubscriptionInactiveError(gate);
+            }
         }
         throw new errors_1.HttpError(res.statusCode, path, messageOf(res.body));
     }
