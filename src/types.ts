@@ -11,6 +11,12 @@ export interface Inputs {
   apiUrl: string;
   timeoutSeconds: number;
   failOnWarnings: boolean;
+  /**
+   * When the tenant's subscription is inactive (HTTP 402 subscription_inactive), skip extension-JAR
+   * generation and let the pipeline continue (deploy proceeds WITHOUT a newly generated extension)
+   * instead of failing the step. Default false — a lapsed subscription hard-fails, as before.
+   */
+  skipGenerateOnInactive: boolean;
 }
 
 export interface Session {

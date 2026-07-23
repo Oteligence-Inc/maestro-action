@@ -2,7 +2,7 @@ import nock from 'nock';
 jest.mock('@actions/core');
 import { MaestroApi } from '../../src/api';
 import { auth } from '../../src/steps/auth';
-import { UserError } from '../../src/util/errors';
+import { SubscriptionInactiveError, UserError } from '../../src/util/errors';
 import { Inputs } from '../../src/types';
 
 const BASE = 'https://api.oteligence.com';
@@ -34,4 +34,47 @@ it('throws a friendly UserError on 401', async () => {
 it('throws when no token is returned', async () => {
   nock(BASE).post('/api/auth/cli/token').reply(200, {});
   await expect(auth(new MaestroApi(BASE), inputs)).rejects.toBeInstanceOf(UserError);
+});
+
+it('throws SubscriptionInactiveError on 402 subscription_inactive with status + billing url', async () => {
+  nock(BASE).post('/api/auth/cli/token').reply(402, {
+    success: false,
+    code: 'subscription_inactive',
+    status: 'SUSPENDED',
+    billing_url: 'https://app.oteligence.com/billing',
+  });
+
+  let caught: unknown;
+  try {
+    await auth(new MaestroApi(BASE), inputs);
+  } catch (e) {
+    caught = e;
+  }
+  expect(caught).toBeInstanceOf(SubscriptionInactiveError);
+  const message = (caught as Error).message;
+  expect(message).toMatch(/subscription is not active/i);
+  expect(message).toContain('SUSPENDED');
+  expect(message).toContain('https://app.oteligence.com/billing');
+});
+
+it('does not cite a hardcoded prod billing host when the 402 body omits billing_url', async () => {
+  // A run against a dev/self-hosted backend must not be pointed at prod billing. With no billing_url
+  // the message falls back to a host-agnostic hint instead of a hardcoded URL.
+  nock(BASE).post('/api/auth/cli/token').reply(402, {
+    success: false,
+    code: 'subscription_inactive',
+    status: 'PAST_DUE',
+  });
+
+  let caught: unknown;
+  try {
+    await auth(new MaestroApi(BASE), inputs);
+  } catch (e) {
+    caught = e;
+  }
+  expect(caught).toBeInstanceOf(SubscriptionInactiveError);
+  const message = (caught as Error).message;
+  expect(message).toContain('PAST_DUE');
+  expect(message).not.toContain('app.oteligence.com');
+  expect(message).toMatch(/dashboard/i);
 });

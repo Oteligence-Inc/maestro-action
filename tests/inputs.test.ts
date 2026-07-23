@@ -67,4 +67,18 @@ describe('parseInputs — project / project-id', () => {
     expect(i.project).toBe('otel-3July');
     expect(i.projectId).toBe('');
   });
+
+  it('skip-generate-on-inactive defaults to false', () => {
+    seedRequired();
+    process.env['INPUT_PROJECT'] = 'p';
+    delete process.env['INPUT_SKIP-GENERATE-ON-INACTIVE'];
+    expect(parseInputs().skipGenerateOnInactive).toBe(false);
+  });
+
+  it('skip-generate-on-inactive parses true (case-insensitive)', () => {
+    seedRequired();
+    process.env['INPUT_PROJECT'] = 'p';
+    process.env['INPUT_SKIP-GENERATE-ON-INACTIVE'] = 'TRUE';
+    expect(parseInputs().skipGenerateOnInactive).toBe(true);
+  });
 });

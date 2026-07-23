@@ -21,6 +21,33 @@ export class UserError extends Error {
   }
 }
 
+/**
+ * The tenant's Maestro subscription is not active (HTTP 402 `subscription_inactive`). Fatal and
+ * user-fixable — the trial ended or payment lapsed. Surfaces the tenant status and the billing URL so
+ * the run log tells the user exactly how to restore access. A {@link UserError} so it exits non-zero
+ * without retry.
+ */
+export class SubscriptionInactiveError extends UserError {
+  constructor(body?: { status?: string; billing_url?: string }) {
+    const status = typeof body?.status === 'string' ? body.status : undefined;
+    // Only cite a billing URL the server actually provided — never hardcode a host (a run against a
+    // dev/self-hosted backend must not be pointed at prod billing). Fall back to a host-agnostic hint.
+    const url =
+      typeof body?.billing_url === 'string' && body.billing_url ? body.billing_url : undefined;
+    const statusClause = status ? ` (status: ${status})` : '';
+    const urlClause = url
+      ? ` — update your card at ${url}`
+      : ' — restore billing from the Maestro dashboard';
+    super(
+      // Thrown from expectOk on ANY gated call (token exchange, resolve-config, generate, deploy), so
+      // keep the wording operation-agnostic.
+      `Maestro subscription is not active for this tenant${statusClause}. ` +
+        `This Maestro operation is blocked until billing is restored${urlClause}`,
+    );
+    this.name = 'SubscriptionInactiveError';
+  }
+}
+
 /** A Maestro job ended in a non-COMPLETED terminal state. */
 export class JobFailed extends Error {
   constructor(jobId: string, status: string) {

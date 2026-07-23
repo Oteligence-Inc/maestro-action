@@ -1,6 +1,6 @@
 import { HttpClient } from '@actions/http-client';
 import { Readable } from 'stream';
-import { HttpError } from './util/errors';
+import { HttpError, SubscriptionInactiveError } from './util/errors';
 import { withRetry } from './util/retry';
 
 export interface ApiResponse<T = any> {
@@ -106,6 +106,18 @@ export class MaestroApi {
 /** Throw a friendly HttpError carrying ONLY the server's short `message` (never the raw body). */
 export function expectOk(res: ApiResponse, path: string): void {
   if (res.statusCode >= 400) {
+    // v7: a 402 subscription_inactive is a distinct, user-fixable billing state — surface the tenant
+    // status + billing URL rather than a generic "HTTP 402". Every gated call (auth token exchange,
+    // resolve-config, generate, ...) routes through expectOk, so this covers them all. Two wire shapes:
+    // auth returns { code, status, billing_url } FLAT; job-manager wraps it under an APIResponse `data`.
+    if (res.statusCode === 402) {
+      const nested = res.body?.data;
+      const gate =
+        nested && typeof nested === 'object' && nested.code ? nested : res.body;
+      if (gate?.code === 'subscription_inactive') {
+        throw new SubscriptionInactiveError(gate);
+      }
+    }
     throw new HttpError(res.statusCode, path, messageOf(res.body));
   }
 }
