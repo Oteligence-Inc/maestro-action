@@ -29458,12 +29458,31 @@ async function run() {
         core.setOutput('locked-version', String(cfg.locked.version));
         core.setOutput('jar-sha', upload.sha);
         core.setOutput('job-id', buildJobId);
+        core.setOutput('generated', 'true');
         // v6 staleness signal — attributed to the analysis job that re-stamped current signatures.
         await (0, staleness_1.warnStalePeers)(api, inputs, cfg, analysisJobId, inputs.failOnWarnings);
         await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'completed', 'success'); // deploy-run: done
         core.info('Maestro instrumentation complete.');
     }
     catch (err) {
+        // Graceful degradation (opt-in): when the subscription is inactive (402 subscription_inactive)
+        // and skip-generate-on-inactive is set, DON'T fail the step — skip extension-JAR generation and
+        // let the pipeline continue so the deploy still runs (just without a newly generated extension).
+        // The generated=false output lets the workflow omit the OTel layer. Only a genuine 402 reaches
+        // here; any other error still fails the step.
+        if (err instanceof errors_1.SubscriptionInactiveError && inputs.skipGenerateOnInactive) {
+            core.warning('Maestro subscription is not active — skipping extension-JAR generation. The pipeline will ' +
+                'continue and deploy WITHOUT a newly generated extension JAR. ' +
+                (0, errors_1.formatError)(err));
+            core.setOutput('generated', 'false');
+            // Clear the extension outputs so the workflow's assemble/bake step can gate on `generated`.
+            core.setOutput('extension-dir', '');
+            core.setOutput('config-path', '');
+            core.setOutput('collector-config-path', '');
+            // Telemetry only (never fatal); records that this run reached completion in a degraded mode.
+            await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'completed', 'success');
+            return; // exit 0 — the step succeeds; deploy is not blocked
+        }
         await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'completed', 'failure'); // deploy-run: failed (best-effort)
         core.setFailed((0, errors_1.formatError)(err));
     }
@@ -29545,7 +29564,11 @@ function parseInputs() {
         throw new errors_1.UserError(`timeout-seconds must be a positive integer, got "${timeoutRaw}".`);
     }
     const failOnWarnings = (core.getInput('fail-on-warnings') || 'false').toLowerCase() === 'true';
-    return { apiKey, project, projectId, service, environment, jarsGlob, apiUrl, timeoutSeconds, failOnWarnings };
+    const skipGenerateOnInactive = (core.getInput('skip-generate-on-inactive') || 'false').toLowerCase() === 'true';
+    return {
+        apiKey, project, projectId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
+        failOnWarnings, skipGenerateOnInactive,
+    };
 }
 /** Strips a trailing slash, enforces https + the oteligence.com allow-list. */
 function normaliseApiUrl(raw) {

@@ -36,8 +36,16 @@ inputs:
     description: 'Fail the step if this run made peer services stale (default: false)'
     required: false
     default: 'false'
+  skip-generate-on-inactive:
+    description: >-
+      If the tenant subscription is inactive (402), skip extension-JAR generation and continue the
+      pipeline (deploy proceeds WITHOUT a new extension) instead of failing the step. Default false.
+    required: false
+    default: 'false'
 
 outputs:
+  generated:
+    description: "'true' when an extension JAR was generated; 'false' when skipped (inactive subscription)"
   extension-dir:
     description: 'Local path to the extracted OTel agent + extension JAR bundle'
   config-path:
