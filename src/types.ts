@@ -17,6 +17,13 @@ export interface Inputs {
    * instead of failing the step. Default false — a lapsed subscription hard-fails, as before.
    */
   skipGenerateOnInactive: boolean;
+  /**
+   * When the target service is not part of the env's locked config (removed from the project), skip
+   * gracefully (generated=false, exit 0) instead of failing the step. Default false — a removed/unknown
+   * service hard-fails with a clear message, so a typo'd `service` input is caught rather than silently
+   * producing no instrumentation.
+   */
+  skipOnRemovedService: boolean;
 }
 
 export interface Session {

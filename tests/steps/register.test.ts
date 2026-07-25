@@ -2,7 +2,7 @@ import nock from 'nock';
 jest.mock('@actions/core');
 import { MaestroApi } from '../../src/api';
 import { registerJarForEnv } from '../../src/steps/register';
-import { UserError } from '../../src/util/errors';
+import { RemovedServiceError } from '../../src/util/errors';
 import { Inputs, ResolvedConfig, UploadResult } from '../../src/types';
 
 const BASE = 'https://api.oteligence.com';
@@ -37,7 +37,9 @@ it('maps 409 to a service-name-mismatch UserError', async () => {
   await expect(registerJarForEnv(client(), inputs, cfg, upload, 'build_1')).rejects.toThrow(/does not match service/);
 });
 
-it('maps 404 to a not-part-of-env UserError', async () => {
+it('maps 404 to a RemovedServiceError (service removed from the env config)', async () => {
   nock(BASE).put(jarPath).reply(404, { message: 'not found' });
-  await expect(registerJarForEnv(client(), inputs, cfg, upload, 'build_1')).rejects.toBeInstanceOf(UserError);
+  await expect(registerJarForEnv(client(), inputs, cfg, upload, 'build_1')).rejects.toBeInstanceOf(
+    RemovedServiceError,
+  );
 });

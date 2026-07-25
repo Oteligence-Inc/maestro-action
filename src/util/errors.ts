@@ -48,6 +48,25 @@ export class SubscriptionInactiveError extends UserError {
   }
 }
 
+/**
+ * The requested service is not part of the target env's locked config — it was removed from the project
+ * (or the {@code service:} input is wrong). A {@link UserError} (exits non-zero with a clear message) —
+ * unless the workflow sets {@code skip-on-removed-service}, in which case index.ts turns it into a
+ * graceful no-op (generated=false, exit 0). Detected EARLY (before upload/analyse/build) so a removed
+ * service never re-runs the pipeline, re-registers, or re-bills; the register step's 404 is the live
+ * backstop.
+ */
+export class RemovedServiceError extends UserError {
+  constructor(service: string, environment: string) {
+    super(
+      `Service "${service}" is not part of "${environment}"'s locked config — it looks like it was ` +
+        'removed from the project. Re-add it via the Maestro wizard (Step 1) to instrument it, or fix ' +
+        'the "service" input if the name is wrong.',
+    );
+    this.name = 'RemovedServiceError';
+  }
+}
+
 /** A Maestro job ended in a non-COMPLETED terminal state. */
 export class JobFailed extends Error {
   constructor(jobId: string, status: string) {

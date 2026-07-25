@@ -42,6 +42,13 @@ inputs:
       pipeline (deploy proceeds WITHOUT a new extension) instead of failing the step. Default false.
     required: false
     default: 'false'
+  skip-on-removed-service:
+    description: >-
+      If this service is no longer part of the env's Maestro config (removed from the project), skip
+      gracefully (generated=false) and continue the pipeline instead of failing the step. Default false
+      — a removed or mistyped service hard-fails with a clear message.
+    required: false
+    default: 'false'
 
 outputs:
   generated:
