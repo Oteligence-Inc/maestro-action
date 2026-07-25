@@ -81,4 +81,18 @@ describe('parseInputs — project / project-id', () => {
     process.env['INPUT_SKIP-GENERATE-ON-INACTIVE'] = 'TRUE';
     expect(parseInputs().skipGenerateOnInactive).toBe(true);
   });
+
+  it('skip-on-removed-service defaults to false', () => {
+    seedRequired();
+    process.env['INPUT_PROJECT'] = 'p';
+    delete process.env['INPUT_SKIP-ON-REMOVED-SERVICE'];
+    expect(parseInputs().skipOnRemovedService).toBe(false);
+  });
+
+  it('skip-on-removed-service parses true (case-insensitive)', () => {
+    seedRequired();
+    process.env['INPUT_PROJECT'] = 'p';
+    process.env['INPUT_SKIP-ON-REMOVED-SERVICE'] = 'True';
+    expect(parseInputs().skipOnRemovedService).toBe(true);
+  });
 });

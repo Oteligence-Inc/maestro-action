@@ -1,7 +1,7 @@
 import * as core from '@actions/core';
 import { MaestroApi, expectOk } from '../api';
 import { Inputs, ResolvedConfig, UploadResult } from '../types';
-import { UserError } from '../util/errors';
+import { RemovedServiceError, UserError } from '../util/errors';
 import { envPath } from './resolveConfig';
 
 /**
@@ -32,10 +32,8 @@ export async function registerJarForEnv(
     );
   }
   if (res.statusCode === 404) {
-    throw new UserError(
-      `Service "${inputs.service}" is not part of "${inputs.environment}"'s config. ` +
-        'Register it via the wizard (Step 1) or correct the service input.',
-    );
+    // Live backstop for the early removed-service guard in run() — the (env, service) isn't registered.
+    throw new RemovedServiceError(inputs.service, inputs.environment);
   }
   expectOk(res, 'register-jar');
   core.info(`Registered ${inputs.service} JAR (sha ${upload.sha}) for env ${inputs.environment}.`);

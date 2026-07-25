@@ -10,7 +10,7 @@ import { downloadArtifacts } from './steps/download';
 import { registerJarForEnv } from './steps/register';
 import { warnStalePeers } from './steps/staleness';
 import { reportDeployRun } from './steps/reportDeployRun';
-import { formatError, SubscriptionInactiveError } from './util/errors';
+import { formatError, RemovedServiceError, SubscriptionInactiveError } from './util/errors';
 import { Inputs } from './types';
 
 /**
@@ -37,6 +37,16 @@ export async function run(): Promise<void> {
     await auth(api, inputs); // [1]
     const cfg = await resolveLockedConfig(api, inputs); // [2]
     projectUid = cfg.projectUid;
+
+    // [2b] Early removed-service guard: if this service isn't in the env's locked config it was removed
+    // from the project. Detect it HERE — before upload/analyse/build — so a removed service never re-runs
+    // the pipeline, re-registers, or re-bills. Only trip when registeredJars is populated (a lock exists)
+    // and the service is genuinely absent; the register step (9) 404 is the live backstop for edge cases.
+    const registered = cfg.locked.registeredJars;
+    if (registered && Object.keys(registered).length > 0 && !(inputs.service in registered)) {
+      throw new RemovedServiceError(inputs.service, inputs.environment);
+    }
+
     await reportDeployRun(api, inputs, projectUid, 'in_progress', null); // deploy-run: start
 
     const upload = await uploadJar(api, inputs, cfg); // [3-5]
@@ -70,6 +80,22 @@ export async function run(): Promise<void> {
     // let the pipeline continue so the deploy still runs (just without a newly generated extension).
     // The generated=false output lets the workflow omit the OTel layer. Only a genuine 402 reaches
     // here; any other error still fails the step.
+    // Graceful degradation (opt-in): the service was removed from the project (not in the env's locked
+    // config). With skip-on-removed-service set, DON'T fail — skip generation and let the pipeline
+    // continue (deploy runs without a newly generated extension) rather than breaking CI for a service
+    // that no longer exists. Default off: a removed/typo'd service hard-fails with the clear message.
+    if (err instanceof RemovedServiceError && inputs.skipOnRemovedService) {
+      core.warning(
+        `Skipping instrumentation — ${formatError(err)} (skip-on-removed-service is set). ` +
+          'The pipeline will continue WITHOUT a newly generated extension JAR.',
+      );
+      core.setOutput('generated', 'false');
+      core.setOutput('extension-dir', '');
+      core.setOutput('config-path', '');
+      core.setOutput('collector-config-path', '');
+      await reportDeployRun(api, inputs, projectUid, 'completed', 'success');
+      return; // exit 0 — removed service is not a failure when opted in
+    }
     if (err instanceof SubscriptionInactiveError && inputs.skipGenerateOnInactive) {
       core.warning(
         'Maestro subscription is not active — skipping extension-JAR generation. The pipeline will ' +

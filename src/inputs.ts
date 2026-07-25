@@ -34,10 +34,12 @@ export function parseInputs(): Inputs {
   const failOnWarnings = (core.getInput('fail-on-warnings') || 'false').toLowerCase() === 'true';
   const skipGenerateOnInactive =
     (core.getInput('skip-generate-on-inactive') || 'false').toLowerCase() === 'true';
+  const skipOnRemovedService =
+    (core.getInput('skip-on-removed-service') || 'false').toLowerCase() === 'true';
 
   return {
     apiKey, project, projectId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
-    failOnWarnings, skipGenerateOnInactive,
+    failOnWarnings, skipGenerateOnInactive, skipOnRemovedService,
   };
 }
 
