@@ -29443,6 +29443,14 @@ async function run() {
         await (0, auth_1.auth)(api, inputs); // [1]
         const cfg = await (0, resolveConfig_1.resolveLockedConfig)(api, inputs); // [2]
         projectUid = cfg.projectUid;
+        // [2b] Early removed-service guard: if this service isn't in the env's locked config it was removed
+        // from the project. Detect it HERE — before upload/analyse/build — so a removed service never re-runs
+        // the pipeline, re-registers, or re-bills. Only trip when registeredJars is populated (a lock exists)
+        // and the service is genuinely absent; the register step (9) 404 is the live backstop for edge cases.
+        const registered = cfg.locked.registeredJars;
+        if (registered && Object.keys(registered).length > 0 && !(inputs.service in registered)) {
+            throw new errors_1.RemovedServiceError(inputs.service, inputs.environment);
+        }
         await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'in_progress', null); // deploy-run: start
         const upload = await (0, upload_1.uploadJar)(api, inputs, cfg); // [3-5]
         const analysisJobId = await (0, submitJob_1.submitAnalysis)(api, cfg, upload); // [6a]
@@ -29470,6 +29478,20 @@ async function run() {
         // let the pipeline continue so the deploy still runs (just without a newly generated extension).
         // The generated=false output lets the workflow omit the OTel layer. Only a genuine 402 reaches
         // here; any other error still fails the step.
+        // Graceful degradation (opt-in): the service was removed from the project (not in the env's locked
+        // config). With skip-on-removed-service set, DON'T fail — skip generation and let the pipeline
+        // continue (deploy runs without a newly generated extension) rather than breaking CI for a service
+        // that no longer exists. Default off: a removed/typo'd service hard-fails with the clear message.
+        if (err instanceof errors_1.RemovedServiceError && inputs.skipOnRemovedService) {
+            core.warning(`Skipping instrumentation — ${(0, errors_1.formatError)(err)} (skip-on-removed-service is set). ` +
+                'The pipeline will continue WITHOUT a newly generated extension JAR.');
+            core.setOutput('generated', 'false');
+            core.setOutput('extension-dir', '');
+            core.setOutput('config-path', '');
+            core.setOutput('collector-config-path', '');
+            await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'completed', 'success');
+            return; // exit 0 — removed service is not a failure when opted in
+        }
         if (err instanceof errors_1.SubscriptionInactiveError && inputs.skipGenerateOnInactive) {
             core.warning('Maestro subscription is not active — skipping extension-JAR generation. The pipeline will ' +
                 'continue and deploy WITHOUT a newly generated extension JAR. ' +
@@ -29565,9 +29587,10 @@ function parseInputs() {
     }
     const failOnWarnings = (core.getInput('fail-on-warnings') || 'false').toLowerCase() === 'true';
     const skipGenerateOnInactive = (core.getInput('skip-generate-on-inactive') || 'false').toLowerCase() === 'true';
+    const skipOnRemovedService = (core.getInput('skip-on-removed-service') || 'false').toLowerCase() === 'true';
     return {
         apiKey, project, projectId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
-        failOnWarnings, skipGenerateOnInactive,
+        failOnWarnings, skipGenerateOnInactive, skipOnRemovedService,
     };
 }
 /** Strips a trailing slash, enforces https + the oteligence.com allow-list. */
@@ -29888,8 +29911,8 @@ async function registerJarForEnv(api, inputs, cfg, upload, buildJobId) {
             'Fix the service input or upload to the right service.');
     }
     if (res.statusCode === 404) {
-        throw new errors_1.UserError(`Service "${inputs.service}" is not part of "${inputs.environment}"'s config. ` +
-            'Register it via the wizard (Step 1) or correct the service input.');
+        // Live backstop for the early removed-service guard in run() — the (env, service) isn't registered.
+        throw new errors_1.RemovedServiceError(inputs.service, inputs.environment);
     }
     (0, api_1.expectOk)(res, 'register-jar');
     core.info(`Registered ${inputs.service} JAR (sha ${upload.sha}) for env ${inputs.environment}.`);
@@ -30509,7 +30532,7 @@ async function uploadJar(api, inputs, cfg) {
 // Typed errors with user-facing messages (Build Spec §8). Server stack traces and
 // response bodies are never echoed — only safe, actionable text.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.JobTimeout = exports.JobFailed = exports.SubscriptionInactiveError = exports.UserError = exports.HttpError = void 0;
+exports.JobTimeout = exports.JobFailed = exports.RemovedServiceError = exports.SubscriptionInactiveError = exports.UserError = exports.HttpError = void 0;
 exports.formatError = formatError;
 class HttpError extends Error {
     constructor(status, path, 
@@ -30556,6 +30579,23 @@ class SubscriptionInactiveError extends UserError {
     }
 }
 exports.SubscriptionInactiveError = SubscriptionInactiveError;
+/**
+ * The requested service is not part of the target env's locked config — it was removed from the project
+ * (or the {@code service:} input is wrong). A {@link UserError} (exits non-zero with a clear message) —
+ * unless the workflow sets {@code skip-on-removed-service}, in which case index.ts turns it into a
+ * graceful no-op (generated=false, exit 0). Detected EARLY (before upload/analyse/build) so a removed
+ * service never re-runs the pipeline, re-registers, or re-bills; the register step's 404 is the live
+ * backstop.
+ */
+class RemovedServiceError extends UserError {
+    constructor(service, environment) {
+        super(`Service "${service}" is not part of "${environment}"'s locked config — it looks like it was ` +
+            'removed from the project. Re-add it via the Maestro wizard (Step 1) to instrument it, or fix ' +
+            'the "service" input if the name is wrong.');
+        this.name = 'RemovedServiceError';
+    }
+}
+exports.RemovedServiceError = RemovedServiceError;
 /** A Maestro job ended in a non-COMPLETED terminal state. */
 class JobFailed extends Error {
     constructor(jobId, status) {
