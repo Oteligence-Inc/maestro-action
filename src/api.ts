@@ -106,6 +106,9 @@ export class MaestroApi {
 /** Throw a friendly HttpError carrying ONLY the server's short `message` (never the raw body). */
 export function expectOk(res: ApiResponse, path: string): void {
   if (res.statusCode >= 400) {
+    // Pull the gateway's correlation/trace id (if any) so it reaches the CI log on EVERY failure —
+    // not just billing ones. Guards the 27 Jul incident (a bare status code with no trace).
+    const traceId = traceOf(res.body);
     // v7: a 402 subscription_inactive is a distinct, user-fixable billing state — surface the tenant
     // status + billing URL rather than a generic "HTTP 402". Every gated call (auth token exchange,
     // resolve-config, generate, ...) routes through expectOk, so this covers them all. Two wire shapes:
@@ -115,10 +118,10 @@ export function expectOk(res: ApiResponse, path: string): void {
       const gate =
         nested && typeof nested === 'object' && nested.code ? nested : res.body;
       if (gate?.code === 'subscription_inactive') {
-        throw new SubscriptionInactiveError(gate);
+        throw new SubscriptionInactiveError(gate, traceId);
       }
     }
-    throw new HttpError(res.statusCode, path, messageOf(res.body));
+    throw new HttpError(res.statusCode, path, messageOf(res.body), traceId);
   }
 }
 
@@ -135,8 +138,35 @@ function safeMessage(text: string): string | undefined {
   return messageOf(parse<any>(text));
 }
 
-/** Extract a short, safe human message from a parsed body — never the whole body. */
+/**
+ * Extract a short, safe human message from a parsed body — never the whole body. Reads `message`
+ * first, then falls back to `error`: the context-service gateway puts its reason under `error`
+ * (job-manager/auth use `message`), and without this fallback a gateway failure reached CI as a bare
+ * status code with no reason — the exact 27 Jul incident.
+ */
 export function messageOf(body: any): string | undefined {
-  const m = body && typeof body.message === 'string' ? body.message : undefined;
+  const m =
+    body && typeof body.message === 'string' && body.message
+      ? body.message
+      : body && typeof body.error === 'string' && body.error
+        ? body.error
+        : undefined;
   return m ? m.slice(0, 200) : undefined;
+}
+
+/**
+ * Extract the gateway's correlation/trace id from an error body so the CI log can be matched to a
+ * server-side trace. The gateway emits `traceId` + `correlationId` at the top level; tolerate an
+ * APIResponse `data` wrapper and snake_case variants.
+ */
+export function traceOf(body: any): string | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const t =
+    body.traceId ??
+    body.correlationId ??
+    body.trace_id ??
+    body.correlation_id ??
+    body.data?.traceId ??
+    body.data?.correlationId;
+  return typeof t === 'string' && t ? t.slice(0, 120) : undefined;
 }

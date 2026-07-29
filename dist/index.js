@@ -29231,6 +29231,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.MaestroApi = void 0;
 exports.expectOk = expectOk;
 exports.messageOf = messageOf;
+exports.traceOf = traceOf;
 const http_client_1 = __nccwpck_require__(4844);
 const stream_1 = __nccwpck_require__(2203);
 const errors_1 = __nccwpck_require__(17);
@@ -29330,6 +29331,9 @@ exports.MaestroApi = MaestroApi;
 /** Throw a friendly HttpError carrying ONLY the server's short `message` (never the raw body). */
 function expectOk(res, path) {
     if (res.statusCode >= 400) {
+        // Pull the gateway's correlation/trace id (if any) so it reaches the CI log on EVERY failure —
+        // not just billing ones. Guards the 27 Jul incident (a bare status code with no trace).
+        const traceId = traceOf(res.body);
         // v7: a 402 subscription_inactive is a distinct, user-fixable billing state — surface the tenant
         // status + billing URL rather than a generic "HTTP 402". Every gated call (auth token exchange,
         // resolve-config, generate, ...) routes through expectOk, so this covers them all. Two wire shapes:
@@ -29338,10 +29342,10 @@ function expectOk(res, path) {
             const nested = res.body?.data;
             const gate = nested && typeof nested === 'object' && nested.code ? nested : res.body;
             if (gate?.code === 'subscription_inactive') {
-                throw new errors_1.SubscriptionInactiveError(gate);
+                throw new errors_1.SubscriptionInactiveError(gate, traceId);
             }
         }
-        throw new errors_1.HttpError(res.statusCode, path, messageOf(res.body));
+        throw new errors_1.HttpError(res.statusCode, path, messageOf(res.body), traceId);
     }
 }
 function parse(text) {
@@ -29357,10 +29361,35 @@ function parse(text) {
 function safeMessage(text) {
     return messageOf(parse(text));
 }
-/** Extract a short, safe human message from a parsed body — never the whole body. */
+/**
+ * Extract a short, safe human message from a parsed body — never the whole body. Reads `message`
+ * first, then falls back to `error`: the context-service gateway puts its reason under `error`
+ * (job-manager/auth use `message`), and without this fallback a gateway failure reached CI as a bare
+ * status code with no reason — the exact 27 Jul incident.
+ */
 function messageOf(body) {
-    const m = body && typeof body.message === 'string' ? body.message : undefined;
+    const m = body && typeof body.message === 'string' && body.message
+        ? body.message
+        : body && typeof body.error === 'string' && body.error
+            ? body.error
+            : undefined;
     return m ? m.slice(0, 200) : undefined;
+}
+/**
+ * Extract the gateway's correlation/trace id from an error body so the CI log can be matched to a
+ * server-side trace. The gateway emits `traceId` + `correlationId` at the top level; tolerate an
+ * APIResponse `data` wrapper and snake_case variants.
+ */
+function traceOf(body) {
+    if (!body || typeof body !== 'object')
+        return undefined;
+    const t = body.traceId ??
+        body.correlationId ??
+        body.trace_id ??
+        body.correlation_id ??
+        body.data?.traceId ??
+        body.data?.correlationId;
+    return typeof t === 'string' && t ? t.slice(0, 120) : undefined;
 }
 
 
@@ -30537,11 +30566,15 @@ exports.formatError = formatError;
 class HttpError extends Error {
     constructor(status, path, 
     /** A short, already-sanitised server message (never the raw body). */
-    serverMessage) {
-        super(`HTTP ${status} on ${path}${serverMessage ? `: ${serverMessage}` : ''}`);
+    serverMessage, 
+    /** Correlation/trace id the gateway emitted, so the CI log can be matched to a server trace. */
+    traceId) {
+        super(`HTTP ${status} on ${path}${serverMessage ? `: ${serverMessage}` : ''}` +
+            `${traceId ? ` [trace: ${traceId}]` : ''}`);
         this.status = status;
         this.path = path;
         this.serverMessage = serverMessage;
+        this.traceId = traceId;
         this.name = 'HttpError';
     }
 }
@@ -30561,7 +30594,7 @@ exports.UserError = UserError;
  * without retry.
  */
 class SubscriptionInactiveError extends UserError {
-    constructor(body) {
+    constructor(body, traceId) {
         const status = typeof body?.status === 'string' ? body.status : undefined;
         // Only cite a billing URL the server actually provided — never hardcode a host (a run against a
         // dev/self-hosted backend must not be pointed at prod billing). Fall back to a host-agnostic hint.
@@ -30570,11 +30603,14 @@ class SubscriptionInactiveError extends UserError {
         const urlClause = url
             ? ` — update your card at ${url}`
             : ' — restore billing from the Maestro dashboard';
+        // Surface the server's correlation/trace id so a blocked CI run can be matched to the server-side
+        // trace in one step (Build Spec §8 diagnosability — guards the 27 Jul "bare status code" incident).
+        const traceClause = traceId ? ` [trace: ${traceId}]` : '';
         super(
         // Thrown from expectOk on ANY gated call (token exchange, resolve-config, generate, deploy), so
         // keep the wording operation-agnostic.
         `Maestro subscription is not active for this tenant${statusClause}. ` +
-            `This Maestro operation is blocked until billing is restored${urlClause}`);
+            `This Maestro operation is blocked until billing is restored${urlClause}${traceClause}`);
         this.name = 'SubscriptionInactiveError';
     }
 }
@@ -30620,7 +30656,10 @@ function formatError(err) {
         return err.message;
     }
     if (err instanceof HttpError) {
-        return err.serverMessage ? `${err.message}` : `Maestro API error (HTTP ${err.status}). Please retry; if it persists, contact support.`;
+        if (err.serverMessage)
+            return `${err.message}`;
+        const trace = err.traceId ? ` [trace: ${err.traceId}]` : '';
+        return `Maestro API error (HTTP ${err.status})${trace}. Please retry; if it persists, contact support.`;
     }
     if (err instanceof Error) {
         // Generic — keep the message, drop the stack.

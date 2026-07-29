@@ -7,8 +7,13 @@ export class HttpError extends Error {
     public readonly path: string,
     /** A short, already-sanitised server message (never the raw body). */
     public readonly serverMessage?: string,
+    /** Correlation/trace id the gateway emitted, so the CI log can be matched to a server trace. */
+    public readonly traceId?: string,
   ) {
-    super(`HTTP ${status} on ${path}${serverMessage ? `: ${serverMessage}` : ''}`);
+    super(
+      `HTTP ${status} on ${path}${serverMessage ? `: ${serverMessage}` : ''}` +
+        `${traceId ? ` [trace: ${traceId}]` : ''}`,
+    );
     this.name = 'HttpError';
   }
 }
@@ -28,7 +33,7 @@ export class UserError extends Error {
  * without retry.
  */
 export class SubscriptionInactiveError extends UserError {
-  constructor(body?: { status?: string; billing_url?: string }) {
+  constructor(body?: { status?: string; billing_url?: string }, traceId?: string) {
     const status = typeof body?.status === 'string' ? body.status : undefined;
     // Only cite a billing URL the server actually provided — never hardcode a host (a run against a
     // dev/self-hosted backend must not be pointed at prod billing). Fall back to a host-agnostic hint.
@@ -38,11 +43,14 @@ export class SubscriptionInactiveError extends UserError {
     const urlClause = url
       ? ` — update your card at ${url}`
       : ' — restore billing from the Maestro dashboard';
+    // Surface the server's correlation/trace id so a blocked CI run can be matched to the server-side
+    // trace in one step (Build Spec §8 diagnosability — guards the 27 Jul "bare status code" incident).
+    const traceClause = traceId ? ` [trace: ${traceId}]` : '';
     super(
       // Thrown from expectOk on ANY gated call (token exchange, resolve-config, generate, deploy), so
       // keep the wording operation-agnostic.
       `Maestro subscription is not active for this tenant${statusClause}. ` +
-        `This Maestro operation is blocked until billing is restored${urlClause}`,
+        `This Maestro operation is blocked until billing is restored${urlClause}${traceClause}`,
     );
     this.name = 'SubscriptionInactiveError';
   }
@@ -91,7 +99,9 @@ export function formatError(err: unknown): string {
     return err.message;
   }
   if (err instanceof HttpError) {
-    return err.serverMessage ? `${err.message}` : `Maestro API error (HTTP ${err.status}). Please retry; if it persists, contact support.`;
+    if (err.serverMessage) return `${err.message}`;
+    const trace = err.traceId ? ` [trace: ${err.traceId}]` : '';
+    return `Maestro API error (HTTP ${err.status})${trace}. Please retry; if it persists, contact support.`;
   }
   if (err instanceof Error) {
     // Generic — keep the message, drop the stack.
