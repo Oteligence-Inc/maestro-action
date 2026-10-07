@@ -66,7 +66,7 @@ the app image.
 | Output | Description |
 |---|---|
 | `extension-dir` | Local dir with the extracted OTel agent + extension JAR. |
-| `config-path` | Resolved `javaagent.config`. |
+| `config-path` | This service's `javaagent.config` from the build (empty, with a warning, when the build has none for it). |
 | `collector-config-path` | Resolved collector config (deploy to your Collector). |
 | `locked-version` | The locked version applied (e.g. `22`). |
 | `jar-sha` | SHA-256 of the uploaded JAR. |

@@ -56,7 +56,7 @@ outputs:
   extension-dir:
     description: 'Local path to the extracted OTel agent + extension JAR bundle'
   config-path:
-    description: 'Local path to the resolved javaagent.config'
+    description: "Local path to this service's javaagent.config from the build"
   collector-config-path:
     description: 'Local path to the resolved collector config (deploy to your Collector, not the app image)'
   locked-version:

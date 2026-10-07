@@ -58,7 +58,7 @@ export async function run(): Promise<void> {
     const buildJobId = await submitBuild(api, cfg, upload, analysisJobId, profile); // [6b]
     await pollJob(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
 
-    const paths = await downloadArtifacts(api, buildJobId); // [8]
+    const paths = await downloadArtifacts(api, buildJobId, inputs.service); // [8]
     await registerJarForEnv(api, inputs, cfg, upload, buildJobId); // [9]
 
     core.setOutput('extension-dir', paths.extensionDir);

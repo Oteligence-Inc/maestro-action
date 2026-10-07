@@ -29487,7 +29487,7 @@ async function run() {
         const profile = (0, submitJob_1.buildProfileFromLocked)(cfg.locked);
         const buildJobId = await (0, submitJob_1.submitBuild)(api, cfg, upload, analysisJobId, profile); // [6b]
         await (0, poll_1.pollJob)(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
-        const paths = await (0, download_1.downloadArtifacts)(api, buildJobId); // [8]
+        const paths = await (0, download_1.downloadArtifacts)(api, buildJobId, inputs.service); // [8]
         await (0, register_1.registerJarForEnv)(api, inputs, cfg, upload, buildJobId); // [9]
         core.setOutput('extension-dir', paths.extensionDir);
         core.setOutput('config-path', paths.configPath);
@@ -29756,6 +29756,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.downloadArtifacts = downloadArtifacts;
+exports.compactServiceToken = compactServiceToken;
 const core = __importStar(__nccwpck_require__(7484));
 const fs = __importStar(__nccwpck_require__(9896));
 const os = __importStar(__nccwpck_require__(857));
@@ -29768,7 +29769,7 @@ const errors_1 = __nccwpck_require__(17);
  * signed URL is the credential), extract the bundle, and return local paths for the
  * action outputs. Files land under RUNNER_TEMP so the customer's next step can consume them.
  */
-async function downloadArtifacts(api, buildJobId) {
+async function downloadArtifacts(api, buildJobId, service) {
     const res = await api.get(`/api/job-manager/jobs/${encodeURIComponent(buildJobId)}/download`);
     (0, api_1.expectOk)(res, `/jobs/${buildJobId}/download`);
     const data = res.body?.data;
@@ -29781,9 +29782,37 @@ async function downloadArtifacts(api, buildJobId) {
     const zipBytes = await api.getSignedBytes(data.bundleZipUrl);
     new adm_zip_1.default(zipBytes).extractAllTo(extensionDir, /* overwrite */ true);
     core.info(`Extracted extension bundle to ${extensionDir}`);
-    const configPath = await writeIfPresent(api, data.individualArtifacts?.agentConfigUrl, baseDir, 'javaagent.config');
+    const configPath = await writeIfPresent(api, serviceConfigUrl(data.individualArtifacts?.agentConfigsByService ?? [], service), baseDir, 'javaagent.config');
     const collectorConfigPath = await writeIfPresent(api, data.individualArtifacts?.collectorConfigUrl, baseDir, 'collector-config.yaml');
     return { extensionDir, configPath, collectorConfigPath };
+}
+/**
+ * The build lists one javaagent.config per service, keyed by the analysis's service name, which can
+ * differ from the name the service was registered under (fundtransfer against fund-transfer-service).
+ * Match exactly, then by the analysis's own letters-only form, then take a build's only config; an
+ * ambiguous match takes none.
+ */
+function serviceConfigUrl(configs, service) {
+    const wanted = compactServiceToken(service);
+    const compactMatches = configs.filter((c) => wanted !== null && compactServiceToken(c.serviceName) === wanted);
+    const match = configs.find((c) => c.serviceName === service) ??
+        (compactMatches.length === 1 ? compactMatches[0] : undefined) ??
+        (configs.length === 1 ? configs[0] : undefined);
+    if (!match && configs.length > 0) {
+        core.warning(`No single javaagent.config for service "${service}" among: ${configs.map((c) => c.serviceName).join(', ')}.`);
+    }
+    return match?.signedUrl ?? undefined;
+}
+/** Mirrors CrossServiceMatcher.compactServiceToken: letters only, one trailing role word removed. */
+function compactServiceToken(name) {
+    const compact = (name ?? '').toLowerCase().replace(/[^a-z]/g, '');
+    if (!compact)
+        return null;
+    for (const role of ['service', 'svc', 'api', 'svr']) {
+        if (compact.length > role.length && compact.endsWith(role))
+            return compact.slice(0, -role.length);
+    }
+    return compact;
 }
 async function writeIfPresent(api, url, dir, name) {
     if (!url) {
