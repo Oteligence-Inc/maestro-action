@@ -1,13 +1,11 @@
 import * as core from '@actions/core';
 import { MaestroApi, expectOk } from '../api';
 import { Inputs, ResolvedConfig, UploadResult } from '../types';
-import { RemovedServiceError, UserError } from '../util/errors';
 import { envPath } from './resolveConfig';
 
 /**
  * [9] Register the built JAR's SHA for this (env, service). Silent per-env pointer
- * update — the locked config itself is unchanged. A 409 means the JAR's detected
- * service name doesn't match the workflow's `service:` input.
+ * update — the locked config itself is unchanged.
  */
 export async function registerJarForEnv(
   api: MaestroApi,
@@ -25,16 +23,6 @@ export async function registerJarForEnv(
     fileName: upload.fileName,
     sizeBytes: upload.sizeBytes,
   });
-  if (res.statusCode === 409) {
-    throw new UserError(
-      `This JAR's detected service does not match service: "${inputs.service}". ` +
-        'Fix the service input or upload to the right service.',
-    );
-  }
-  if (res.statusCode === 404) {
-    // Live backstop for the early removed-service guard in run() — the (env, service) isn't registered.
-    throw new RemovedServiceError(inputs.service, inputs.environment);
-  }
   expectOk(res, 'register-jar');
   core.info(`Registered ${inputs.service} JAR (sha ${upload.sha}) for env ${inputs.environment}.`);
 }

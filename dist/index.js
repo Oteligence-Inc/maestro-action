@@ -29444,6 +29444,7 @@ const upload_1 = __nccwpck_require__(2590);
 const submitJob_1 = __nccwpck_require__(4388);
 const poll_1 = __nccwpck_require__(9858);
 const download_1 = __nccwpck_require__(9579);
+const analysisService_1 = __nccwpck_require__(7626);
 const register_1 = __nccwpck_require__(7042);
 const staleness_1 = __nccwpck_require__(4289);
 const reportDeployRun_1 = __nccwpck_require__(8013);
@@ -29475,7 +29476,7 @@ async function run() {
         // [2b] Early removed-service guard: if this service isn't in the env's locked config it was removed
         // from the project. Detect it HERE — before upload/analyse/build — so a removed service never re-runs
         // the pipeline, re-registers, or re-bills. Only trip when registeredJars is populated (a lock exists)
-        // and the service is genuinely absent; the register step (9) 404 is the live backstop for edge cases.
+        // and the service is genuinely absent.
         const registered = cfg.locked.registeredJars;
         if (registered && Object.keys(registered).length > 0 && !(inputs.service in registered)) {
             throw new errors_1.RemovedServiceError(inputs.service, inputs.environment);
@@ -29487,7 +29488,8 @@ async function run() {
         const profile = (0, submitJob_1.buildProfileFromLocked)(cfg.locked);
         const buildJobId = await (0, submitJob_1.submitBuild)(api, cfg, upload, analysisJobId, profile); // [6b]
         await (0, poll_1.pollJob)(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
-        const paths = await (0, download_1.downloadArtifacts)(api, buildJobId); // [8]
+        const analysisNames = await (0, analysisService_1.analysisServiceNames)(api, analysisJobId, upload.artifactUid);
+        const paths = await (0, download_1.downloadArtifacts)(api, buildJobId, inputs.service, analysisNames); // [8]
         await (0, register_1.registerJarForEnv)(api, inputs, cfg, upload, buildJobId); // [9]
         core.setOutput('extension-dir', paths.extensionDir);
         core.setOutput('config-path', paths.configPath);
@@ -29646,6 +29648,73 @@ function normaliseApiUrl(raw) {
 
 /***/ }),
 
+/***/ 7626:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.analysisServiceNames = analysisServiceNames;
+const core = __importStar(__nccwpck_require__(7484));
+/**
+ * The analysis's names for the uploaded JAR, which key its javaagent.config and can differ from its registered
+ * name. Empty when the upload has no artifact uid or the preview cannot be read.
+ */
+async function analysisServiceNames(api, analysisJobId, artifactUid) {
+    if (!artifactUid)
+        return [];
+    try {
+        const res = await api.get(`/api/job-manager/jobs/${encodeURIComponent(analysisJobId)}/preview`);
+        const url = res.statusCode < 400 ? res.body?.data?.previewJsonUrl : undefined;
+        if (!url)
+            return [];
+        const preview = JSON.parse((await api.getSignedBytes(url)).toString('utf8'));
+        const mine = (preview.services ?? []).find((s) => s?.jarUid === artifactUid);
+        // A second JAR declaring the same application name is keyed name::artifactUid.
+        return mine?.name ? [`${mine.name}::${artifactUid}`, mine.name] : [];
+    }
+    catch (err) {
+        core.debug(`Could not read the analysis preview: ${err}`);
+        return [];
+    }
+}
+
+
+/***/ }),
+
 /***/ 4697:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -29756,6 +29825,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.downloadArtifacts = downloadArtifacts;
+exports.compactServiceToken = compactServiceToken;
 const core = __importStar(__nccwpck_require__(7484));
 const fs = __importStar(__nccwpck_require__(9896));
 const os = __importStar(__nccwpck_require__(857));
@@ -29768,7 +29838,7 @@ const errors_1 = __nccwpck_require__(17);
  * signed URL is the credential), extract the bundle, and return local paths for the
  * action outputs. Files land under RUNNER_TEMP so the customer's next step can consume them.
  */
-async function downloadArtifacts(api, buildJobId) {
+async function downloadArtifacts(api, buildJobId, service, analysisNames = []) {
     const res = await api.get(`/api/job-manager/jobs/${encodeURIComponent(buildJobId)}/download`);
     (0, api_1.expectOk)(res, `/jobs/${buildJobId}/download`);
     const data = res.body?.data;
@@ -29781,9 +29851,36 @@ async function downloadArtifacts(api, buildJobId) {
     const zipBytes = await api.getSignedBytes(data.bundleZipUrl);
     new adm_zip_1.default(zipBytes).extractAllTo(extensionDir, /* overwrite */ true);
     core.info(`Extracted extension bundle to ${extensionDir}`);
-    const configPath = await writeIfPresent(api, data.individualArtifacts?.agentConfigUrl, baseDir, 'javaagent.config');
+    const configPath = await writeIfPresent(api, serviceConfigUrl(data.individualArtifacts?.agentConfigsByService ?? [], service, analysisNames), baseDir, 'javaagent.config');
     const collectorConfigPath = await writeIfPresent(api, data.individualArtifacts?.collectorConfigUrl, baseDir, 'collector-config.yaml');
     return { extensionDir, configPath, collectorConfigPath };
+}
+/** This service's config: by the analysis's name for the upload, the registered name, then a unique letters-only
+ *  match. None for an ambiguous match or a lone config of another service. */
+function serviceConfigUrl(configs, service, analysisNames) {
+    const wanted = compactServiceToken(service);
+    const compactMatches = configs.filter((c) => wanted !== null && compactServiceToken(c.serviceName) === wanted);
+    const match = analysisNames.map((n) => configs.find((c) => c.serviceName === n)).find((c) => c) ??
+        configs.find((c) => c.serviceName === service) ??
+        (compactMatches.length === 1 ? compactMatches[0] : undefined) ??
+        (configs.length === 1 && configs[0].serviceName === ALL_SERVICES ? configs[0] : undefined);
+    if (!match && configs.length > 0) {
+        core.warning(`No single javaagent.config for service "${service}" among: ${configs.map((c) => c.serviceName).join(', ')}.`);
+    }
+    return match?.signedUrl ?? undefined;
+}
+/** The build's name for the one config of a profile with no services. */
+const ALL_SERVICES = 'all services';
+/** Mirrors CrossServiceMatcher.compactServiceToken: letters only, one trailing role word removed. */
+function compactServiceToken(name) {
+    const compact = (name ?? '').toLowerCase().replace(/[^a-z]/g, '');
+    if (!compact)
+        return null;
+    for (const role of ['service', 'svc', 'api', 'svr']) {
+        if (compact.length > role.length && compact.endsWith(role))
+            return compact.slice(0, -role.length);
+    }
+    return compact;
 }
 async function writeIfPresent(api, url, dir, name) {
     if (!url) {
@@ -29918,12 +30015,10 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.registerJarForEnv = registerJarForEnv;
 const core = __importStar(__nccwpck_require__(7484));
 const api_1 = __nccwpck_require__(6879);
-const errors_1 = __nccwpck_require__(17);
 const resolveConfig_1 = __nccwpck_require__(749);
 /**
  * [9] Register the built JAR's SHA for this (env, service). Silent per-env pointer
- * update — the locked config itself is unchanged. A 409 means the JAR's detected
- * service name doesn't match the workflow's `service:` input.
+ * update — the locked config itself is unchanged.
  */
 async function registerJarForEnv(api, inputs, cfg, upload, buildJobId) {
     const path = `${(0, resolveConfig_1.envPath)(cfg.projectUid, inputs.environment)}/services/${encodeURIComponent(inputs.service)}/jar`;
@@ -29935,14 +30030,6 @@ async function registerJarForEnv(api, inputs, cfg, upload, buildJobId) {
         fileName: upload.fileName,
         sizeBytes: upload.sizeBytes,
     });
-    if (res.statusCode === 409) {
-        throw new errors_1.UserError(`This JAR's detected service does not match service: "${inputs.service}". ` +
-            'Fix the service input or upload to the right service.');
-    }
-    if (res.statusCode === 404) {
-        // Live backstop for the early removed-service guard in run() — the (env, service) isn't registered.
-        throw new errors_1.RemovedServiceError(inputs.service, inputs.environment);
-    }
     (0, api_1.expectOk)(res, 'register-jar');
     core.info(`Registered ${inputs.service} JAR (sha ${upload.sha}) for env ${inputs.environment}.`);
 }

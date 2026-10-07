@@ -41,7 +41,7 @@ jobs:
       # Consume the outputs in your image build
       - run: |
           cp -r "${{ steps.maestro.outputs.extension-dir }}" ./otel
-          cp "${{ steps.maestro.outputs.config-path }}" ./otel/javaagent.config
+          test -n "${{ steps.maestro.outputs.config-path }}" && cp "${{ steps.maestro.outputs.config-path }}" ./otel/javaagent.config
           docker build --build-arg OTEL_DIR=otel -t myapp:${{ steps.maestro.outputs.locked-version }} .
 ```
 
@@ -66,7 +66,7 @@ the app image.
 | Output | Description |
 |---|---|
 | `extension-dir` | Local dir with the extracted OTel agent + extension JAR. |
-| `config-path` | Resolved `javaagent.config`. |
+| `config-path` | This service's `javaagent.config` from the build. Empty, with a warning, when the lock selects none of its methods or its name matches more than one service. |
 | `collector-config-path` | Resolved collector config (deploy to your Collector). |
 | `locked-version` | The locked version applied (e.g. `22`). |
 | `jar-sha` | SHA-256 of the uploaded JAR. |
@@ -107,7 +107,7 @@ Set `fail-on-warnings: true` to make that a hard failure instead.
 | `API key is invalid or has been revoked` | Create a new key in Maestro and update the `MAESTRO_API_KEY` secret. |
 | `Env "X" … has not been locked yet` | Complete Step 5 (Save & Lock) in the wizard before running CI. |
 | `Project "X" not found` | Use the exact project name, or its `proj_` UID. |
-| `does not match service: "X"` (409) | The JAR's detected service differs from the `service:` input — fix the input. |
+| `No single javaagent.config for service "X"` | The build has no config for this service: the lock selects none of its methods, or its name matches more than one service. `config-path` is empty. |
 | `matched N files` | v0 expects one JAR; narrow the `jars` glob. |
 | `Job … still running after Ns` | Raise `timeout-seconds`, or check the job in Maestro. |
 
