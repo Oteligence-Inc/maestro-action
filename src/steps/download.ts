@@ -26,6 +26,7 @@ export async function downloadArtifacts(
   api: MaestroApi,
   buildJobId: string,
   service: string,
+  analysisNames: string[] = [],
 ): Promise<DownloadPaths> {
   const res = await api.get<DownloadBody>(`/api/job-manager/jobs/${encodeURIComponent(buildJobId)}/download`);
   expectOk(res, `/jobs/${buildJobId}/download`);
@@ -44,7 +45,7 @@ export async function downloadArtifacts(
 
   const configPath = await writeIfPresent(
     api,
-    serviceConfigUrl(data.individualArtifacts?.agentConfigsByService ?? [], service),
+    serviceConfigUrl(data.individualArtifacts?.agentConfigsByService ?? [], service, analysisNames),
     baseDir,
     'javaagent.config',
   );
@@ -58,22 +59,20 @@ export async function downloadArtifacts(
   return { extensionDir, configPath, collectorConfigPath };
 }
 
-/**
- * The build lists one javaagent.config per service, keyed by the analysis's service name, which can
- * differ from the name the service was registered under (fundtransfer against fund-transfer-service).
- * Match exactly, then by the analysis's own letters-only form, then take a build's only config; an
- * ambiguous match takes none.
- */
+/** This service's config: by the analysis's name for the upload, the registered name, then a unique letters-only
+ *  match. None for an ambiguous match or a lone config of another service. */
 function serviceConfigUrl(
   configs: { serviceName?: string; signedUrl?: string | null }[],
   service: string,
+  analysisNames: string[],
 ): string | undefined {
   const wanted = compactServiceToken(service);
   const compactMatches = configs.filter((c) => wanted !== null && compactServiceToken(c.serviceName) === wanted);
   const match =
+    analysisNames.map((n) => configs.find((c) => c.serviceName === n)).find((c) => c) ??
     configs.find((c) => c.serviceName === service) ??
     (compactMatches.length === 1 ? compactMatches[0] : undefined) ??
-    (configs.length === 1 ? configs[0] : undefined);
+    (configs.length === 1 && configs[0].serviceName === ALL_SERVICES ? configs[0] : undefined);
   if (!match && configs.length > 0) {
     core.warning(
       `No single javaagent.config for service "${service}" among: ${configs.map((c) => c.serviceName).join(', ')}.`,
@@ -81,6 +80,9 @@ function serviceConfigUrl(
   }
   return match?.signedUrl ?? undefined;
 }
+
+/** The build's name for the one config of a profile with no services. */
+const ALL_SERVICES = 'all services';
 
 /** Mirrors CrossServiceMatcher.compactServiceToken: letters only, one trailing role word removed. */
 export function compactServiceToken(name: string | undefined): string | null {

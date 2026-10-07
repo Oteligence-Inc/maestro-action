@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import AdmZip from 'adm-zip';
 jest.mock('@actions/core');
+import * as core from '@actions/core';
 import { MaestroApi } from '../../src/api';
 import { compactServiceToken, downloadArtifacts } from '../../src/steps/download';
 import { UserError } from '../../src/util/errors';
@@ -106,6 +107,61 @@ it('takes no config when two services reduce to the same letters-only form', asy
 
   expect(paths.configPath).toBe('');
   expect(nock.isDone()).toBe(true);
+});
+
+it("finds the config by the analysis's own name when the registered name matches none", async () => {
+  stubBuild('build_7', {
+    agentConfigsByService: [
+      { serviceName: 'account-service', signedUrl: 'https://s3.example.com/account.config' },
+      { serviceName: 'transaction-service', signedUrl: 'https://s3.example.com/transaction.config' },
+    ],
+  });
+  nock('https://s3.example.com').get('/transaction.config').reply(200, 'TRANSACTION_CONFIG');
+
+  const paths = await downloadArtifacts(client(), 'build_7', 'transactions', ['transaction-service']);
+
+  expect(fs.readFileSync(paths.configPath, 'utf8')).toBe('TRANSACTION_CONFIG');
+});
+
+it("prefers the analysis's own name over an exact match on the registered name", async () => {
+  stubBuild('build_10', {
+    agentConfigsByService: [
+      { serviceName: 'payment-service', signedUrl: 'https://s3.example.com/payment.config' },
+      { serviceName: 'paymentservice1.0.0', signedUrl: 'https://s3.example.com/payment-glued.config' },
+    ],
+  });
+  nock('https://s3.example.com').get('/payment-glued.config').reply(200, 'GLUED_CONFIG');
+
+  const paths = await downloadArtifacts(client(), 'build_10', 'payment-service', ['paymentservice1.0.0']);
+
+  expect(fs.readFileSync(paths.configPath, 'utf8')).toBe('GLUED_CONFIG');
+});
+
+it('takes the exact registered name when another service shares its letters-only form', async () => {
+  stubBuild('build_8', {
+    agentConfigsByService: [
+      { serviceName: 'paymentservice1.0.0', signedUrl: 'https://s3.example.com/payment-glued.config' },
+      { serviceName: 'payment-service', signedUrl: 'https://s3.example.com/payment.config' },
+    ],
+  });
+  nock('https://s3.example.com').get('/payment.config').reply(200, 'PAYMENT_CONFIG');
+
+  const paths = await downloadArtifacts(client(), 'build_8', 'payment-service');
+
+  expect(fs.readFileSync(paths.configPath, 'utf8')).toBe('PAYMENT_CONFIG');
+});
+
+it("never takes a lone config that belongs to another service, and warns", async () => {
+  (core.warning as jest.Mock).mockClear();
+  stubBuild('build_9', {
+    agentConfigsByService: [{ serviceName: 'account-service', signedUrl: 'https://s3.example.com/account.config' }],
+  });
+
+  const paths = await downloadArtifacts(client(), 'build_9', 'user-service');
+
+  expect(paths.configPath).toBe('');
+  expect(nock.isDone()).toBe(true);
+  expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('No single javaagent.config for service "user-service"'));
 });
 
 it.each([

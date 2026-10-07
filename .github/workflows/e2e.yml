@@ -28,7 +28,7 @@ on:
         description: 'Maestro project'
         default: 'ecom-sr'
       service:
-        description: 'Service name (= spring.application.name)'
+        description: 'The service name registered in the Maestro environment'
         default: 'order-service'
       environment:
         description: 'Target env'

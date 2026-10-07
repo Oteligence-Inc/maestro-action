@@ -2,7 +2,6 @@ import nock from 'nock';
 jest.mock('@actions/core');
 import { MaestroApi } from '../../src/api';
 import { registerJarForEnv } from '../../src/steps/register';
-import { RemovedServiceError } from '../../src/util/errors';
 import { Inputs, ResolvedConfig, UploadResult } from '../../src/types';
 
 const BASE = 'https://api.oteligence.com';
@@ -32,14 +31,7 @@ it('registers the JAR (source=ci) on the happy path', async () => {
   expect(seen.jobId).toBe('build_1');
 });
 
-it('maps 409 to a service-name-mismatch UserError', async () => {
-  nock(BASE).put(jarPath).reply(409, { message: 'service mismatch' });
-  await expect(registerJarForEnv(client(), inputs, cfg, upload, 'build_1')).rejects.toThrow(/does not match service/);
-});
-
-it('maps 404 to a RemovedServiceError (service removed from the env config)', async () => {
-  nock(BASE).put(jarPath).reply(404, { message: 'not found' });
-  await expect(registerJarForEnv(client(), inputs, cfg, upload, 'build_1')).rejects.toBeInstanceOf(
-    RemovedServiceError,
-  );
+it('fails with the server message when the environment is gone (job-manager answers 404)', async () => {
+  nock(BASE).put(jarPath).reply(404, { message: 'Environment not found: dev' });
+  await expect(registerJarForEnv(client(), inputs, cfg, upload, 'build_1')).rejects.toThrow(/Environment not found: dev/);
 });

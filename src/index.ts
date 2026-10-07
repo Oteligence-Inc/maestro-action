@@ -7,6 +7,7 @@ import { uploadJar } from './steps/upload';
 import { submitAnalysis, submitBuild, buildProfileFromLocked } from './steps/submitJob';
 import { pollJob } from './steps/poll';
 import { downloadArtifacts } from './steps/download';
+import { analysisServiceNames } from './steps/analysisService';
 import { registerJarForEnv } from './steps/register';
 import { warnStalePeers } from './steps/staleness';
 import { reportDeployRun } from './steps/reportDeployRun';
@@ -41,7 +42,7 @@ export async function run(): Promise<void> {
     // [2b] Early removed-service guard: if this service isn't in the env's locked config it was removed
     // from the project. Detect it HERE — before upload/analyse/build — so a removed service never re-runs
     // the pipeline, re-registers, or re-bills. Only trip when registeredJars is populated (a lock exists)
-    // and the service is genuinely absent; the register step (9) 404 is the live backstop for edge cases.
+    // and the service is genuinely absent.
     const registered = cfg.locked.registeredJars;
     if (registered && Object.keys(registered).length > 0 && !(inputs.service in registered)) {
       throw new RemovedServiceError(inputs.service, inputs.environment);
@@ -58,7 +59,8 @@ export async function run(): Promise<void> {
     const buildJobId = await submitBuild(api, cfg, upload, analysisJobId, profile); // [6b]
     await pollJob(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
 
-    const paths = await downloadArtifacts(api, buildJobId, inputs.service); // [8]
+    const analysisNames = await analysisServiceNames(api, analysisJobId, upload.artifactUid);
+    const paths = await downloadArtifacts(api, buildJobId, inputs.service, analysisNames); // [8]
     await registerJarForEnv(api, inputs, cfg, upload, buildJobId); // [9]
 
     core.setOutput('extension-dir', paths.extensionDir);
