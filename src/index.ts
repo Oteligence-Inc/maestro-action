@@ -45,7 +45,7 @@ export async function run(): Promise<void> {
     // and the service is genuinely absent.
     const registered = cfg.locked.registeredJars;
     if (registered && Object.keys(registered).length > 0 && !(inputs.service in registered)) {
-      throw new RemovedServiceError(inputs.service, inputs.environment);
+      throw new RemovedServiceError(inputs.service, inputs.environment, Object.keys(registered));
     }
 
     await reportDeployRun(api, inputs, projectUid, 'in_progress', null); // deploy-run: start
@@ -61,7 +61,7 @@ export async function run(): Promise<void> {
 
     const analysisNames = await analysisServiceNames(api, analysisJobId, upload.artifactUid);
     const paths = await downloadArtifacts(api, buildJobId, inputs.service, analysisNames); // [8]
-    await registerJarForEnv(api, inputs, cfg, upload, buildJobId); // [9]
+    await registerJarForEnv(api, inputs, cfg, upload, buildJobId, analysisNames[analysisNames.length - 1]); // [9]
 
     core.setOutput('extension-dir', paths.extensionDir);
     core.setOutput('config-path', paths.configPath);
@@ -77,11 +77,6 @@ export async function run(): Promise<void> {
     await reportDeployRun(api, inputs, projectUid, 'completed', 'success'); // deploy-run: done
     core.info('Maestro instrumentation complete.');
   } catch (err) {
-    // Graceful degradation (opt-in): when the subscription is inactive (402 subscription_inactive)
-    // and skip-generate-on-inactive is set, DON'T fail the step — skip extension-JAR generation and
-    // let the pipeline continue so the deploy still runs (just without a newly generated extension).
-    // The generated=false output lets the workflow omit the OTel layer. Only a genuine 402 reaches
-    // here; any other error still fails the step.
     // Graceful degradation (opt-in): the service was removed from the project (not in the env's locked
     // config). With skip-on-removed-service set, DON'T fail — skip generation and let the pipeline
     // continue (deploy runs without a newly generated extension) rather than breaking CI for a service
@@ -98,6 +93,11 @@ export async function run(): Promise<void> {
       await reportDeployRun(api, inputs, projectUid, 'completed', 'success');
       return; // exit 0 — removed service is not a failure when opted in
     }
+    // Graceful degradation (opt-in): when the subscription is inactive (402 subscription_inactive)
+    // and skip-generate-on-inactive is set, DON'T fail the step — skip extension-JAR generation and
+    // let the pipeline continue so the deploy still runs (just without a newly generated extension).
+    // The generated=false output lets the workflow omit the OTel layer. Only a genuine 402 reaches
+    // here; any other error still fails the step.
     if (err instanceof SubscriptionInactiveError && inputs.skipGenerateOnInactive) {
       core.warning(
         'Maestro subscription is not active — skipping extension-JAR generation. The pipeline will ' +

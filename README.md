@@ -34,7 +34,7 @@ jobs:
         with:
           api-key: ${{ secrets.MAESTRO_API_KEY }}
           project: 'banking-app'                # same across all service repos
-          service: 'fund-transfer'              # this repo's service name
+          service: 'fund-transfer-service'      # this service's name in Maestro
           environment: ${{ github.ref == 'refs/heads/main' && 'prod' || (github.ref == 'refs/heads/staging' && 'staging' || 'dev') }}
           jars: 'target/*.jar'
 
@@ -54,7 +54,7 @@ the app image.
 |---|---|---|---|
 | `api-key` | yes | — | Maestro API key. **Use a GitHub Secret**, never inline. |
 | `project` | yes | — | Project name (e.g. `banking-app`) or `proj_` UID. |
-| `service` | yes | — | Service name within the project. |
+| `service` | yes | — | The name the environment registers this service under, which should be the analysis's name for the JAR (its `spring.application.name`, else the JAR's file name without its version). A run whose input the environment's latest lock does not register fails and lists the names it does; a run whose JAR the analysis names differently warns with that name. |
 | `environment` | yes | — | Target env: `dev` / `staging` / `prod` / custom. |
 | `jars` | yes | — | Glob to the JAR (e.g. `target/*.jar`). v0 expects exactly one match. |
 | `api-url` | no | `https://api.oteligence.com` | Override base URL. Must be `https://` and an `*.oteligence.com` host unless `MAESTRO_ALLOW_CUSTOM_API_URL=1`. |
@@ -108,6 +108,8 @@ Set `fail-on-warnings: true` to make that a hard failure instead.
 | `Env "X" … has not been locked yet` | Complete Step 5 (Save & Lock) in the wizard before running CI. |
 | `Project "X" not found` | Use the exact project name, or its `proj_` UID. |
 | `No single javaagent.config for service "X"` | The build has no config for this service: the lock selects none of its methods, or its name matches more than one service. `config-path` is empty. |
+| `Service "X" is not part of "env"'s locked config` | The environment's latest lock registers no service by that name. Set `service` to one of the names the message lists, or add the service in the wizard and lock again. |
+| `The analysis names this JAR "Y", the name its lock entries and build use` | The lock and build know the service as `Y`. Register it as `Y` in the wizard and set `service: Y`. |
 | `matched N files` | v0 expects one JAR; narrow the `jars` glob. |
 | `Job … still running after Ns` | Raise `timeout-seconds`, or check the job in Maestro. |
 

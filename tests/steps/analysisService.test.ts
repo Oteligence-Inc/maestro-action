@@ -19,16 +19,28 @@ function stubPreview(jobId: string, services: unknown[]) {
   nock('https://s3.example.com').get('/preview.json').reply(200, JSON.stringify({ services }));
 }
 
-it("names the uploaded JAR by the analysis's service name, plain and duplicate-keyed", async () => {
+it("names the uploaded JAR by the analysis's key, then its display name", async () => {
+  // Two uploads share the name, so each is keyed by its class-content fingerprint.
   stubPreview('an_1', [
-    { name: 'account-service', jarUid: 'art-account' },
-    { name: 'transaction-service', jarUid: 'art-mine' },
+    { name: 'transaction-service', serviceKey: 'transaction-service@5e6f7a8b', jarUid: 'art-other' },
+    { name: 'transaction-service', serviceKey: 'transaction-service@1a2b3c4d', jarUid: 'art-mine' },
   ]);
 
   await expect(analysisServiceNames(client(), 'an_1', 'art-mine')).resolves.toEqual([
-    'transaction-service::art-mine',
+    'transaction-service@1a2b3c4d',
     'transaction-service',
   ]);
+});
+
+it('gives a name only one upload carries once, and reads a preview with no key by its name', async () => {
+  stubPreview('an_5', [{ name: 'transaction-service', serviceKey: 'transaction-service', jarUid: 'art-mine' }]);
+  await expect(analysisServiceNames(client(), 'an_5', 'art-mine')).resolves.toEqual(['transaction-service']);
+
+  stubPreview('an_6', [{ name: 'transaction-service', jarUid: 'art-mine' }]);
+  await expect(analysisServiceNames(client(), 'an_6', 'art-mine')).resolves.toEqual(['transaction-service']);
+
+  stubPreview('an_7', [{ name: 'transaction-service', serviceKey: '', jarUid: 'art-mine' }]);
+  await expect(analysisServiceNames(client(), 'an_7', 'art-mine')).resolves.toEqual(['transaction-service']);
 });
 
 it('returns nothing without an artifact uid, and asks no question', async () => {

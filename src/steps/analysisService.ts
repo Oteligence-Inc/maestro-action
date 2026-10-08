@@ -6,8 +6,9 @@ interface PreviewBody {
 }
 
 /**
- * The analysis's names for the uploaded JAR, which key its javaagent.config and can differ from its registered
- * name. Empty when the upload has no artifact uid or the preview cannot be read.
+ * The analysis's names for the uploaded JAR: its key, then its display name when that differs (the key adds
+ * `@<8 hex>` when uploads share a name). Either can key its javaagent.config. Empty when the upload has no
+ * artifact uid or the preview cannot be read.
  */
 export async function analysisServiceNames(
   api: MaestroApi,
@@ -21,8 +22,9 @@ export async function analysisServiceNames(
     if (!url) return [];
     const preview = JSON.parse((await api.getSignedBytes(url)).toString('utf8'));
     const mine = (preview.services ?? []).find((s: { jarUid?: string }) => s?.jarUid === artifactUid);
-    // A second JAR declaring the same application name is keyed name::artifactUid.
-    return mine?.name ? [`${mine.name}::${artifactUid}`, mine.name] : [];
+    // Uploads sharing a name are keyed name@<8 hex>; a preview from an older engine carries no key.
+    const names = [mine?.serviceKey, mine?.name].filter((n): n is string => typeof n === 'string' && n !== '');
+    return [...new Set(names)];
   } catch (err) {
     core.debug(`Could not read the analysis preview: ${err}`);
     return [];
