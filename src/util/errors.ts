@@ -65,11 +65,12 @@ export class SubscriptionInactiveError extends UserError {
  * backstop.
  */
 export class RemovedServiceError extends UserError {
-  constructor(service: string, environment: string) {
+  constructor(service: string, environment: string, registered: string[] = []) {
+    const known = registered.length ? ` Registered in "${environment}": ${[...registered].sort().join(', ')}.` : '';
     super(
-      `Service "${service}" is not part of "${environment}"'s locked config — it looks like it was ` +
-        'removed from the project. Re-add it via the Maestro wizard (Step 1) to instrument it, or fix ' +
-        'the "service" input if the name is wrong.',
+      `Service "${service}" is not part of "${environment}"'s locked config. It looks like it was ` +
+        'removed from the project. Re-add it via the Maestro wizard (Step 1) to instrument it, or set the ' +
+        '"service" input to the name Maestro gives it.' + known,
     );
     this.name = 'RemovedServiceError';
   }

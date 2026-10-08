@@ -1,5 +1,6 @@
 import nock from 'nock';
 jest.mock('@actions/core');
+import * as core from '@actions/core';
 import { MaestroApi } from '../../src/api';
 import { registerJarForEnv } from '../../src/steps/register';
 import { Inputs, ResolvedConfig, UploadResult } from '../../src/types';
@@ -34,4 +35,20 @@ it('registers the JAR (source=ci) on the happy path', async () => {
 it('fails with the server message when the environment is gone (job-manager answers 404)', async () => {
   nock(BASE).put(jarPath).reply(404, { message: 'Environment not found: dev' });
   await expect(registerJarForEnv(client(), inputs, cfg, upload, 'build_1')).rejects.toThrow(/Environment not found: dev/);
+});
+
+it("registers under the analysis's name for the JAR and warns when the service input differs", async () => {
+  const scope = nock(BASE).put('/api/job-manager/projects/proj_1/envs/dev/services/order-svc%40a1b2c3d4/jar').reply(200, {});
+  await registerJarForEnv(client(), inputs, cfg, upload, 'build_1', 'order-svc@a1b2c3d4');
+  expect(scope.isDone()).toBe(true);
+  expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('service: order-svc@a1b2c3d4'));
+});
+
+it('registers under the service input, without a warning, when the analysis agrees or gave no name', async () => {
+  (core.warning as jest.Mock).mockClear();
+  nock(BASE).put(jarPath).twice().reply(200, {});
+  await registerJarForEnv(client(), inputs, cfg, upload, 'build_1', 'order-service');
+  await registerJarForEnv(client(), inputs, cfg, upload, 'build_1', undefined);
+  expect(nock.pendingMocks()).toEqual([]);
+  expect(core.warning).not.toHaveBeenCalled();
 });

@@ -29479,7 +29479,7 @@ async function run() {
         // and the service is genuinely absent.
         const registered = cfg.locked.registeredJars;
         if (registered && Object.keys(registered).length > 0 && !(inputs.service in registered)) {
-            throw new errors_1.RemovedServiceError(inputs.service, inputs.environment);
+            throw new errors_1.RemovedServiceError(inputs.service, inputs.environment, Object.keys(registered));
         }
         await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'in_progress', null); // deploy-run: start
         const upload = await (0, upload_1.uploadJar)(api, inputs, cfg); // [3-5]
@@ -29490,7 +29490,7 @@ async function run() {
         await (0, poll_1.pollJob)(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
         const analysisNames = await (0, analysisService_1.analysisServiceNames)(api, analysisJobId, upload.artifactUid);
         const paths = await (0, download_1.downloadArtifacts)(api, buildJobId, inputs.service, analysisNames); // [8]
-        await (0, register_1.registerJarForEnv)(api, inputs, cfg, upload, buildJobId); // [9]
+        await (0, register_1.registerJarForEnv)(api, inputs, cfg, upload, buildJobId, analysisNames[0]); // [9]
         core.setOutput('extension-dir', paths.extensionDir);
         core.setOutput('config-path', paths.configPath);
         core.setOutput('collector-config-path', paths.collectorConfigPath);
@@ -29504,11 +29504,6 @@ async function run() {
         core.info('Maestro instrumentation complete.');
     }
     catch (err) {
-        // Graceful degradation (opt-in): when the subscription is inactive (402 subscription_inactive)
-        // and skip-generate-on-inactive is set, DON'T fail the step — skip extension-JAR generation and
-        // let the pipeline continue so the deploy still runs (just without a newly generated extension).
-        // The generated=false output lets the workflow omit the OTel layer. Only a genuine 402 reaches
-        // here; any other error still fails the step.
         // Graceful degradation (opt-in): the service was removed from the project (not in the env's locked
         // config). With skip-on-removed-service set, DON'T fail — skip generation and let the pipeline
         // continue (deploy runs without a newly generated extension) rather than breaking CI for a service
@@ -29523,6 +29518,11 @@ async function run() {
             await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'completed', 'success');
             return; // exit 0 — removed service is not a failure when opted in
         }
+        // Graceful degradation (opt-in): when the subscription is inactive (402 subscription_inactive)
+        // and skip-generate-on-inactive is set, DON'T fail the step — skip extension-JAR generation and
+        // let the pipeline continue so the deploy still runs (just without a newly generated extension).
+        // The generated=false output lets the workflow omit the OTel layer. Only a genuine 402 reaches
+        // here; any other error still fails the step.
         if (err instanceof errors_1.SubscriptionInactiveError && inputs.skipGenerateOnInactive) {
             core.warning('Maestro subscription is not active — skipping extension-JAR generation. The pipeline will ' +
                 'continue and deploy WITHOUT a newly generated extension JAR. ' +
@@ -29690,8 +29690,9 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.analysisServiceNames = analysisServiceNames;
 const core = __importStar(__nccwpck_require__(7484));
 /**
- * The analysis's names for the uploaded JAR, which key its javaagent.config and can differ from its registered
- * name. Empty when the upload has no artifact uid or the preview cannot be read.
+ * The analysis's names for the uploaded JAR: its key, which names its registration, lock entries and
+ * javaagent.config, then its display name when that differs. Empty when the upload has no artifact uid or the
+ * preview cannot be read.
  */
 async function analysisServiceNames(api, analysisJobId, artifactUid) {
     if (!artifactUid)
@@ -29703,8 +29704,9 @@ async function analysisServiceNames(api, analysisJobId, artifactUid) {
             return [];
         const preview = JSON.parse((await api.getSignedBytes(url)).toString('utf8'));
         const mine = (preview.services ?? []).find((s) => s?.jarUid === artifactUid);
-        // A second JAR declaring the same application name is keyed name::artifactUid.
-        return mine?.name ? [`${mine.name}::${artifactUid}`, mine.name] : [];
+        // Uploads sharing a name are keyed name@<8 hex>; a preview from an older engine carries no key.
+        const names = [mine?.serviceKey, mine?.name].filter((n) => typeof n === 'string' && n !== '');
+        return [...new Set(names)];
     }
     catch (err) {
         core.debug(`Could not read the analysis preview: ${err}`);
@@ -30017,11 +30019,16 @@ const core = __importStar(__nccwpck_require__(7484));
 const api_1 = __nccwpck_require__(6879);
 const resolveConfig_1 = __nccwpck_require__(749);
 /**
- * [9] Register the built JAR's SHA for this (env, service). Silent per-env pointer
- * update — the locked config itself is unchanged.
+ * [9] Register the built JAR's SHA for this env under the analysis's name for it, the name its lock entries and
+ * build share; the `service` input when the analysis gave none. The locked config itself is unchanged.
  */
-async function registerJarForEnv(api, inputs, cfg, upload, buildJobId) {
-    const path = `${(0, resolveConfig_1.envPath)(cfg.projectUid, inputs.environment)}/services/${encodeURIComponent(inputs.service)}/jar`;
+async function registerJarForEnv(api, inputs, cfg, upload, buildJobId, analysisName) {
+    const service = analysisName || inputs.service;
+    if (service !== inputs.service) {
+        core.warning(`The analysis names this JAR "${service}", not "${inputs.service}", so it is registered as "${service}". ` +
+            `Set \`service: ${service}\` in this workflow; the next run checks that name against the environment.`);
+    }
+    const path = `${(0, resolveConfig_1.envPath)(cfg.projectUid, inputs.environment)}/services/${encodeURIComponent(service)}/jar`;
     const res = await api.put(path, {
         artifactUid: upload.artifactUid,
         sha: upload.sha,
@@ -30031,7 +30038,7 @@ async function registerJarForEnv(api, inputs, cfg, upload, buildJobId) {
         sizeBytes: upload.sizeBytes,
     });
     (0, api_1.expectOk)(res, 'register-jar');
-    core.info(`Registered ${inputs.service} JAR (sha ${upload.sha}) for env ${inputs.environment}.`);
+    core.info(`Registered ${service} JAR (sha ${upload.sha}) for env ${inputs.environment}.`);
 }
 
 
@@ -30711,10 +30718,11 @@ exports.SubscriptionInactiveError = SubscriptionInactiveError;
  * backstop.
  */
 class RemovedServiceError extends UserError {
-    constructor(service, environment) {
-        super(`Service "${service}" is not part of "${environment}"'s locked config — it looks like it was ` +
-            'removed from the project. Re-add it via the Maestro wizard (Step 1) to instrument it, or fix ' +
-            'the "service" input if the name is wrong.');
+    constructor(service, environment, registered = []) {
+        const known = registered.length ? ` Registered in "${environment}": ${[...registered].sort().join(', ')}.` : '';
+        super(`Service "${service}" is not part of "${environment}"'s locked config. It looks like it was ` +
+            'removed from the project. Re-add it via the Maestro wizard (Step 1) to instrument it, or set the ' +
+            '"service" input to the name Maestro gives it.' + known);
         this.name = 'RemovedServiceError';
     }
 }
