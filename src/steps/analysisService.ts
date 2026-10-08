@@ -6,9 +6,9 @@ interface PreviewBody {
 }
 
 /**
- * The analysis's names for the uploaded JAR: its key, which names its registration, lock entries and
- * javaagent.config, then its display name when that differs. Empty when the upload has no artifact uid or the
- * preview cannot be read.
+ * The analysis's names for the uploaded JAR: its key, then its display name when that differs (the key adds
+ * `@<8 hex>` when uploads share a name). Either can key its javaagent.config. Empty when the upload has no
+ * artifact uid or the preview cannot be read.
  */
 export async function analysisServiceNames(
   api: MaestroApi,

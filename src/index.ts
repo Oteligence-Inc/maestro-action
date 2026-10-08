@@ -61,7 +61,7 @@ export async function run(): Promise<void> {
 
     const analysisNames = await analysisServiceNames(api, analysisJobId, upload.artifactUid);
     const paths = await downloadArtifacts(api, buildJobId, inputs.service, analysisNames); // [8]
-    await registerJarForEnv(api, inputs, cfg, upload, buildJobId, analysisNames[0]); // [9]
+    await registerJarForEnv(api, inputs, cfg, upload, buildJobId, analysisNames[analysisNames.length - 1]); // [9]
 
     core.setOutput('extension-dir', paths.extensionDir);
     core.setOutput('config-path', paths.configPath);

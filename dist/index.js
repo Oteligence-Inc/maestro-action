@@ -29490,7 +29490,7 @@ async function run() {
         await (0, poll_1.pollJob)(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
         const analysisNames = await (0, analysisService_1.analysisServiceNames)(api, analysisJobId, upload.artifactUid);
         const paths = await (0, download_1.downloadArtifacts)(api, buildJobId, inputs.service, analysisNames); // [8]
-        await (0, register_1.registerJarForEnv)(api, inputs, cfg, upload, buildJobId, analysisNames[0]); // [9]
+        await (0, register_1.registerJarForEnv)(api, inputs, cfg, upload, buildJobId, analysisNames[analysisNames.length - 1]); // [9]
         core.setOutput('extension-dir', paths.extensionDir);
         core.setOutput('config-path', paths.configPath);
         core.setOutput('collector-config-path', paths.collectorConfigPath);
@@ -29690,9 +29690,9 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.analysisServiceNames = analysisServiceNames;
 const core = __importStar(__nccwpck_require__(7484));
 /**
- * The analysis's names for the uploaded JAR: its key, which names its registration, lock entries and
- * javaagent.config, then its display name when that differs. Empty when the upload has no artifact uid or the
- * preview cannot be read.
+ * The analysis's names for the uploaded JAR: its key, then its display name when that differs (the key adds
+ * `@<8 hex>` when uploads share a name). Either can key its javaagent.config. Empty when the upload has no
+ * artifact uid or the preview cannot be read.
  */
 async function analysisServiceNames(api, analysisJobId, artifactUid) {
     if (!artifactUid)
@@ -30019,14 +30019,16 @@ const core = __importStar(__nccwpck_require__(7484));
 const api_1 = __nccwpck_require__(6879);
 const resolveConfig_1 = __nccwpck_require__(749);
 /**
- * [9] Register the built JAR's SHA for this env under the analysis's name for it, the name its lock entries and
- * build share; the `service` input when the analysis gave none. The locked config itself is unchanged.
+ * [9] Register the built JAR's SHA for this (env, service). Silent per-env pointer update; the locked config
+ * itself is unchanged. The registration keeps the `service` name the environment knows the service by, and a
+ * warning reports the analysis's name for the JAR when it differs, since the lock and build key on that one.
  */
 async function registerJarForEnv(api, inputs, cfg, upload, buildJobId, analysisName) {
-    const service = analysisName || inputs.service;
-    if (service !== inputs.service) {
-        core.warning(`The analysis names this JAR "${service}", not "${inputs.service}", so it is registered as "${service}". ` +
-            `Set \`service: ${service}\` in this workflow; the next run checks that name against the environment.`);
+    const service = inputs.service;
+    if (analysisName && analysisName !== service) {
+        core.warning(`The analysis names this JAR "${analysisName}", the name its lock entries and build use, but it is ` +
+            `registered as "${service}". Register the service as "${analysisName}" in the Maestro wizard and set ` +
+            'the "service" input to match.');
     }
     const path = `${(0, resolveConfig_1.envPath)(cfg.projectUid, inputs.environment)}/services/${encodeURIComponent(service)}/jar`;
     const res = await api.put(path, {

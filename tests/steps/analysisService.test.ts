@@ -20,8 +20,9 @@ function stubPreview(jobId: string, services: unknown[]) {
 }
 
 it("names the uploaded JAR by the analysis's key, then its display name", async () => {
+  // Two uploads share the name, so each is keyed by its class-content fingerprint.
   stubPreview('an_1', [
-    { name: 'account-service', serviceKey: 'account-service', jarUid: 'art-account' },
+    { name: 'transaction-service', serviceKey: 'transaction-service@5e6f7a8b', jarUid: 'art-other' },
     { name: 'transaction-service', serviceKey: 'transaction-service@1a2b3c4d', jarUid: 'art-mine' },
   ]);
 
@@ -37,6 +38,9 @@ it('gives a name only one upload carries once, and reads a preview with no key b
 
   stubPreview('an_6', [{ name: 'transaction-service', jarUid: 'art-mine' }]);
   await expect(analysisServiceNames(client(), 'an_6', 'art-mine')).resolves.toEqual(['transaction-service']);
+
+  stubPreview('an_7', [{ name: 'transaction-service', serviceKey: '', jarUid: 'art-mine' }]);
+  await expect(analysisServiceNames(client(), 'an_7', 'art-mine')).resolves.toEqual(['transaction-service']);
 });
 
 it('returns nothing without an artifact uid, and asks no question', async () => {

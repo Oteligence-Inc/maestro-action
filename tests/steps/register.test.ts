@@ -37,14 +37,14 @@ it('fails with the server message when the environment is gone (job-manager answ
   await expect(registerJarForEnv(client(), inputs, cfg, upload, 'build_1')).rejects.toThrow(/Environment not found: dev/);
 });
 
-it("registers under the analysis's name for the JAR and warns when the service input differs", async () => {
-  const scope = nock(BASE).put('/api/job-manager/projects/proj_1/envs/dev/services/order-svc%40a1b2c3d4/jar').reply(200, {});
-  await registerJarForEnv(client(), inputs, cfg, upload, 'build_1', 'order-svc@a1b2c3d4');
+it("keeps the service input's registration and warns with the analysis's name when they differ", async () => {
+  const scope = nock(BASE).put(jarPath).reply(200, {});
+  await registerJarForEnv(client(), inputs, cfg, upload, 'build_1', 'orders');
   expect(scope.isDone()).toBe(true);
-  expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('service: order-svc@a1b2c3d4'));
+  expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('Register the service as "orders"'));
 });
 
-it('registers under the service input, without a warning, when the analysis agrees or gave no name', async () => {
+it('warns about nothing when the analysis agrees or gave no name', async () => {
   (core.warning as jest.Mock).mockClear();
   nock(BASE).put(jarPath).twice().reply(200, {});
   await registerJarForEnv(client(), inputs, cfg, upload, 'build_1', 'order-service');

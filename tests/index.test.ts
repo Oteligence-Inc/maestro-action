@@ -34,15 +34,15 @@ beforeEach(() => {
   (downloadArtifacts as jest.Mock).mockResolvedValue({ extensionDir: 'x', configPath: 'c', collectorConfigPath: 'k' });
 });
 
-it("registers the JAR under the analysis's key for it", async () => {
+it("hands the register step the analysis's display name, never the fingerprinted key", async () => {
   (analysisServiceNames as jest.Mock).mockResolvedValue(['fund-transfer-service@1a2b3c4d', 'fund-transfer-service']);
   await run();
   expect(core.setFailed).not.toHaveBeenCalled();
   expect(registerJarForEnv).toHaveBeenCalledWith(
-    expect.anything(), inputs, expect.anything(), expect.anything(), 'build_1', 'fund-transfer-service@1a2b3c4d');
+    expect.anything(), inputs, expect.anything(), expect.anything(), 'build_1', 'fund-transfer-service');
 });
 
-it('registers under the service input when the analysis gave no name', async () => {
+it('hands it no name when the analysis gave none', async () => {
   (analysisServiceNames as jest.Mock).mockResolvedValue([]);
   await run();
   expect(registerJarForEnv).toHaveBeenCalledWith(
@@ -57,4 +57,15 @@ it('refuses a service input the environment does not register, naming the ones i
   await run();
   expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('Registered in "dev": fund-transfer-service.'));
   expect(uploadJar).not.toHaveBeenCalled();
+});
+
+it('proceeds when the environment registers the service input', async () => {
+  (analysisServiceNames as jest.Mock).mockResolvedValue([]);
+  (resolveLockedConfig as jest.Mock).mockResolvedValue({
+    projectUid: 'proj_1',
+    locked: { version: 3, goals: [], selection: [], registeredJars: { fundtransfer: { sha: 'old' } } },
+  });
+  await run();
+  expect(core.setFailed).not.toHaveBeenCalled();
+  expect(uploadJar).toHaveBeenCalled();
 });

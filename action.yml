@@ -16,7 +16,7 @@ inputs:
     description: 'Maestro project UID. Wins over `project` when set — use it if the name may be wrong/forgotten. Provide project OR project-id (or both).'
     required: false
   service:
-    description: "The service's name in Maestro: the analysis's name for this JAR (its spring.application.name, else its file name), as the wizard shows it (e.g. fund-transfer-service)"
+    description: "The name the environment registers this service under, normally the analysis's name for the JAR: its spring.application.name, else the JAR file name without its version (e.g. fund-transfer-service)"
     required: true
   environment:
     description: 'Target env: dev / staging / prod / <custom>'
