@@ -1,6 +1,6 @@
 # TODO: maestro-action
 
-**Open:** 0 · **Next ID:** 1
+**Open:** 1 · **Next ID:** 2
 
 Open bugs only. Severities reflect verified impact, not the original audit label.
 A ticket is the facet line plus Where, Failure mode (the repro), and Fix. Essays belong in
@@ -32,3 +32,12 @@ Cross-repo items (the `v0` tag move and the pin bump in the platform's `maestro-
 in `platform-overview/TODO.md`.
 
 ---
+
+## MEDIUM — correctness, resilience, and operations
+
+#### 1. The nightly E2E smoke fails on every run because the repo has no API key or URL secret
+
+- **Needs:** input · **Repos:** maestro-action
+- **Where:** the `e2e` job in `.github/workflows/e2e.yml` (`api-key: ${{ secrets.MAESTRO_API_KEY }}`, `api-url: ${{ secrets.MAESTRO_API_URL }}`)
+- **Failure mode:** the `schedule` trigger runs nightly and fails at the action's first step with `Input required and not supplied: api-key`, so the job has never exercised the action against a platform. **OBSERVED:** all 103 recorded runs are `failure`; `gh secret list -R Oteligence-Inc/maestro-action` returns no secrets. A real regression in the action would land in the same red column and go unseen.
+- **Decision needed:** (a) mint an API key in hosted dev for a project whose `dev` environment has a lock, and set `MAESTRO_API_KEY` and `MAESTRO_API_URL` (recommended: it is the only check that runs the action contract on a GitHub runner); (b) drop the `schedule` trigger and keep `workflow_dispatch`, accepting no nightly coverage.

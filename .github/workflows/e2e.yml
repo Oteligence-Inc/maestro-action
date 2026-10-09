@@ -8,9 +8,9 @@ name: E2E
 #
 #  A) Locally with `act` (no GitHub, no publish) — the recommended pre-publish gate:
 #       1. install Docker Desktop + nektos/act
-#       2. copy a built JAR into the repo so the container can see it:
-#            cp ../demo-jars/ecommerce-microservices/jars/order-service-0.0.1-SNAPSHOT.jar fixtures/service.jar
-#       3. from services/maestro-action/ :
+#       2. copy a built JAR into the repo so the container can see it, for example the kit testbed's:
+#            cp ../maestro-validation-kit/instrumentation-testbed/dist/order-service-1.0.0.jar fixtures/service.jar
+#       3. from the repo root:
 #            act workflow_dispatch -W .github/workflows/e2e.yml \
 #              -s MAESTRO_API_KEY=ak_xxx \
 #              -s MAESTRO_API_URL=https://<your-ngrok-host> \
