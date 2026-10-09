@@ -29771,7 +29771,7 @@ async function auth(api, inputs) {
     const query = inputs.orgId ? `?orgId=${encodeURIComponent(inputs.orgId)}` : '';
     const res = await api.post(`/api/auth/cli/token${query}`, {});
     const refusal = typeof res.body?.message === 'string' ? res.body.message : '';
-    if (res.statusCode === 400 && refusal.includes('orgId')) {
+    if (res.body?.code === 'org_required') {
         throw new errors_1.UserError(`${refusal}. Set the "org-id" input to the id of the organization to act for.`);
     }
     if (res.statusCode === 403 && refusal) {

@@ -39,9 +39,20 @@ it('sends the org-id input as orgId, escaped, and omits it when unset', async ()
 it("names the org-id input when the key needs an organization chosen", async () => {
   nock(BASE).post('/api/auth/cli/token').reply(400, {
     success: false,
+    code: 'org_required',
     message: 'This API key is not scoped to a project and your account belongs to several organizations; pass orgId to choose one',
   });
   await expect(auth(new MaestroApi(BASE), inputs)).rejects.toThrow(/several organizations.*"org-id" input/);
+});
+
+it('does not blame a missing org-id when the org-id given contradicts the key', async () => {
+  nock(BASE).post('/api/auth/cli/token').query(true).reply(400, {
+    success: false,
+    code: 'org_conflict',
+    message: "orgId names a different organization from this API key's",
+  });
+  const err = auth(new MaestroApi(BASE), { ...inputs, orgId: 'org_x' } as Inputs);
+  await expect(err).rejects.not.toThrow(/Set the "org-id" input/);
 });
 
 it("gives the server's reason for a 403, not a revoked-key message", async () => {

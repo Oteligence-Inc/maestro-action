@@ -54,7 +54,7 @@ the app image.
 |---|---|---|---|
 | `api-key` | yes | — | Maestro API key. **Use a GitHub Secret**, never inline. |
 | `project` | yes | — | Project name (e.g. `banking-app`) or `proj_` UID. |
-| `org-id` | no | — | The organization to act for (`org_...`). Needed only when the API key is not scoped to a project and its owner belongs to several organizations; the token exchange refuses such a key without it. |
+| `org-id` | no | — | The id of the organization to act for (`org_...` on hosted SaaS, a UUID on a private-cloud VM). Needed only when the API key is not scoped to a project and its owner belongs to several organizations; the token exchange refuses such a key without it. |
 | `service` | yes | — | The name the environment registers this service under: the analysis's name for the JAR (its `spring.application.name`, else the JAR's file name without its version), or, for one of two JARs that share that name, the file-derived name the wizard registered it under. A run whose input the environment's latest lock does not register fails and lists the names it does. A run warns when the analysis keys the JAR differently from the key the lock recorded for the registration (the build may then carry none of its locked methods), or, under a lock that recorded none, when the analysis names it differently. |
 | `environment` | yes | — | Target env: `dev` / `staging` / `prod` / custom. |
 | `jars` | yes | — | Glob to the JAR (e.g. `target/*.jar`). v0 expects exactly one match. |

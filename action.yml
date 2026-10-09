@@ -16,7 +16,7 @@ inputs:
     description: 'Maestro project UID. Wins over `project` when set — use it if the name may be wrong/forgotten. Provide project OR project-id (or both).'
     required: false
   org-id:
-    description: "The id of the organization to act for (org_...). Needed only when the API key is not scoped to a project and its owner belongs to several organizations."
+    description: "The id of the organization to act for (org_... on hosted SaaS, a UUID on a private-cloud VM). Needed only when the API key is not scoped to a project and its owner belongs to several organizations."
     required: false
   service:
     description: "The name the environment registers this service under, normally the analysis's name for the JAR: its spring.application.name, else the JAR file name without its version (e.g. fund-transfer-service)"
