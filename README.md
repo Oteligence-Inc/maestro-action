@@ -76,7 +76,8 @@ the app image.
 
 1. Exchange the API key for a short-lived JWT (`POST /api/auth/cli/token`).
 2. Resolve the project UID + the env's **locked config** and locked-version UID.
-3–5. Upload the changed JAR (referencing the env's other services by SHA) and confirm.
+3–5. Upload the changed JAR (referencing the env's other services by the artifact the lock recorded for each,
+   or by SHA for a lock entry that recorded none) and confirm.
 6. Submit `MULTI_JAR_ANALYSIS` (re-applies locked rules; refreshes the cross-service
    staleness signatures), then `MULTI_JAR_EXPLORER_BUILD` (generates the extension from
    the locked selection).
@@ -111,14 +112,14 @@ Set `fail-on-warnings: true` to make that a hard failure instead.
 | `Service "X" is not part of "env"'s locked config` | The environment's latest lock registers no service by that name. Set `service` to one of the names the message lists, or add the service in the wizard and lock again. |
 | `The analysis names this JAR "Y", the name its lock entries and build use` | The lock and build know the service as `Y`. Register it as `Y` in the wizard and set `service: Y`. |
 | `matched N files` | v0 expects one JAR; narrow the `jars` glob. |
+| `No uploaded artifact … to reference for <service>.jar` | A JAR the environment's lock recorded is no longer stored, or its stored bytes differ from the lock's SHA-256 ("… with that SHA-256"). Upload that service again in the wizard and re-lock the environment. |
 | `Job … still running after Ns` | Raise `timeout-seconds`, or check the job in Maestro. |
 
 ## Limitations (v0 pilot)
 
 - **One JAR per invocation.** Monorepos: add one step per service.
-- **Backend flags required:** the server must have `maestro.staleness.enabled`
-  (job-processor) and `maestro.batch-dedup.enabled` (file-service) on for the staleness
-  warning + peer-by-SHA references to work.
+- **Backend flag required:** the server must have `maestro.staleness.enabled`
+  (job-processor) on for the staleness warning.
 - Per-service `javaagent.config` enrichment (`agentConfigContextByService`) from the
   analysis preview is **not** forwarded yet — the locked selection drives the build.
 - Deferred to v1: artifact-hash verification, OIDC auth, GitHub Check / Slack surfaces,

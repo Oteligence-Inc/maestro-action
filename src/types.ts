@@ -41,7 +41,7 @@ export interface LockedSpec {
   javaVersion?: string | null;
   otelVersion?: string | null;
   extensionName?: string | null;
-  registeredJars?: Record<string, { sha?: string; versionLabel?: string }>;
+  registeredJars?: Record<string, { sha?: string; versionLabel?: string; artifactUid?: string | null }>;
   expectedArtifactHashes?: Record<string, unknown> | null;
 }
 
