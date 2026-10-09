@@ -30040,7 +30040,13 @@ async function registerJarForEnv(api, inputs, cfg, upload, buildJobId, analysisN
     const [key, shared] = analysisNames;
     const lockedKey = cfg.locked?.registeredJars?.[service]?.serviceKey;
     const pair = shared ? ` (another JAR in this analysis is also named "${shared}")` : '';
-    if (key && lockedKey && key !== lockedKey) {
+    const selection = cfg.locked?.selection ?? [];
+    if (key && shared && selection.some((e) => e.service === shared) && !selection.some((e) => e.service === key)) {
+        core.warning(`The lock files the methods of the JARs named "${shared}" under that shared name, which does not tell ` +
+            `them apart, so this build may carry none of this JAR's ("${key}") locked methods. Re-lock the ` +
+            'environment in the Maestro wizard.');
+    }
+    else if (key && lockedKey && key !== lockedKey) {
         core.warning(`The lock files the "${service}" service's methods under "${lockedKey}", but this analysis keys its JAR ` +
             `"${key}"${pair}, so this build may carry none of its locked methods. Re-lock the environment in the ` +
             'Maestro wizard.');

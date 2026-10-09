@@ -38,8 +38,9 @@ extension bundle and configs on the runner for their image build. All analysis a
 7. `downloadArtifacts`: `/jobs/{id}/download`; extracts the bundle and writes this service's `javaagent.config`,
    chosen by the analysis key, then the `service` input, then a unique letters-only match.
 8. `registerJarForEnv`: `PUT .../envs/{env}/services/{service}/jar` under the `service` input. It warns when the
-   analysis key differs from the `serviceKey` the lock's `registeredJars` recorded for that registration, and, for a
-   lock that recorded none, when the analysis names the JAR differently from the registration.
+   analysis key differs from the `serviceKey` the lock's `registeredJars` recorded for that registration; for a lock
+   that recorded none, when the analysis names the JAR differently from the registration; and when a lock from
+   before per-JAR keys files a shared-name pair's selection under the shared name.
 9. `warnStalePeers`: `.../envs/{env}/staleness`, warning (or failing, with `fail-on-warnings`) for peers this run's
    analysis made stale. `reportDeployRun` posts to `.../deploy-runs` at start and end, best-effort.
 

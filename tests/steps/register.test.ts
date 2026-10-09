@@ -112,3 +112,23 @@ it('is silent when the lock already maps a differently named registration to the
   await registerJarForEnv(client(), inputs, locked, upload, 'build_1', ['orders']);
   expect(core.warning).not.toHaveBeenCalled();
 });
+
+it('warns when a lock from before per-JAR keys files a pair under the shared name', async () => {
+  (core.warning as jest.Mock).mockClear();
+  const pairInputs = { service: 'orders-1.0', environment: 'dev' } as Inputs;
+  const locked = {
+    projectUid: 'proj_1',
+    locked: {
+      registeredJars: { 'orders-1.0': { serviceKey: 'orders@aaaa1111' } },
+      selection: [{ service: 'orders', methodFqn: 'a.Api.place' }],
+    },
+  } as unknown as ResolvedConfig;
+  nock(BASE).put('/api/job-manager/projects/proj_1/envs/dev/services/orders-1.0/jar').twice().reply(200, {});
+  await registerJarForEnv(client(), pairInputs, locked, upload, 'build_1', ['orders@aaaa1111', 'orders']);
+  expect((core.warning as jest.Mock).mock.calls[0][0]).toContain('under that shared name');
+
+  (core.warning as jest.Mock).mockClear();
+  (locked.locked as any).selection = [{ service: 'orders@aaaa1111', methodFqn: 'a.Api.place' }];
+  await registerJarForEnv(client(), pairInputs, locked, upload, 'build_1', ['orders@aaaa1111', 'orders']);
+  expect(core.warning).not.toHaveBeenCalled();
+});
