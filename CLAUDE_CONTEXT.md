@@ -60,7 +60,8 @@ extension bundle and configs on the runner for their image build. All analysis a
 ## Tests
 
 `npm test` runs jest with nock for HTTP and module mocks for `run()` (`tests/index.test.ts`), so the call-site wiring
-is tested as well as each step. `e2e.yml` runs the action with `uses: ./` against a configured host.
+is tested as well as each step. `e2e.yml` runs the action with `uses: ./` nightly against hosted dev: the CicdTest org's `maestro-action-e2e`
+project, whose `dev` lock was made from the committed `fixtures/order-service-1.0.0.jar`.
 
 **Running `dist/index.js` against devstack.** The action requires an https `api-url`, and its uploader and download
 fetches accept only https, while devstack's gateway (`:8082`) and MinIO (`:9000`) speak http.
