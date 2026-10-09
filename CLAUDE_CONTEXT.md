@@ -23,8 +23,8 @@ extension bundle and configs on the runner for their image build. All analysis a
    server's reason.
 2. `resolveLockedConfig`: `GET /api/auth/tenant-projects` to resolve a project name, then
    `GET /api/job-manager/projects/{uid}/envs/{env}/locked` and `.../versions` (newest first, for `lockedVersionUid`).
-   A 404 on `locked` means the environment does not exist or was never locked (job-manager answers both the same way
-   today); a 200 with `data: null` means never locked; an empty or unparseable 200 is reported as an empty response.
+   A 404 on `locked` means the environment does not exist; a 200 with `data: null` means it was never locked; an empty
+   or unparseable 200 is reported as an empty response.
 3. The removed-service guard: once the lock's `registeredJars` is non-empty, a `service` input it does not contain is
    refused before any upload, listing the registered names.
 4. `uploadJar`: one glob match; `POST /api/file/artifact/upload/batch` with this JAR plus the other registered
