@@ -6,7 +6,7 @@ describe('normaliseApiUrl', () => {
     delete process.env.MAESTRO_ALLOW_CUSTOM_API_URL;
   });
 
-  it('accepts the default oteligence host and strips a trailing slash', () => {
+  it('accepts an oteligence host and strips a trailing slash', () => {
     expect(normaliseApiUrl('https://api.oteligence.com/')).toBe('https://api.oteligence.com');
   });
 

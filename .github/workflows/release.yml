@@ -5,7 +5,7 @@ name: Release
 #   2. verifies the tagged commit's dist/ matches source (CI already enforces this on the
 #      branch; this is the release-time backstop — never bundle locally and forget to commit)
 #   3. creates a GitHub Release with auto-generated notes
-#   4. moves the floating major tag (v1.0.0 -> also updates v1) so consumers can pin `@v1`
+#   4. moves the floating major tag (v0.2.0 -> also updates v0) so consumers can pin `@v0`
 #
 # Pre-req: commit a fresh `npm run build` on the branch BEFORE tagging (CI guards this).
 
@@ -26,7 +26,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24' # matches action.yml `runs: using: node24`
           cache: npm
 
       - run: npm ci
