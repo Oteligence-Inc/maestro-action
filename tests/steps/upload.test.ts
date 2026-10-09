@@ -31,14 +31,18 @@ const cfg: ResolvedConfig = {
     goals: [],
     selection: [],
     registeredJars: {
-      'payment-service': { sha: 'oldpaymentsha' }, // the service we're uploading — excluded from refs
-      'order-service': { sha: 'ordersha' }, // peer — referenced by SHA
+      'payment-service': { sha: 'oldpaymentsha', artifactUid: 'art_pay_old' }, // the service we're uploading
+      'order-service': { sha: 'ordersha', artifactUid: 'art_order' }, // peer named by the uid the lock froze
+      'inventory-service': { sha: 'invsha' }, // a lock entry with no uid: referenced by SHA in this project
+      'shipping-service': { artifactUid: 'art_ship' }, // uid with no SHA: still referenced
+      'legacy-service': {}, // neither: nothing to reference
+      'payment-old-name': { sha: 'oldpaymentsha', artifactUid: 'art_pay_old' }, // this service under a leftover name
     },
   },
 };
 const inputs = { service: 'payment-service', jarsGlob } as Inputs;
 
-it('uploads the changed JAR, references peers by SHA, and confirms UPLOADED (mustUpload=true)', async () => {
+it('uploads the changed JAR, names each peer by its locked artifactUid (else its SHA), and confirms UPLOADED', async () => {
   let batchBody: any;
   nock(BASE)
     .post('/api/file/artifact/upload/batch', (b) => {
@@ -67,11 +71,15 @@ it('uploads the changed JAR, references peers by SHA, and confirms UPLOADED (mus
   expect(result.sha).toBe(JAR_SHA);
   expect(result.mustUpload).toBe(true);
   expect(s3.isDone()).toBe(true);
-  // batch request shape: our jar uploads; the order-service peer is referenced by SHA
+  // batch request shape: our jar uploads; each peer is referenced, by uid where the lock froze one
   expect(batchBody.projectId).toBe('proj_1');
   expect(batchBody.files[0]).toMatchObject({ sha256: JAR_SHA, referenceExistingOnly: false });
-  const peer = batchBody.files.find((f: any) => f.referenceExistingOnly === true);
-  expect(peer).toMatchObject({ sha256: 'ordersha', referenceExistingOnly: true });
+  const peers = batchBody.files.filter((f: any) => f.referenceExistingOnly === true);
+  expect(peers).toEqual([
+    { fileName: 'order-service.jar', fileSizeInBytes: 1, sha256: 'ordersha', referenceExistingOnly: true, artifactUid: 'art_order' },
+    { fileName: 'inventory-service.jar', fileSizeInBytes: 1, sha256: 'invsha', referenceExistingOnly: true },
+    { fileName: 'shipping-service.jar', fileSizeInBytes: 1, referenceExistingOnly: true, artifactUid: 'art_ship' },
+  ]);
   // status confirm uses the changed jar's artifact + checksum
   expect(statusBody).toMatchObject({ artifactId: 'art_0', operation: 'UPLOAD', status: 'UPLOADED', checksum: JAR_SHA });
 });
@@ -86,4 +94,16 @@ it('skips the byte upload on a SHA cache hit (mustUpload=false)', async () => {
   expect(result.mustUpload).toBe(false);
   expect(result.artifactGroupUid).toBe('grp_2');
   expect(result.sha).toBe(JAR_SHA);
+});
+
+it('fails with file-service\'s reason when a peer the lock named is no longer stored', async () => {
+  nock(BASE)
+    .post('/api/file/artifact/upload/batch', (b) =>
+      b.files.some((f: any) => f.artifactUid === 'art_order' && f.referenceExistingOnly === true),
+    )
+    .reply(404, { message: 'No uploaded artifact art_order to reference for order-service.jar' });
+
+  await expect(uploadJar(client(), inputs, cfg)).rejects.toThrow(
+    /HTTP 404.*No uploaded artifact art_order to reference for order-service\.jar/,
+  );
 });

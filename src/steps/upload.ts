@@ -8,11 +8,13 @@ import { UserError } from '../util/errors';
 
 /**
  * [3-5] Resolve the jars glob, then init a batch upload that uploads THIS service's
- * (changed) JAR bytes and references the env's other registered services by their
- * recorded SHA (referenceExistingOnly) so the server can build the env-wide
- * cross-service graph from one upload. Then PUT the bytes (if mustUpload) and confirm.
+ * (changed) JAR bytes and references the env's other registered services (referenceExistingOnly)
+ * so the server can build the env-wide cross-service graph from one upload. Then PUT the bytes
+ * (if mustUpload) and confirm.
  *
- * Depends on the file-service `maestro.batch-dedup.enabled` flag for the SHA references.
+ * A peer is named by the artifactUid the lock froze, which file-service resolves in any of the
+ * org's projects and refuses with a 404 when it is gone. A lock entry with no uid is matched by
+ * its SHA in this project and skipped on a miss.
  * v0: exactly one JAR per invocation (monorepo multi-JAR deferred — Build Spec §12).
  */
 export async function uploadJar(api: MaestroApi, inputs: Inputs, cfg: ResolvedConfig): Promise<UploadResult> {
@@ -30,13 +32,26 @@ export async function uploadJar(api: MaestroApi, inputs: Inputs, cfg: ResolvedCo
   core.info(`JAR ${fileName} sha256=${sha}`);
 
   // changed jar (upload) + peers from the locked config (reference by SHA)
-  const files: Array<{ fileName: string; fileSizeInBytes: number; sha256: string; referenceExistingOnly: boolean }> = [
-    { fileName, fileSizeInBytes: sizeBytes, sha256: sha, referenceExistingOnly: false },
-  ];
+  const files: Array<{
+    fileName: string;
+    fileSizeInBytes: number;
+    sha256?: string;
+    referenceExistingOnly: boolean;
+    artifactUid?: string;
+  }> = [{ fileName, fileSizeInBytes: sizeBytes, sha256: sha, referenceExistingOnly: false }];
   const registered = cfg.locked.registeredJars ?? {};
+  const own = registered[inputs.service];
   for (const [peerService, info] of Object.entries(registered)) {
-    if (peerService === inputs.service || !info?.sha) continue;
-    files.push({ fileName: `${peerService}.jar`, fileSizeInBytes: 1, sha256: info.sha, referenceExistingOnly: true });
+    if (peerService === inputs.service || (!info?.sha && !info?.artifactUid)) continue;
+    // A leftover registration of this service under another name is its previous JAR, not a peer.
+    if (own?.artifactUid && info.artifactUid === own.artifactUid) continue;
+    files.push({
+      fileName: `${peerService}.jar`,
+      fileSizeInBytes: 1,
+      ...(info.sha ? { sha256: info.sha } : {}),
+      referenceExistingOnly: true,
+      ...(info.artifactUid ? { artifactUid: info.artifactUid } : {}),
+    });
   }
 
   const batchRes = await api.post<BatchUploadResponse>('/api/file/artifact/upload/batch', {

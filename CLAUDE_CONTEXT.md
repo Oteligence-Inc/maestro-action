@@ -25,7 +25,9 @@ extension bundle and configs on the runner for their image build. All analysis a
 3. The removed-service guard: once the lock's `registeredJars` is non-empty, a `service` input it does not contain is
    refused before any upload, listing the registered names.
 4. `uploadJar`: one glob match; `POST /api/file/artifact/upload/batch` with this JAR plus the other registered
-   services by SHA; a signed `PUT` of the bytes when the server asks for them; `PUT /api/file/artifact/status`.
+   services, each named by the `artifactUid` its lock entry froze (resolved in any of the org's projects, a 404 when
+   gone) or, for an entry with none, by SHA in this project (skipped on a miss); a signed `PUT` of the bytes when the
+   server asks for them; `PUT /api/file/artifact/status`.
 5. `submitAnalysis` and `submitBuild`: `POST /api/job-manager/jobs` for `MULTI_JAR_ANALYSIS`, then
    `MULTI_JAR_EXPLORER_BUILD` with the profile `buildProfileFromLocked` derives from the lock; `pollJob` on
    `/api/job-manager/jobs/{id}/status` after each.
