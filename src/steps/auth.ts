@@ -5,12 +5,20 @@ import { UserError } from '../util/errors';
 
 /**
  * [1] Exchange the long-lived API key for a short-lived JWT.
- * POST /api/auth/cli/token with `Authorization: Bearer ak_<api-key>` → { token, ... }.
- * The JWT is then used as the Bearer for every later call.
+ * POST /api/auth/cli/token with `Authorization: Bearer ak_<api-key>` → { token, ... }, plus `orgId` when the
+ * `org-id` input names the organization. The JWT is then used as the Bearer for every later call.
  */
 export async function auth(api: MaestroApi, inputs: Inputs): Promise<Session> {
   api.setToken(inputs.apiKey); // the cli/token endpoint authenticates the ak_ key as Bearer
-  const res = await api.post<{ token?: string }>('/api/auth/cli/token', {});
+  const query = inputs.orgId ? `?orgId=${encodeURIComponent(inputs.orgId)}` : '';
+  const res = await api.post<{ token?: string; message?: string }>(`/api/auth/cli/token${query}`, {});
+  const refusal = typeof res.body?.message === 'string' ? res.body.message : '';
+  if (res.statusCode === 400 && refusal.includes('orgId')) {
+    throw new UserError(`${refusal}. Set the "org-id" input to the id of the organization to act for.`);
+  }
+  if (res.statusCode === 403 && refusal) {
+    throw new UserError(`Maestro refused this API key: ${refusal}.`);
+  }
   if (res.statusCode === 401 || res.statusCode === 403) {
     throw new UserError(
       'Maestro API key is invalid or has been revoked. Create a new key in the project settings and update the MAESTRO_API_KEY GitHub Secret.',

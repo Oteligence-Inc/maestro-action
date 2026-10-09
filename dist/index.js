@@ -29490,7 +29490,7 @@ async function run() {
         await (0, poll_1.pollJob)(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
         const analysisNames = await (0, analysisService_1.analysisServiceNames)(api, analysisJobId, upload.artifactUid);
         const paths = await (0, download_1.downloadArtifacts)(api, buildJobId, inputs.service, analysisNames); // [8]
-        await (0, register_1.registerJarForEnv)(api, inputs, cfg, upload, buildJobId, analysisNames[analysisNames.length - 1]); // [9]
+        await (0, register_1.registerJarForEnv)(api, inputs, cfg, upload, buildJobId, analysisNames); // [9]
         core.setOutput('extension-dir', paths.extensionDir);
         core.setOutput('config-path', paths.configPath);
         core.setOutput('collector-config-path', paths.collectorConfigPath);
@@ -29607,6 +29607,7 @@ function parseInputs() {
     if (!project.trim() && !projectId.trim()) {
         throw new errors_1.UserError('Provide either "project" (name) or "project-id" (UID).');
     }
+    const orgId = core.getInput('org-id').trim();
     const service = core.getInput('service', { required: true });
     const environment = core.getInput('environment', { required: true });
     const jarsGlob = core.getInput('jars', { required: true });
@@ -29620,7 +29621,7 @@ function parseInputs() {
     const skipGenerateOnInactive = (core.getInput('skip-generate-on-inactive') || 'false').toLowerCase() === 'true';
     const skipOnRemovedService = (core.getInput('skip-on-removed-service') || 'false').toLowerCase() === 'true';
     return {
-        apiKey, project, projectId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
+        apiKey, project, projectId, orgId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
         failOnWarnings, skipGenerateOnInactive, skipOnRemovedService,
     };
 }
@@ -29762,12 +29763,20 @@ const api_1 = __nccwpck_require__(6879);
 const errors_1 = __nccwpck_require__(17);
 /**
  * [1] Exchange the long-lived API key for a short-lived JWT.
- * POST /api/auth/cli/token with `Authorization: Bearer ak_<api-key>` → { token, ... }.
- * The JWT is then used as the Bearer for every later call.
+ * POST /api/auth/cli/token with `Authorization: Bearer ak_<api-key>` → { token, ... }, plus `orgId` when the
+ * `org-id` input names the organization. The JWT is then used as the Bearer for every later call.
  */
 async function auth(api, inputs) {
     api.setToken(inputs.apiKey); // the cli/token endpoint authenticates the ak_ key as Bearer
-    const res = await api.post('/api/auth/cli/token', {});
+    const query = inputs.orgId ? `?orgId=${encodeURIComponent(inputs.orgId)}` : '';
+    const res = await api.post(`/api/auth/cli/token${query}`, {});
+    const refusal = typeof res.body?.message === 'string' ? res.body.message : '';
+    if (res.statusCode === 400 && refusal.includes('orgId')) {
+        throw new errors_1.UserError(`${refusal}. Set the "org-id" input to the id of the organization to act for.`);
+    }
+    if (res.statusCode === 403 && refusal) {
+        throw new errors_1.UserError(`Maestro refused this API key: ${refusal}.`);
+    }
     if (res.statusCode === 401 || res.statusCode === 403) {
         throw new errors_1.UserError('Maestro API key is invalid or has been revoked. Create a new key in the project settings and update the MAESTRO_API_KEY GitHub Secret.');
     }
@@ -30020,15 +30029,29 @@ const api_1 = __nccwpck_require__(6879);
 const resolveConfig_1 = __nccwpck_require__(749);
 /**
  * [9] Register the built JAR's SHA for this (env, service). Silent per-env pointer update; the locked config
- * itself is unchanged. The registration keeps the `service` name the environment knows the service by, and a
- * warning reports the analysis's name for the JAR when it differs, since the lock and build key on that one.
+ * itself is unchanged. The registration keeps the `service` name the environment knows the service by.
+ * `analysisNames` is the analysis's key for the JAR first, then its display name when that differs (uploads that
+ * share a name are keyed `name@<8 hex>`). The lock's selection and the build key a service by that key, so a
+ * warning fires when it differs from the key the lock recorded for this registration, or, for a lock that
+ * recorded none, from the registration's own name.
  */
-async function registerJarForEnv(api, inputs, cfg, upload, buildJobId, analysisName) {
+async function registerJarForEnv(api, inputs, cfg, upload, buildJobId, analysisNames = []) {
     const service = inputs.service;
-    if (analysisName && analysisName !== service) {
-        core.warning(`The analysis names this JAR "${analysisName}", the name its lock entries and build use, but it is ` +
-            `registered as "${service}". Register the service as "${analysisName}" in the Maestro wizard and set ` +
-            'the "service" input to match.');
+    const [key, shared] = analysisNames;
+    const lockedKey = cfg.locked?.registeredJars?.[service]?.serviceKey;
+    const pair = shared ? ` (another JAR in this analysis is also named "${shared}")` : '';
+    if (key && lockedKey && key !== lockedKey) {
+        core.warning(`The lock files the "${service}" service's methods under "${lockedKey}", but this analysis keys its JAR ` +
+            `"${key}"${pair}, so this build may carry none of its locked methods. Re-lock the environment in the ` +
+            'Maestro wizard.');
+    }
+    else if (key && !lockedKey && key !== service) {
+        core.warning(shared
+            ? `The analysis keys this JAR "${key}"${pair}, and the lock records no key for the "${service}" ` +
+                'registration. Re-lock the environment in the Maestro wizard so the lock records which JAR it holds.'
+            : `The analysis names this JAR "${key}", the name its lock entries and build use, but it is ` +
+                `registered as "${service}". Register the service as "${key}" in the Maestro wizard and set ` +
+                'the "service" input to match.');
     }
     const path = `${(0, resolveConfig_1.envPath)(cfg.projectUid, inputs.environment)}/services/${encodeURIComponent(service)}/jar`;
     const res = await api.put(path, {

@@ -5,6 +5,7 @@ export interface Inputs {
   apiKey: string;
   project: string; // human project name (may be "" when projectId is supplied instead)
   projectId: string; // project UID; wins over `project` when set. Resolves without a name lookup.
+  orgId: string; // the organization a key with no project scope acts for; "" lets the key decide
   service: string;
   environment: string;
   jarsGlob: string;
@@ -41,7 +42,11 @@ export interface LockedSpec {
   javaVersion?: string | null;
   otelVersion?: string | null;
   extensionName?: string | null;
-  registeredJars?: Record<string, { sha?: string; versionLabel?: string; artifactUid?: string | null }>;
+  /** The lock's snapshot per registration; `serviceKey` is the analysis key its selection entries use. */
+  registeredJars?: Record<
+    string,
+    { sha?: string; versionLabel?: string; artifactUid?: string | null; serviceKey?: string; analysisService?: string }
+  >;
   expectedArtifactHashes?: Record<string, unknown> | null;
 }
 

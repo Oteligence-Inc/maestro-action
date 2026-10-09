@@ -38,17 +38,77 @@ it('fails with the server message when the environment is gone (job-manager answ
 });
 
 it("keeps the service input's registration and warns with the analysis's name when they differ", async () => {
+  (core.warning as jest.Mock).mockClear();
   const scope = nock(BASE).put(jarPath).reply(200, {});
-  await registerJarForEnv(client(), inputs, cfg, upload, 'build_1', 'orders');
+  await registerJarForEnv(client(), inputs, cfg, upload, 'build_1', ['orders']);
   expect(scope.isDone()).toBe(true);
   expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('Register the service as "orders"'));
 });
 
+it('warns that the build may lack its locked methods when the analysis key is not the one the lock recorded', async () => {
+  (core.warning as jest.Mock).mockClear();
+  const pairInputs = { service: 'orders-1.0', environment: 'dev' } as Inputs;
+  const locked = {
+    projectUid: 'proj_1',
+    locked: { registeredJars: { 'orders-1.0': { serviceKey: 'orders@aaaa1111' } } },
+  } as unknown as ResolvedConfig;
+  nock(BASE).put('/api/job-manager/projects/proj_1/envs/dev/services/orders-1.0/jar').reply(200, {});
+  await registerJarForEnv(client(), pairInputs, locked, upload, 'build_1', ['orders@cccc3333', 'orders']);
+  const message = (core.warning as jest.Mock).mock.calls[0][0] as string;
+  expect(message).toContain('under "orders@aaaa1111"');
+  expect(message).toContain('keys its JAR "orders@cccc3333"');
+  expect(message).toContain('also named "orders"');
+  expect(message).toContain('Re-lock');
+});
+
+it('is silent for a pair member whose analysis key is the one the lock recorded for its registration', async () => {
+  (core.warning as jest.Mock).mockClear();
+  const pairInputs = { service: 'orders-1.0', environment: 'dev' } as Inputs;
+  const locked = {
+    projectUid: 'proj_1',
+    locked: { registeredJars: { 'orders-1.0': { serviceKey: 'orders@aaaa1111' } } },
+  } as unknown as ResolvedConfig;
+  nock(BASE).put('/api/job-manager/projects/proj_1/envs/dev/services/orders-1.0/jar').reply(200, {});
+  await registerJarForEnv(client(), pairInputs, locked, upload, 'build_1', ['orders@aaaa1111', 'orders']);
+  expect(core.warning).not.toHaveBeenCalled();
+});
+
+it('asks for a re-lock when a pair member is under a lock that recorded no key', async () => {
+  (core.warning as jest.Mock).mockClear();
+  const pairInputs = { service: 'orders-1.0', environment: 'dev' } as Inputs;
+  nock(BASE).put('/api/job-manager/projects/proj_1/envs/dev/services/orders-1.0/jar').reply(200, {});
+  await registerJarForEnv(client(), pairInputs, cfg, upload, 'build_1', ['orders@aaaa1111', 'orders']);
+  const message = (core.warning as jest.Mock).mock.calls[0][0] as string;
+  expect(message).toContain('records no key for the "orders-1.0" registration');
+  expect(message).not.toContain('set the "service" input');
+});
+
 it('warns about nothing when the analysis agrees or gave no name', async () => {
   (core.warning as jest.Mock).mockClear();
-  nock(BASE).put(jarPath).twice().reply(200, {});
-  await registerJarForEnv(client(), inputs, cfg, upload, 'build_1', 'order-service');
-  await registerJarForEnv(client(), inputs, cfg, upload, 'build_1', undefined);
+  nock(BASE).put(jarPath).times(3).reply(200, {});
+  await registerJarForEnv(client(), inputs, cfg, upload, 'build_1', ['order-service']);
+  await registerJarForEnv(client(), inputs, cfg, upload, 'build_1', []);
+  await registerJarForEnv(client(), inputs, cfg, upload, 'build_1');
   expect(nock.pendingMocks()).toEqual([]);
+  expect(core.warning).not.toHaveBeenCalled();
+});
+
+it('registers a pair member under its key once the service input names it', async () => {
+  (core.warning as jest.Mock).mockClear();
+  const keyed = { service: 'orders@aaaa1111', environment: 'dev' } as Inputs;
+  const scope = nock(BASE).put('/api/job-manager/projects/proj_1/envs/dev/services/orders%40aaaa1111/jar').reply(200, {});
+  await registerJarForEnv(client(), keyed, cfg, upload, 'build_1', ['orders@aaaa1111', 'orders']);
+  expect(scope.isDone()).toBe(true);
+  expect(core.warning).not.toHaveBeenCalled();
+});
+
+it('is silent when the lock already maps a differently named registration to the analysis name', async () => {
+  (core.warning as jest.Mock).mockClear();
+  const locked = {
+    projectUid: 'proj_1',
+    locked: { registeredJars: { 'order-service': { serviceKey: 'orders' } } },
+  } as unknown as ResolvedConfig;
+  nock(BASE).put(jarPath).reply(200, {});
+  await registerJarForEnv(client(), inputs, locked, upload, 'build_1', ['orders']);
   expect(core.warning).not.toHaveBeenCalled();
 });
