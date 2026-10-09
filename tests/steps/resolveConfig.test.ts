@@ -47,18 +47,18 @@ it('passes a proj_ uid straight through without a tenant-projects lookup', async
   expect(lockedScope.isDone()).toBe(true);
 });
 
-it('maps a 404 on locked to "not found, or not locked yet", naming both causes', async () => {
+it('maps a 404 on locked to "not found", since an unlocked environment answers 200 with null data', async () => {
   nock(BASE)
     .get('/api/auth/tenant-projects')
     .query(true)
     .reply(200, { content: [{ uid: 'proj_1', projectName: 'banking-app' }], page: { number: 0, size: 100, totalElements: 1 } });
   nock(BASE)
     .get('/api/job-manager/projects/proj_1/envs/dev/locked')
-    .reply(404, { message: "Environment 'dev' has no locked version yet" });
+    .reply(404, { message: 'Environment not found: dev' });
 
-  await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(
-    /"dev" in project "banking-app" was not found, or has not been locked yet/,
-  );
+  const err = await resolveLockedConfig(client(), inputs).catch((e: Error) => e);
+  expect(String(err)).toMatch(/"dev" in project "banking-app" was not found\./);
+  expect(String(err)).not.toMatch(/locked/);
 });
 
 it('the 404 message tells the user to check the environment name', async () => {

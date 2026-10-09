@@ -108,7 +108,7 @@ Set `fail-on-warnings: true` to make that a hard failure instead.
 | Message | Cause / fix |
 |---|---|
 | `API key is invalid or has been revoked` | Create a new key in Maestro and update the `MAESTRO_API_KEY` secret. |
-| `Env "X" … was not found, or has not been locked yet` | Check that `environment` names an environment in the project, then complete Step 5 (Save & Lock) in the wizard before running CI. |
+| `Env "X" … was not found` | Check that `environment` names an environment in the project. |
 | `Env "X" … has not been locked yet` | Complete Step 5 (Save & Lock) in the wizard before running CI. |
 | `Input required and not supplied: api-url` | Add `api-url` to the step's `with:`. It has no default. |
 | `Project "X" not found` | Use the exact project name, or its `proj_` UID. |
