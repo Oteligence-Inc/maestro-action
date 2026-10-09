@@ -20,16 +20,21 @@ export async function resolveLockedConfig(api: MaestroApi, inputs: Inputs): Prom
   const projectUid = await resolveProjectUid(api, inputs.project, inputs.projectId);
 
   const projectLabel = inputs.project?.trim() || `id ${projectUid}`;
-  const lockedRes = await api.get<{ data: LockedSpec }>(`${envPath(projectUid, inputs.environment)}/locked`);
+  const lockedRes = await api.get<{ data: LockedSpec | null }>(`${envPath(projectUid, inputs.environment)}/locked`);
+  const notLockedYet =
+    `Env "${inputs.environment}" in project "${projectLabel}" has not been locked yet. ` +
+    'Open Maestro and complete Step 5 (Save & Lock) before running CI.';
+  // job-manager answers "not locked yet" as 200 with null data; a 404 is an environment it cannot find,
+  // which an older job-manager also returned for "not locked yet".
   if (lockedRes.statusCode === 404) {
     throw new UserError(
-      `Env "${inputs.environment}" in project "${projectLabel}" has not been locked yet. ` +
-        'Open Maestro and complete Step 5 (Save & Lock) before running CI.',
+      `Env "${inputs.environment}" in project "${projectLabel}" was not found, or has not been locked yet. ` +
+        'Check the environment name, and complete Step 5 (Save & Lock) in Maestro before running CI.',
     );
   }
   expectOk(lockedRes, 'locked');
   const locked = lockedRes.body?.data;
-  if (!locked) throw new UserError('Locked-config response was empty.');
+  if (!locked) throw new UserError(notLockedYet);
 
   const versionsRes = await api.get<{ data: LockedVersion[] }>(`${envPath(projectUid, inputs.environment)}/versions`);
   expectOk(versionsRes, 'versions');

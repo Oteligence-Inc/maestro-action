@@ -29611,7 +29611,7 @@ function parseInputs() {
     const service = core.getInput('service', { required: true });
     const environment = core.getInput('environment', { required: true });
     const jarsGlob = core.getInput('jars', { required: true });
-    const apiUrl = normaliseApiUrl(core.getInput('api-url') || 'https://api.oteligence.com');
+    const apiUrl = normaliseApiUrl(core.getInput('api-url', { required: true }));
     const timeoutRaw = core.getInput('timeout-seconds') || '300';
     const timeoutSeconds = Number.parseInt(timeoutRaw, 10);
     if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
@@ -30256,14 +30256,18 @@ async function resolveLockedConfig(api, inputs) {
     const projectUid = await resolveProjectUid(api, inputs.project, inputs.projectId);
     const projectLabel = inputs.project?.trim() || `id ${projectUid}`;
     const lockedRes = await api.get(`${envPath(projectUid, inputs.environment)}/locked`);
+    const notLockedYet = `Env "${inputs.environment}" in project "${projectLabel}" has not been locked yet. ` +
+        'Open Maestro and complete Step 5 (Save & Lock) before running CI.';
+    // job-manager answers "not locked yet" as 200 with null data; a 404 is an environment it cannot find,
+    // which an older job-manager also returned for "not locked yet".
     if (lockedRes.statusCode === 404) {
-        throw new errors_1.UserError(`Env "${inputs.environment}" in project "${projectLabel}" has not been locked yet. ` +
-            'Open Maestro and complete Step 5 (Save & Lock) before running CI.');
+        throw new errors_1.UserError(`Env "${inputs.environment}" in project "${projectLabel}" was not found, or has not been locked yet. ` +
+            'Check the environment name, and complete Step 5 (Save & Lock) in Maestro before running CI.');
     }
     (0, api_1.expectOk)(lockedRes, 'locked');
     const locked = lockedRes.body?.data;
     if (!locked)
-        throw new errors_1.UserError('Locked-config response was empty.');
+        throw new errors_1.UserError(notLockedYet);
     const versionsRes = await api.get(`${envPath(projectUid, inputs.environment)}/versions`);
     (0, api_1.expectOk)(versionsRes, 'versions');
     const versions = versionsRes.body?.data ?? [];

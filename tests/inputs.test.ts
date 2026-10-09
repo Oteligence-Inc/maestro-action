@@ -43,9 +43,19 @@ describe('parseInputs — project / project-id', () => {
     process.env['INPUT_SERVICE'] = 'svc';
     process.env['INPUT_ENVIRONMENT'] = 'dev';
     process.env['INPUT_JARS'] = 'target/x.jar';
+    process.env['INPUT_API-URL'] = 'https://prod.api.oteligence.com';
     delete process.env['INPUT_PROJECT'];
     delete process.env['INPUT_PROJECT-ID'];
   }
+
+  it('requires api-url: there is no default API', () => {
+    seedRequired();
+    process.env['INPUT_PROJECT-ID'] = 'proj_1';
+    delete process.env['INPUT_API-URL'];
+    expect(() => parseInputs()).toThrow(/api-url/);
+    process.env['INPUT_API-URL'] = 'https://develop.api.oteligence.com/';
+    expect(parseInputs().apiUrl).toBe('https://develop.api.oteligence.com');
+  });
 
   it('throws when neither project nor project-id is provided', () => {
     seedRequired();
@@ -109,6 +119,7 @@ describe('parseInputs — org-id', () => {
     process.env['INPUT_SERVICE'] = 'svc';
     process.env['INPUT_ENVIRONMENT'] = 'dev';
     process.env['INPUT_JARS'] = 'target/x.jar';
+    process.env['INPUT_API-URL'] = 'https://prod.api.oteligence.com';
     process.env['INPUT_ORG-ID'] = '  org_ci ';
     expect(parseInputs().orgId).toBe('org_ci');
     delete process.env['INPUT_ORG-ID'];

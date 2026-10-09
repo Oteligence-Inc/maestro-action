@@ -8,9 +8,9 @@ extension bundle and configs on the runner for their image build. All analysis a
 
 | Path | Purpose |
 |---|---|
-| `action.yml` | Inputs, outputs, `runs: using: 'node20'`, entry `dist/index.js`. |
+| `action.yml` | Inputs, outputs, `runs: using: 'node24'`, entry `dist/index.js`. |
 | `src/index.ts` | `run()`: the step order below, the removed-service guard, the two opt-in degradations (`skip-on-removed-service`, `skip-generate-on-inactive`), and the deploy-run report at start and end. |
-| `src/inputs.ts` | `parseInputs`: reads the inputs, requires `project` or `project-id`, enforces an `https://` `api-url` on an `*.oteligence.com` host unless `MAESTRO_ALLOW_CUSTOM_API_URL=1`. |
+| `src/inputs.ts` | `parseInputs`: reads the inputs, requires `project` or `project-id` and `api-url` (there is no default API), and enforces an `https://` `api-url` on an `*.oteligence.com` host unless `MAESTRO_ALLOW_CUSTOM_API_URL=1`. |
 | `src/api.ts` | `MaestroApi` over `@actions/http-client`: bearer auth, retry on transient failures (`util/retry.ts`), signed-URL reads and writes without the auth header, `expectOk` mapping a 402 `subscription_inactive` to `SubscriptionInactiveError`. |
 | `src/steps/` | One module per step, each with its own suite under `tests/steps/`. |
 | `src/util/errors.ts` | The only messages that reach the log. `formatError` never echoes a response body or stack. |

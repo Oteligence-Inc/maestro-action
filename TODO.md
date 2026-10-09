@@ -28,7 +28,7 @@ not optional:** unscoped, that command rewrites every register it finds.
 its *canonical* scenario passes and the fix's trigger is confirmed to be produced; otherwise rewrite
 it as the narrowed residual, keeping its number. Never cite a number from code or a code comment.
 
-Cross-repo items (the required `api-url` input, the Node 24 runtime and the pin bump in the platform's
-`maestro-deploy.yml` copies) live in `platform-overview/TODO.md`.
+Cross-repo items (the `v0` tag move and the pin bump in the platform's `maestro-deploy.yml` copies) live
+in `platform-overview/TODO.md`.
 
 ---
