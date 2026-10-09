@@ -47,14 +47,36 @@ it('passes a proj_ uid straight through without a tenant-projects lookup', async
   expect(lockedScope.isDone()).toBe(true);
 });
 
-it('maps a 404 on locked to a "not locked yet" UserError', async () => {
+it('maps a 404 on locked to "not found, or not locked yet", naming both causes', async () => {
   nock(BASE)
     .get('/api/auth/tenant-projects')
     .query(true)
     .reply(200, { content: [{ uid: 'proj_1', projectName: 'banking-app' }], page: { number: 0, size: 100, totalElements: 1 } });
-  nock(BASE).get('/api/job-manager/projects/proj_1/envs/dev/locked').reply(404, { message: 'no locked version yet' });
+  nock(BASE)
+    .get('/api/job-manager/projects/proj_1/envs/dev/locked')
+    .reply(404, { message: "Environment 'dev' has no locked version yet" });
 
-  await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/has not been locked yet/);
+  await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(
+    /"dev" in project "banking-app" was not found, or has not been locked yet/,
+  );
+});
+
+it('the 404 message tells the user to check the environment name', async () => {
+  nock(BASE)
+    .get('/api/auth/tenant-projects')
+    .query(true)
+    .reply(200, { content: [{ uid: 'proj_1', projectName: 'banking-app' }] });
+  nock(BASE).get('/api/job-manager/projects/proj_1/envs/dev/locked').reply(404, {});
+  await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/Check the environment name/);
+});
+
+it('reads an empty 200 on locked as an empty response, not as "not locked yet"', async () => {
+  nock(BASE)
+    .get('/api/auth/tenant-projects')
+    .query(true)
+    .reply(200, { content: [{ uid: 'proj_1', projectName: 'banking-app' }] });
+  nock(BASE).get('/api/job-manager/projects/proj_1/envs/dev/locked').reply(200, '');
+  await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/^Locked-config response was empty\.$/);
 });
 
 it('tolerates a data-wrapped tenant-projects envelope if a gateway adds one', async () => {
@@ -125,4 +147,17 @@ it('throws a clear error when project-id is not in the tenant (validated up fron
   await expect(
     resolveLockedConfig(client(), { projectId: 'does-not-exist', environment: 'dev' } as Inputs),
   ).rejects.toThrow(/project-id "does-not-exist" was not found/);
+});
+
+it('reads a 200 with null data on locked as "not locked yet", not as an empty response', async () => {
+  nock(BASE)
+    .get('/api/auth/tenant-projects')
+    .query(true)
+    .reply(200, { content: [{ uid: 'proj_1', projectName: 'banking-app' }] });
+  nock(BASE)
+    .get('/api/job-manager/projects/proj_1/envs/dev/locked')
+    .reply(200, { status: 'OK', data: null });
+  await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(
+    /"dev" in project "banking-app" has not been locked yet/,
+  );
 });

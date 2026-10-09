@@ -24,7 +24,7 @@ export function parseInputs(): Inputs {
   const environment = core.getInput('environment', { required: true });
   const jarsGlob = core.getInput('jars', { required: true });
 
-  const apiUrl = normaliseApiUrl(core.getInput('api-url') || 'https://api.oteligence.com');
+  const apiUrl = normaliseApiUrl(core.getInput('api-url', { required: true }));
 
   const timeoutRaw = core.getInput('timeout-seconds') || '300';
   const timeoutSeconds = Number.parseInt(timeoutRaw, 10);

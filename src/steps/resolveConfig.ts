@@ -20,14 +20,22 @@ export async function resolveLockedConfig(api: MaestroApi, inputs: Inputs): Prom
   const projectUid = await resolveProjectUid(api, inputs.project, inputs.projectId);
 
   const projectLabel = inputs.project?.trim() || `id ${projectUid}`;
-  const lockedRes = await api.get<{ data: LockedSpec }>(`${envPath(projectUid, inputs.environment)}/locked`);
+  const lockedRes = await api.get<{ data: LockedSpec | null }>(`${envPath(projectUid, inputs.environment)}/locked`);
+  // job-manager answers 404 both for an environment it cannot find and for one never locked; a 200 with null
+  // data is the answer it is moving to for the second.
   if (lockedRes.statusCode === 404) {
+    throw new UserError(
+      `Env "${inputs.environment}" in project "${projectLabel}" was not found, or has not been locked yet. ` +
+        'Check the environment name, and complete Step 5 (Save & Lock) in Maestro before running CI.',
+    );
+  }
+  expectOk(lockedRes, 'locked');
+  if (lockedRes.body?.data === null) {
     throw new UserError(
       `Env "${inputs.environment}" in project "${projectLabel}" has not been locked yet. ` +
         'Open Maestro and complete Step 5 (Save & Lock) before running CI.',
     );
   }
-  expectOk(lockedRes, 'locked');
   const locked = lockedRes.body?.data;
   if (!locked) throw new UserError('Locked-config response was empty.');
 

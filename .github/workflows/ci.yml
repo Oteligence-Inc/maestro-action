@@ -20,7 +20,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20' # matches action.yml `runs: using: node20`
+          node-version: '24' # matches action.yml `runs: using: node24`
           cache: npm
 
       - run: npm ci

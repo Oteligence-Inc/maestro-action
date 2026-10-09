@@ -28,9 +28,8 @@ inputs:
     description: 'Glob path to the service JAR (e.g. target/*.jar). v0 expects exactly one match.'
     required: true
   api-url:
-    description: 'Override Maestro API base URL (advanced — for testing). Must be https://'
-    required: false
-    default: 'https://api.oteligence.com'
+    description: "The Maestro API this run talks to: https://prod.api.oteligence.com for hosted Maestro, your platform's own address for a private-cloud install. Must be https://"
+    required: true
   timeout-seconds:
     description: 'Max wait for each Maestro job to complete'
     required: false
@@ -70,5 +69,5 @@ outputs:
     description: 'Maestro build job ID — for audit / log lookup'
 
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'dist/index.js'

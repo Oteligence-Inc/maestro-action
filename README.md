@@ -30,9 +30,10 @@ jobs:
       - run: mvn -B package -DskipTests
 
       - id: maestro
-        uses: Oteligence-Inc/maestro-action@v1
+        uses: Oteligence-Inc/maestro-action@v0
         with:
           api-key: ${{ secrets.MAESTRO_API_KEY }}
+          api-url: 'https://prod.api.oteligence.com'  # hosted Maestro; a private-cloud install uses its own
           project: 'banking-app'                # same across all service repos
           service: 'fund-transfer-service'      # this service's name in Maestro
           environment: ${{ github.ref == 'refs/heads/main' && 'prod' || (github.ref == 'refs/heads/staging' && 'staging' || 'dev') }}
@@ -58,7 +59,7 @@ the app image.
 | `service` | yes | — | The name the environment registers this service under: the analysis's name for the JAR (its `spring.application.name`, else the JAR's file name without its version), or, for one of two JARs that share that name, the file-derived name the wizard registered it under. A run whose input the environment's latest lock does not register fails and lists the names it does. A run warns when the analysis keys the JAR differently from the key the lock recorded for the registration (the build may then carry none of its locked methods), or, under a lock that recorded none, when the analysis names it differently. |
 | `environment` | yes | — | Target env: `dev` / `staging` / `prod` / custom. |
 | `jars` | yes | — | Glob to the JAR (e.g. `target/*.jar`). v0 expects exactly one match. |
-| `api-url` | no | `https://api.oteligence.com` | Override base URL. Must be `https://` and an `*.oteligence.com` host unless `MAESTRO_ALLOW_CUSTOM_API_URL=1`. |
+| `api-url` | yes | | The Maestro API this run talks to: `https://prod.api.oteligence.com` for hosted Maestro, or your private-cloud install's address. It must be `https://` in every case; a private-cloud install serves plain HTTP out of the box, so put a TLS terminator in front of it. A host outside `*.oteligence.com` also needs `MAESTRO_ALLOW_CUSTOM_API_URL=1` in the step's environment. |
 | `timeout-seconds` | no | `300` | Max wait for each Maestro job. |
 | `fail-on-warnings` | no | `false` | Fail the step if this run made peer services stale. |
 
@@ -107,7 +108,9 @@ Set `fail-on-warnings: true` to make that a hard failure instead.
 | Message | Cause / fix |
 |---|---|
 | `API key is invalid or has been revoked` | Create a new key in Maestro and update the `MAESTRO_API_KEY` secret. |
+| `Env "X" … was not found, or has not been locked yet` | Check that `environment` names an environment in the project, then complete Step 5 (Save & Lock) in the wizard before running CI. |
 | `Env "X" … has not been locked yet` | Complete Step 5 (Save & Lock) in the wizard before running CI. |
+| `Input required and not supplied: api-url` | Add `api-url` to the step's `with:`. It has no default. |
 | `Project "X" not found` | Use the exact project name, or its `proj_` UID. |
 | `No single javaagent.config for service "X"` | The build has no config for this service: the lock selects none of its methods, or its name matches more than one service. `config-path` is empty. |
 | `Service "X" is not part of "env"'s locked config` | The environment's latest lock registers no service by that name. Set `service` to one of the names the message lists, or add the service in the wizard and lock again. |
@@ -115,6 +118,11 @@ Set `fail-on-warnings: true` to make that a hard failure instead.
 | `matched N files` | v0 expects one JAR; narrow the `jars` glob. |
 | `No uploaded artifact … to reference for <service>.jar` | A JAR the environment's lock recorded is no longer stored, or its stored bytes differ from the lock's SHA-256 ("… with that SHA-256"). Upload that service again in the wizard and re-lock the environment. |
 | `Job … still running after Ns` | Raise `timeout-seconds`, or check the job in Maestro. |
+
+## Runner requirements
+
+The action runs on Node 24 (`runs: using: node24`). GitHub-hosted runners provide it. A self-hosted runner needs
+Actions Runner 2.327.1 or later, on an OS and architecture Node 24 supports (not macOS 13.4 or earlier, not ARM32).
 
 ## Limitations (v0 pilot)
 
@@ -141,7 +149,7 @@ npm run build       # ncc bundle → dist/index.js (committed; runtime entrypoin
 |---|---|---|
 | `.github/workflows/ci.yml` | push / PR | typecheck + test + build, and **fails if committed `dist/` is stale** |
 | `.github/workflows/e2e.yml` | manual / nightly | runs the Action via `uses: ./` against staging (or a custom host) and asserts outputs/artifacts |
-| `.github/workflows/release.yml` | push tag `v*` | re-test + verify `dist/`, create a GitHub Release, move the floating `v1` tag |
+| `.github/workflows/release.yml` | push tag `v*` | re-test + verify `dist/`, create a GitHub Release, move the floating major tag (`v0` for a `v0.x.y` tag) |
 
 ### Test the GitHub layer locally with `act`
 
@@ -158,13 +166,14 @@ act workflow_dispatch -W .github/workflows/e2e.yml \
   --input jars=fixtures/service.jar
 ```
 
-### Releasing (v0 → v1)
+### Releasing
 
 `dist/` is committed and run as-is by GitHub, so it must be fresh before tagging:
 
 ```bash
 npm run build && git add dist/ && git commit -m "build: bundle dist"
-git tag v0.1.0 && git push origin v0.1.0   # release.yml builds, releases, moves `v0`
+git tag v0.<minor>.<patch> && git push origin v0.<minor>.<patch>   # the next unused version; release.yml builds, releases, moves `v0`
 ```
 
-Consumers then pin `uses: Oteligence-Inc/maestro-action@v1` (see the parent repos' `deploy.yml`).
+Customers pin `uses: Oteligence-Inc/maestro-action@v0`. The platform's own `maestro-deploy.yml` workflows pin a
+commit SHA instead.

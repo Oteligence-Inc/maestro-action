@@ -8,9 +8,9 @@ extension bundle and configs on the runner for their image build. All analysis a
 
 | Path | Purpose |
 |---|---|
-| `action.yml` | Inputs, outputs, `runs: using: 'node20'`, entry `dist/index.js`. |
+| `action.yml` | Inputs, outputs, `runs: using: 'node24'`, entry `dist/index.js`. |
 | `src/index.ts` | `run()`: the step order below, the removed-service guard, the two opt-in degradations (`skip-on-removed-service`, `skip-generate-on-inactive`), and the deploy-run report at start and end. |
-| `src/inputs.ts` | `parseInputs`: reads the inputs, requires `project` or `project-id`, enforces an `https://` `api-url` on an `*.oteligence.com` host unless `MAESTRO_ALLOW_CUSTOM_API_URL=1`. |
+| `src/inputs.ts` | `parseInputs`: reads the inputs, requires `project` or `project-id` and `api-url` (there is no default API), and enforces an `https://` `api-url` on an `*.oteligence.com` host unless `MAESTRO_ALLOW_CUSTOM_API_URL=1`. |
 | `src/api.ts` | `MaestroApi` over `@actions/http-client`: bearer auth, retry on transient failures (`util/retry.ts`), signed-URL reads and writes without the auth header, `expectOk` mapping a 402 `subscription_inactive` to `SubscriptionInactiveError`. |
 | `src/steps/` | One module per step, each with its own suite under `tests/steps/`. |
 | `src/util/errors.ts` | The only messages that reach the log. `formatError` never echoes a response body or stack. |
@@ -23,7 +23,8 @@ extension bundle and configs on the runner for their image build. All analysis a
    server's reason.
 2. `resolveLockedConfig`: `GET /api/auth/tenant-projects` to resolve a project name, then
    `GET /api/job-manager/projects/{uid}/envs/{env}/locked` and `.../versions` (newest first, for `lockedVersionUid`).
-   A 404 on `locked` means the environment was never locked.
+   A 404 on `locked` means the environment does not exist or was never locked (job-manager answers both the same way
+   today); a 200 with `data: null` means never locked; an empty or unparseable 200 is reported as an empty response.
 3. The removed-service guard: once the lock's `registeredJars` is non-empty, a `service` input it does not contain is
    refused before any upload, listing the registered names.
 4. `uploadJar`: one glob match; `POST /api/file/artifact/upload/batch` with this JAR plus the other registered
@@ -60,3 +61,25 @@ extension bundle and configs on the runner for their image build. All analysis a
 
 `npm test` runs jest with nock for HTTP and module mocks for `run()` (`tests/index.test.ts`), so the call-site wiring
 is tested as well as each step. `e2e.yml` runs the action with `uses: ./` against a configured host.
+
+**Running `dist/index.js` against devstack.** The action requires an https `api-url`, and its uploader and download
+fetches accept only https, while devstack's gateway (`:8082`) and MinIO (`:9000`) speak http.
+`scripts/devstack-tls-proxy.mjs` fronts both (`:8443` and `:9443`; the MinIO front keeps the Host header, which a
+presigned URL's signature covers), and file-service and job-manager, which sign upload and download URLs, are
+restarted with `AWS_PRESIGN_ENDPOINT_URL` pointing at the MinIO front. From the work root, in bash or zsh:
+
+```
+mkdir -p /tmp/maestro-tls && openssl req -x509 -newkey rsa:2048 -nodes -keyout /tmp/maestro-tls/key.pem -out /tmp/maestro-tls/cert.pem -days 2 -subj /CN=localhost -addext "subjectAltName=DNS:localhost"
+node maestro-action/scripts/devstack-tls-proxy.mjs /tmp/maestro-tls/cert.pem /tmp/maestro-tls/key.pem   # long-running: background it
+cp devstack/devstack.local.env /tmp/maestro-tls/local.env && echo AWS_PRESIGN_ENDPOINT_URL=https://localhost:9443 >> /tmp/maestro-tls/local.env
+OTELIGENCE_LOCAL_ENV=/tmp/maestro-tls/local.env bash devstack/devstack.sh restart file-service
+OTELIGENCE_LOCAL_ENV=/tmp/maestro-tls/local.env bash devstack/devstack.sh restart job-manager
+env MAESTRO_ALLOW_CUSTOM_API_URL=1 NODE_EXTRA_CA_CERTS=/tmp/maestro-tls/cert.pem RUNNER_TEMP=/tmp/maestro-tls/runner GITHUB_OUTPUT=/tmp/maestro-tls/out.txt \
+  INPUT_API-KEY=<ak_ key> INPUT_ORG-ID=<org id> INPUT_PROJECT=<project> INPUT_SERVICE=<service> INPUT_ENVIRONMENT=<env> \
+  INPUT_JARS=<path to the service JAR> INPUT_API-URL=https://localhost:8443 node maestro-action/dist/index.js
+```
+
+`<ak_ key>` is an API key created in the wizard's CI/CD step (or `POST /api/auth/users/api-keys`); `<org id>` is
+needed when the key's account belongs to several organizations; the project's environment must be locked. Restore
+devstack afterwards with `bash devstack/devstack.sh restart file-service` and `bash devstack/devstack.sh restart
+job-manager`, without the variable, and stop the proxy: the browser cannot use the self-signed MinIO front.
