@@ -132,7 +132,7 @@ Actions Runner 2.327.1 or later, on an OS and architecture Node 24 supports (not
 - Per-service `javaagent.config` enrichment (`agentConfigContextByService`) from the
   analysis preview is **not** forwarded yet — the locked selection drives the build.
 - Deferred to v1: artifact-hash verification, OIDC auth, GitHub Check / Slack surfaces,
-  release automation, integration/E2E against staging.
+  release automation.
 
 ## Development
 
@@ -148,7 +148,7 @@ npm run build       # ncc bundle → dist/index.js (committed; runtime entrypoin
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `.github/workflows/ci.yml` | push / PR | typecheck + test + build, and **fails if committed `dist/` is stale** |
-| `.github/workflows/e2e.yml` | manual / nightly | runs the Action via `uses: ./` against staging (or a custom host) and asserts outputs/artifacts |
+| `.github/workflows/e2e.yml` | manual / nightly | runs the Action via `uses: ./` against hosted dev (project `maestro-action-e2e`, fixture `fixtures/order-service-1.0.0.jar`) and asserts outputs/artifacts |
 | `.github/workflows/release.yml` | push tag `v*` | re-test + verify `dist/`, create a GitHub Release, move the floating major tag (`v0` for a `v0.x.y` tag) |
 
 ### Test the GitHub layer locally with `act`
@@ -157,13 +157,10 @@ npm run build       # ncc bundle → dist/index.js (committed; runtime entrypoin
 
 ```bash
 # 1. install Docker Desktop + nektos/act
-# 2. provide a JAR the container can see
-cp ../demo-jars/ecommerce-microservices/jars/order-service-0.0.1-SNAPSHOT.jar fixtures/service.jar
-# 3. run the E2E workflow against your https endpoint (ngrok/caddy)
+# 2. from the repo root (the fixture JAR is committed; the key is the CicdTest org's MAESTRO_ACTION_E2E_DEV)
 act workflow_dispatch -W .github/workflows/e2e.yml \
-  -s MAESTRO_API_KEY=ak_xxx \
-  -s MAESTRO_API_URL=https://<your-ngrok-host> \
-  --input jars=fixtures/service.jar
+  -s MAESTRO_API_KEY=<ak_ key> \
+  -s MAESTRO_API_URL=https://develop.api.oteligence.com
 ```
 
 ### Releasing

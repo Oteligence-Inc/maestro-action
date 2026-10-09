@@ -7,19 +7,19 @@
 
 .EXAMPLE
   .\run-local.ps1 -ApiKey ak_xxx -ApiUrl https://abcd.ngrok-free.app -Service order-service `
-                  -Jar ..\demo-jars\ecommerce-microservices\jars\order-service-0.0.1-SNAPSHOT.jar
+                  -Jar fixtures\order-service-1.0.0.jar
 
 .EXAMPLE
   # staleness scenario — point at the changed jar
   .\run-local.ps1 -ApiKey ak_xxx -ApiUrl https://abcd.ngrok-free.app -Service order-service `
-                  -Jar ..\demo-jars\ecommerce-microservices\jars\latest\order-service-0.0.2-SNAPSHOT.jar -FailOnWarnings
+                  -Jar <a rebuilt order-service JAR> -FailOnWarnings
 #>
 param(
   [Parameter(Mandatory=$true)][string]$ApiKey,
   [Parameter(Mandatory=$true)][string]$ApiUrl,
   [Parameter(Mandatory=$true)][string]$Service,   # MUST equal spring.application.name (e.g. order-service)
   [Parameter(Mandatory=$true)][string]$Jar,       # path to exactly one jar
-  [string]$Project = "ecom-sr",
+  [string]$Project = "maestro-action-e2e",
   [string]$Environment = "dev",
   [int]$TimeoutSeconds = 300,
   [switch]$FailOnWarnings
