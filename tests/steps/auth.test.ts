@@ -26,6 +26,46 @@ it('exchanges the API key for a JWT and uses it on the next call', async () => {
   expect(probe.isDone()).toBe(true);
 });
 
+it('sends the org-id input as orgId, escaped, and omits it when unset', async () => {
+  const scope = nock(BASE)
+    .post('/api/auth/cli/token')
+    .query({ orgId: 'org_ci&x' })
+    .reply(200, { token: 'jwt-org' });
+  const session = await auth(new MaestroApi(BASE), { ...inputs, orgId: 'org_ci&x' } as Inputs);
+  expect(scope.isDone()).toBe(true);
+  expect(session.token).toBe('jwt-org');
+});
+
+it("names the org-id input when the key needs an organization chosen", async () => {
+  nock(BASE).post('/api/auth/cli/token').reply(400, {
+    success: false,
+    code: 'org_required',
+    message: 'This API key is not scoped to a project and your account belongs to several organizations; pass orgId to choose one',
+  });
+  await expect(auth(new MaestroApi(BASE), inputs)).rejects.toThrow(/several organizations.*"org-id" input/);
+});
+
+it('does not blame a missing org-id when the org-id given contradicts the key', async () => {
+  nock(BASE).post('/api/auth/cli/token').query(true).reply(400, {
+    success: false,
+    code: 'org_conflict',
+    message: "orgId names a different organization from this API key's",
+  });
+  const err = auth(new MaestroApi(BASE), { ...inputs, orgId: 'org_x' } as Inputs);
+  await expect(err).rejects.not.toThrow(/Set the "org-id" input/);
+});
+
+it("gives the server's reason for a 403, not a revoked-key message", async () => {
+  nock(BASE).post('/api/auth/cli/token').reply(403, {
+    success: false,
+    message: "This API key's project is not in any organization you belong to",
+  });
+  const err = auth(new MaestroApi(BASE), inputs);
+  await expect(err).rejects.toThrow(/not in any organization you belong to/);
+  nock(BASE).post('/api/auth/cli/token').reply(403, {});
+  await expect(auth(new MaestroApi(BASE), inputs)).rejects.toThrow(/invalid or has been revoked/);
+});
+
 it('throws a friendly UserError on 401', async () => {
   nock(BASE).post('/api/auth/cli/token').reply(401, { message: 'invalid' });
   await expect(auth(new MaestroApi(BASE), inputs)).rejects.toThrow(/invalid or has been revoked/);

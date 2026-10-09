@@ -34,19 +34,19 @@ beforeEach(() => {
   (downloadArtifacts as jest.Mock).mockResolvedValue({ extensionDir: 'x', configPath: 'c', collectorConfigPath: 'k' });
 });
 
-it("hands the register step the analysis's display name, never the fingerprinted key", async () => {
+it("hands the register step both of the analysis's names, key first", async () => {
   (analysisServiceNames as jest.Mock).mockResolvedValue(['fund-transfer-service@1a2b3c4d', 'fund-transfer-service']);
   await run();
   expect(core.setFailed).not.toHaveBeenCalled();
-  expect(registerJarForEnv).toHaveBeenCalledWith(
-    expect.anything(), inputs, expect.anything(), expect.anything(), 'build_1', 'fund-transfer-service');
+  expect(registerJarForEnv).toHaveBeenCalledWith(expect.anything(), inputs, expect.anything(), expect.anything(),
+    'build_1', ['fund-transfer-service@1a2b3c4d', 'fund-transfer-service']);
 });
 
 it('hands it no name when the analysis gave none', async () => {
   (analysisServiceNames as jest.Mock).mockResolvedValue([]);
   await run();
   expect(registerJarForEnv).toHaveBeenCalledWith(
-    expect.anything(), inputs, expect.anything(), expect.anything(), 'build_1', undefined);
+    expect.anything(), inputs, expect.anything(), expect.anything(), 'build_1', []);
 });
 
 it('refuses a service input the environment does not register, naming the ones it does', async () => {

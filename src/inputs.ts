@@ -19,6 +19,7 @@ export function parseInputs(): Inputs {
   if (!project.trim() && !projectId.trim()) {
     throw new UserError('Provide either "project" (name) or "project-id" (UID).');
   }
+  const orgId = core.getInput('org-id').trim();
   const service = core.getInput('service', { required: true });
   const environment = core.getInput('environment', { required: true });
   const jarsGlob = core.getInput('jars', { required: true });
@@ -38,7 +39,7 @@ export function parseInputs(): Inputs {
     (core.getInput('skip-on-removed-service') || 'false').toLowerCase() === 'true';
 
   return {
-    apiKey, project, projectId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
+    apiKey, project, projectId, orgId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
     failOnWarnings, skipGenerateOnInactive, skipOnRemovedService,
   };
 }

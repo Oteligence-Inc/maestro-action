@@ -96,3 +96,22 @@ describe('parseInputs — project / project-id', () => {
     expect(parseInputs().skipOnRemovedService).toBe(true);
   });
 });
+
+describe('parseInputs — org-id', () => {
+  const ORIGINAL = { ...process.env };
+  afterEach(() => {
+    process.env = { ...ORIGINAL };
+  });
+
+  it('trims org-id and leaves it empty when unset', () => {
+    process.env['INPUT_API-KEY'] = 'k';
+    process.env['INPUT_PROJECT-ID'] = 'proj_1';
+    process.env['INPUT_SERVICE'] = 'svc';
+    process.env['INPUT_ENVIRONMENT'] = 'dev';
+    process.env['INPUT_JARS'] = 'target/x.jar';
+    process.env['INPUT_ORG-ID'] = '  org_ci ';
+    expect(parseInputs().orgId).toBe('org_ci');
+    delete process.env['INPUT_ORG-ID'];
+    expect(parseInputs().orgId).toBe('');
+  });
+});

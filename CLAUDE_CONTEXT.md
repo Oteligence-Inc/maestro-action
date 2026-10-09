@@ -18,7 +18,9 @@ extension bundle and configs on the runner for their image build. All analysis a
 
 ## Flow and the endpoints it calls
 
-1. `auth`: `POST /api/auth/cli/token` with the API key, keeping the JWT.
+1. `auth`: `POST /api/auth/cli/token` with the API key (plus `orgId` from the `org-id` input when set), keeping the
+   JWT. A refusal with `code` `org_required` names the `org-id` input; any other 403 with a message reports the
+   server's reason.
 2. `resolveLockedConfig`: `GET /api/auth/tenant-projects` to resolve a project name, then
    `GET /api/job-manager/projects/{uid}/envs/{env}/locked` and `.../versions` (newest first, for `lockedVersionUid`).
    A 404 on `locked` means the environment was never locked.
@@ -35,8 +37,10 @@ extension bundle and configs on the runner for their image build. All analysis a
    `serviceKey` (its name, or `name@<8 hex>` when uploads share a name) and display name.
 7. `downloadArtifacts`: `/jobs/{id}/download`; extracts the bundle and writes this service's `javaagent.config`,
    chosen by the analysis key, then the `service` input, then a unique letters-only match.
-8. `registerJarForEnv`: `PUT .../envs/{env}/services/{service}/jar` under the `service` input; a warning names the
-   analysis's display name for the JAR when it differs.
+8. `registerJarForEnv`: `PUT .../envs/{env}/services/{service}/jar` under the `service` input. It warns when the
+   analysis key differs from the `serviceKey` the lock's `registeredJars` recorded for that registration; for a lock
+   that recorded none, when the analysis names the JAR differently from the registration; and when a lock from
+   before per-JAR keys files a shared-name pair's selection under the shared name.
 9. `warnStalePeers`: `.../envs/{env}/staleness`, warning (or failing, with `fail-on-warnings`) for peers this run's
    analysis made stale. `reportDeployRun` posts to `.../deploy-runs` at start and end, best-effort.
 
