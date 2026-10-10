@@ -1,7 +1,7 @@
-# Maestro Instrumentation — GitHub Action
+# Maestro Instrumentation: GitHub Action
 
 Wire [Maestro](https://oteligence.com) into your CI/CD so every JAR build is
-instrumented with your **locked** observability rules — server-side, deterministic —
+instrumented with your **locked** observability rules (server-side, deterministic)
 and the resulting OpenTelemetry agent + extension JAR are emitted for `docker build`.
 
 This is the client for **Step 6** of the Maestro flow. The whole instrumentation
@@ -13,7 +13,7 @@ resolution) runs on Maestro; this Action is a thin orchestrator.
 
 ## Quick start
 
-1. In the Maestro wizard, **lock** the target environment (Step 5 → Save & Lock).
+1. In the Maestro wizard, **lock** the target environment (Step 5 -> Save & Lock).
 2. Create a per-environment **API key** and add it to each service repo as the
    `MAESTRO_API_KEY` GitHub Secret.
 3. Add the step to your deploy workflow **after** `mvn package`:
@@ -46,19 +46,19 @@ jobs:
           docker build --build-arg OTEL_DIR=otel -t myapp:${{ steps.maestro.outputs.locked-version }} .
 ```
 
-Deploy the `collector-config-path` file to your OpenTelemetry **Collector** — not into
+Deploy the `collector-config-path` file to your OpenTelemetry **Collector**, not into
 the app image.
 
 ## Inputs
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `api-key` | yes | — | Maestro API key. **Use a GitHub Secret**, never inline. |
-| `project` | yes | — | Project name (e.g. `banking-app`) or `proj_` UID. |
-| `org-id` | no | — | The id of the organization to act for (`org_...` on hosted SaaS, a UUID on a private-cloud VM). Needed only when the API key is not scoped to a project and its owner belongs to several organizations; the token exchange refuses such a key without it. |
-| `service` | yes | — | The name the environment registers this service under: the analysis's name for the JAR (its `spring.application.name`, else the JAR's file name without its version), or, for one of two JARs that share that name, the file-derived name the wizard registered it under. A run whose input the environment's latest lock does not register fails and lists the names it does. A run warns when the analysis keys the JAR differently from the key the lock recorded for the registration (the build may then carry none of its locked methods), or, under a lock that recorded none, when the analysis names it differently. |
-| `environment` | yes | — | Target env: `dev` / `staging` / `prod` / custom. |
-| `jars` | yes | — | Glob to the JAR (e.g. `target/*.jar`). v0 expects exactly one match. |
+| `api-key` | yes | none | Maestro API key. **Use a GitHub Secret**, never inline. |
+| `project` | yes | none | Project name (e.g. `banking-app`) or `proj_` UID. |
+| `org-id` | no | none | The id of the organization to act for (`org_...` on hosted SaaS, a UUID on a private-cloud VM). Needed only when the API key is not scoped to a project and its owner belongs to several organizations; the token exchange refuses such a key without it. |
+| `service` | yes | none | The name the environment registers this service under: the analysis's name for the JAR (its `spring.application.name`, else the JAR's file name without its version), or, for one of two JARs that share that name, the file-derived name the wizard registered it under. A run whose input the environment's latest lock does not register fails and lists the names it does. A run warns when the analysis keys the JAR differently from the key the lock recorded for the registration (the build may then carry none of its locked methods), or, under a lock that recorded none, when the analysis names it differently. |
+| `environment` | yes | none | Target env: `dev` / `staging` / `prod` / custom. |
+| `jars` | yes | none | Glob to the JAR (e.g. `target/*.jar`). v0 expects exactly one match. |
 | `api-url` | yes | | The Maestro API this run talks to: `https://prod.api.oteligence.com` for hosted Maestro, or your private-cloud install's address. It must be `https://` in every case; a private-cloud install serves plain HTTP out of the box, so put a TLS terminator in front of it. A host outside `*.oteligence.com` also needs `MAESTRO_ALLOW_CUSTOM_API_URL=1` in the step's environment. |
 | `timeout-seconds` | no | `300` | Max wait for each Maestro job. |
 | `fail-on-warnings` | no | `false` | Fail the step if this run made peer services stale. |
@@ -78,13 +78,13 @@ the app image.
 
 1. Exchange the API key for a short-lived JWT (`POST /api/auth/cli/token`).
 2. Resolve the project UID + the env's **locked config** and locked-version UID.
-3–5. Upload the changed JAR (referencing the env's other services by the artifact the lock recorded for each,
+3 to 5. Upload the changed JAR (referencing the env's other services by the artifact the lock recorded for each,
    or by SHA for a lock entry that recorded none) and confirm.
 6. Submit `MULTI_JAR_ANALYSIS` (re-applies locked rules; refreshes the cross-service
    staleness signatures), then `MULTI_JAR_EXPLORER_BUILD` (generates the extension from
    the locked selection).
 7. Poll each job to completion.
-8. Download + extract the bundle and configs → step outputs.
+8. Download + extract the bundle and configs -> step outputs.
 9. Register the JAR's SHA for this `(env, service)` (silent; the lock is unchanged).
 
 After step 9 the Action calls `GET .../staleness` and emits a **`::warning`** naming any
@@ -108,16 +108,16 @@ Set `fail-on-warnings: true` to make that a hard failure instead.
 | Message | Cause / fix |
 |---|---|
 | `API key is invalid or has been revoked` | Create a new key in Maestro and update the `MAESTRO_API_KEY` secret. |
-| `Env "X" … was not found` | Check that `environment` names an environment in the project. |
-| `Env "X" … has not been locked yet` | Complete Step 5 (Save & Lock) in the wizard before running CI. |
+| `Env "X" ... was not found` | Check that `environment` names an environment in the project. |
+| `Env "X" ... has not been locked yet` | Complete Step 5 (Save & Lock) in the wizard before running CI. |
 | `Input required and not supplied: api-url` | Add `api-url` to the step's `with:`. It has no default. |
 | `Project "X" not found` | Use the exact project name, or its `proj_` UID. |
 | `No single javaagent.config for service "X"` | The build has no config for this service: the lock selects none of its methods, or its name matches more than one service. `config-path` is empty. |
 | `Service "X" is not part of "env"'s locked config` | The environment's latest lock registers no service by that name. Set `service` to one of the names the message lists, or add the service in the wizard and lock again. |
 | `The analysis names this JAR "Y", the name its lock entries and build use` | The lock and build know the service as `Y`. Register it as `Y` in the wizard and set `service: Y`. |
 | `matched N files` | v0 expects one JAR; narrow the `jars` glob. |
-| `No uploaded artifact … to reference for <service>.jar` | A JAR the environment's lock recorded is no longer stored, or its stored bytes differ from the lock's SHA-256 ("… with that SHA-256"). Upload that service again in the wizard and re-lock the environment. |
-| `Job … still running after Ns` | Raise `timeout-seconds`, or check the job in Maestro. |
+| `No uploaded artifact ... to reference for <service>.jar` | A JAR the environment's lock recorded is no longer stored, or its stored bytes differ from the lock's SHA-256 ("... with that SHA-256"). Upload that service again in the wizard and re-lock the environment. |
+| `Job ... still running after Ns` | Raise `timeout-seconds`, or check the job in Maestro. |
 
 ## Runner requirements
 
@@ -130,7 +130,7 @@ Actions Runner 2.327.1 or later, on an OS and architecture Node 24 supports (not
 - **Backend flag required:** the server must have `maestro.staleness.enabled`
   (job-processor) on for the staleness warning.
 - Per-service `javaagent.config` enrichment (`agentConfigContextByService`) from the
-  analysis preview is **not** forwarded yet — the locked selection drives the build.
+  analysis preview is **not** forwarded yet: the locked selection drives the build.
 - Deferred to v1: artifact-hash verification, OIDC auth, GitHub Check / Slack surfaces,
   release automation.
 
@@ -140,7 +140,7 @@ Actions Runner 2.327.1 or later, on an OS and architecture Node 24 supports (not
 npm install
 npm run typecheck   # tsc --noEmit
 npm test            # jest (HTTP mocked with nock)
-npm run build       # ncc bundle → dist/index.js (committed; runtime entrypoint)
+npm run build       # ncc bundle -> dist/index.js (committed; runtime entrypoint)
 ```
 
 ## CI / workflows
@@ -153,7 +153,7 @@ npm run build       # ncc bundle → dist/index.js (committed; runtime entrypoin
 
 ### Test the GitHub layer locally with `act`
 
-`act` runs a real workflow (and the `action.yml`→`INPUT_*` plumbing) without GitHub:
+`act` runs a real workflow (and the `action.yml`->`INPUT_*` plumbing) without GitHub:
 
 ```bash
 # 1. install Docker Desktop + nektos/act
