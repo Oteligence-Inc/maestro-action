@@ -54,7 +54,8 @@ the app image.
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `api-key` | yes | none | Maestro API key. **Use a GitHub Secret**, never inline. |
-| `project` | yes | none | Project name (e.g. `banking-app`) or `proj_` UID. |
+| `project` | one of `project` / `project-id` | none | Project name (e.g. `banking-app`) or `proj_` UID. |
+| `project-id` | one of `project` / `project-id` | none | Project UID. Wins over `project` when both are set; a name that disagrees is warned about and ignored. |
 | `org-id` | no | none | The id of the organization to act for (`org_...` on hosted SaaS, a UUID on a private-cloud VM). Needed only when the API key is not scoped to a project and its owner belongs to several organizations; the token exchange refuses such a key without it. |
 | `service` | yes | none | The name the environment registers this service under: the analysis's name for the JAR (its `spring.application.name`, else the JAR's file name without its version), or, for one of two JARs that share that name, the file-derived name the wizard registered it under. A run whose input the environment's latest lock does not register fails and lists the names it does. A run warns when the analysis keys the JAR differently from the key the lock recorded for the registration (the build may then carry none of its locked methods), or, under a lock that recorded none, when the analysis names it differently. |
 | `environment` | yes | none | Target env: `dev` / `staging` / `prod` / custom. |
@@ -112,6 +113,9 @@ Set `fail-on-warnings: true` to make that a hard failure instead.
 | `Env "X" ... has not been locked yet` | Complete Step 5 (Save & Lock) in the wizard before running CI. |
 | `Input required and not supplied: api-url` | Add `api-url` to the step's `with:`. It has no default. |
 | `Project "X" not found` | Use the exact project name, or its `proj_` UID. |
+| `project-id "X" was not found for this API key's tenant` | Copy the exact Project ID from Maestro, or use the project name instead. |
+| `API key does not have access to project "X"` | The tenant-projects listing refused the key (401 or 403). Use a key from the organization that owns the project. |
+| `Listing this API key's tenant projects returned more than 1000 pages` | The listing never reported a last page. Set `project-id` to skip the name lookup, and report it. |
 | `No single javaagent.config for service "X"` | The build has no config for this service: the lock selects none of its methods, or its name matches more than one service. `config-path` is empty. |
 | `Service "X" is not part of "env"'s locked config` | The environment's latest lock registers no service by that name. Set `service` to one of the names the message lists, or add the service in the wizard and lock again. |
 | `The analysis names this JAR "Y", the name its lock entries and build use` | The lock and build know the service as `Y`. Register it as `Y` in the wizard and set `service: Y`. |

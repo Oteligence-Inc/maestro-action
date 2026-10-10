@@ -107,18 +107,20 @@ async function findTenantProject(
   matches: (p: TenantProject) => boolean,
 ): Promise<TenantProject | undefined> {
   for (let page = 0; page < MAX_PROJECT_PAGES; page++) {
-    const res = await api.get<TenantProjectsPage & { data?: TenantProjectsPage }>(
-      `/api/auth/tenant-projects?page=${page}&size=100`,
-    );
+    const res = await api.get<TenantProjectsPage>(`/api/auth/tenant-projects?page=${page}&size=100`);
     if (res.statusCode === 401 || res.statusCode === 403) {
       throw new UserError(`API key does not have access to project "${ref}".`);
     }
     expectOk(res, '/api/auth/tenant-projects');
-    // oteligence-auth returns PagedResponse directly ({ content, page }); a `data` wrapper is tolerated in case a
-    // gateway ever adds one.
-    const body = res.body?.content || res.body?.page ? res.body : res.body?.data;
-    const match = (body?.content ?? []).find(matches);
-    if (match || !body?.page?.hasNext) return match;
+    // oteligence-auth returns its PagedResponse directly ({ content, page }), with no `data` envelope.
+    const body = res.body;
+    if (!body) {
+      throw new UserError('Listing the tenant projects returned an empty response.');
+    }
+    const content = body.content ?? [];
+    const match = content.find(matches);
+    // An empty page ends the listing even when it says more follow, so a server that ignores `page` cannot loop.
+    if (match || !body.page?.hasNext || content.length === 0) return match;
   }
   throw new UserError(
     `Listing this API key's tenant projects returned more than ${MAX_PROJECT_PAGES} pages without finding "${ref}".`,

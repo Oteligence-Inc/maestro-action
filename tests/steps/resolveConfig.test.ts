@@ -79,22 +79,6 @@ it('reads an empty 200 on locked as an empty response, not as "not locked yet"',
   await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/^Locked-config response was empty\.$/);
 });
 
-it('tolerates a data-wrapped tenant-projects envelope if a gateway adds one', async () => {
-  nock(BASE)
-    .get('/api/auth/tenant-projects')
-    .query(true)
-    .reply(200, { data: { content: [{ uid: 'proj_1', projectName: 'banking-app' }] } });
-  nock(BASE)
-    .get('/api/job-manager/projects/proj_1/envs/dev/locked')
-    .reply(200, { data: { version: 5, goals: [], selection: [] } });
-  nock(BASE)
-    .get('/api/job-manager/projects/proj_1/envs/dev/versions')
-    .reply(200, { data: [{ uid: 'lv_5', versionNum: 5 }] });
-
-  const cfg = await resolveLockedConfig(client(), inputs);
-  expect(cfg.projectUid).toBe('proj_1');
-});
-
 it('throws when the project name is unknown to the tenant', async () => {
   nock(BASE).get('/api/auth/tenant-projects').query(true).reply(200, { content: [], page: { number: 0, size: 100, totalElements: 0 } });
   await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/not found/);
@@ -213,8 +197,34 @@ describe('a project past the first page of tenant projects', () => {
     expect(last.isDone()).toBe(true);
   });
 
-  it('refuses a listing that never ends instead of reading forever', async () => {
-    nock(BASE).get('/api/auth/tenant-projects').query(true).times(1000).reply(200, firstPage);
+  it('refuses a listing that never ends after reading 1000 pages', async () => {
+    const pages = nock(BASE).get('/api/auth/tenant-projects').query(true).times(1000).reply(200, firstPage);
     await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/more than 1000 pages/);
+    expect(pages.isDone()).toBe(true);
+  });
+
+  it('ends the listing at an empty page that still says more follow', async () => {
+    nock(BASE).get('/api/auth/tenant-projects').query({ page: '0', size: '100' }).reply(200, firstPage);
+    nock(BASE).get('/api/auth/tenant-projects').query({ page: '1', size: '100' })
+      .reply(200, { content: [], page: { number: 1, size: 100, hasNext: true } });
+    await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/not found for this API key's tenant/);
+  });
+
+  it('reports a refusal on a later page as an access problem', async () => {
+    nock(BASE).get('/api/auth/tenant-projects').query({ page: '0', size: '100' }).reply(200, firstPage);
+    nock(BASE).get('/api/auth/tenant-projects').query({ page: '1', size: '100' }).reply(403, { message: 'no' });
+    await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/does not have access to project "banking-app"/);
+  });
+
+  it('reports any other failure as the HTTP error, not as a missing project', async () => {
+    nock(BASE).get('/api/auth/tenant-projects').query({ page: '0', size: '100' }).reply(404, { message: 'gone' });
+    const err = await resolveLockedConfig(client(), inputs).catch((e: Error) => e);
+    expect(String(err)).not.toMatch(/not found for this API key's tenant/);
+    expect(String(err)).toMatch(/404/);
+  });
+
+  it('reports an empty listing response instead of a missing project', async () => {
+    nock(BASE).get('/api/auth/tenant-projects').query({ page: '0', size: '100' }).reply(200, '');
+    await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/returned an empty response/);
   });
 });
