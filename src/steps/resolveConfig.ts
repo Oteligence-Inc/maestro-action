@@ -64,8 +64,7 @@ async function resolveProjectUid(api: MaestroApi, project: string, projectId: st
   const name = (project || '').trim();
 
   if (id) {
-    const projects = await fetchTenantProjects(api, id);
-    const match = projects.find((p) => p.uid === id);
+    const match = await findTenantProject(api, id, (p) => p.uid === id);
     if (!match) {
       throw new UserError(
         `project-id "${id}" was not found for this API key's tenant. ` +
@@ -83,8 +82,7 @@ async function resolveProjectUid(api: MaestroApi, project: string, projectId: st
 
   // No projectId → resolve by name. Legacy proj_ passthrough kept for back-compat.
   if (name.startsWith('proj_')) return name;
-  const projects = await fetchTenantProjects(api, name);
-  const match = projects.find((p) => p.projectName === name);
+  const match = await findTenantProject(api, name, (p) => p.projectName === name);
   if (!match) {
     throw new UserError(
       `Project "${name}" not found for this API key's tenant. Pass the exact project name, or set "project-id".`,
@@ -93,21 +91,38 @@ async function resolveProjectUid(api: MaestroApi, project: string, projectId: st
   return match.uid;
 }
 
-/** Fetch this API key's tenant projects. `ref` is only used for the access-denied message. */
-async function fetchTenantProjects(
+type TenantProject = { uid: string; projectName: string };
+type TenantProjectsPage = { content?: TenantProject[]; page?: { hasNext?: boolean } };
+
+/** Pages read before a listing that keeps saying "more" is refused. */
+const MAX_PROJECT_PAGES = 1000;
+
+/**
+ * The first of this API key's tenant projects that `matches`, reading page by page until one does or the listing
+ * says no page follows. `ref` is only used in the error messages.
+ */
+async function findTenantProject(
   api: MaestroApi,
   ref: string,
-): Promise<Array<{ uid: string; projectName: string }>> {
-  const res = await api.get<{
-    content?: Array<{ uid: string; projectName: string }>;
-    data?: { content?: Array<{ uid: string; projectName: string }> };
-  }>('/api/auth/tenant-projects?page=0&size=100');
-  if (res.statusCode === 401 || res.statusCode === 403) {
-    throw new UserError(`API key does not have access to project "${ref}".`);
+  matches: (p: TenantProject) => boolean,
+): Promise<TenantProject | undefined> {
+  for (let page = 0; page < MAX_PROJECT_PAGES; page++) {
+    const res = await api.get<TenantProjectsPage>(`/api/auth/tenant-projects?page=${page}&size=100`);
+    if (res.statusCode === 401 || res.statusCode === 403) {
+      throw new UserError(`API key does not have access to project "${ref}".`);
+    }
+    expectOk(res, '/api/auth/tenant-projects');
+    // oteligence-auth returns its PagedResponse directly ({ content, page }), with no `data` envelope.
+    const body = res.body;
+    if (!body) {
+      throw new UserError('Listing the tenant projects returned an empty response.');
+    }
+    const content = body.content ?? [];
+    const match = content.find(matches);
+    // An empty page ends the listing even when it says more follow, so a server that ignores `page` cannot loop.
+    if (match || !body.page?.hasNext || content.length === 0) return match;
   }
-  expectOk(res, '/api/auth/tenant-projects');
-  // oteligence-auth returns PagedResponse directly ({ content, page }) — there is no `data`
-  // envelope on this endpoint (unlike job-manager's APIResponse). Read top-level `content`,
-  // tolerating a `data.content` wrapper in case a gateway ever adds one.
-  return res.body?.content ?? res.body?.data?.content ?? [];
+  throw new UserError(
+    `Listing this API key's tenant projects returned more than ${MAX_PROJECT_PAGES} pages without finding "${ref}".`,
+  );
 }
