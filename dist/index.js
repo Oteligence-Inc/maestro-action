@@ -30543,8 +30543,7 @@ async function resolveProjectUid(api, project, projectId) {
     const id = (projectId || '').trim();
     const name = (project || '').trim();
     if (id) {
-        const projects = await fetchTenantProjects(api, id);
-        const match = projects.find((p) => p.uid === id);
+        const match = await findTenantProject(api, id, (p) => p.uid === id);
         if (!match) {
             throw new errors_1.UserError(`project-id "${id}" was not found for this API key's tenant. ` +
                 'Copy the exact Project ID from Maestro (project settings / URL), or use the project name instead.');
@@ -30558,24 +30557,33 @@ async function resolveProjectUid(api, project, projectId) {
     // No projectId → resolve by name. Legacy proj_ passthrough kept for back-compat.
     if (name.startsWith('proj_'))
         return name;
-    const projects = await fetchTenantProjects(api, name);
-    const match = projects.find((p) => p.projectName === name);
+    const match = await findTenantProject(api, name, (p) => p.projectName === name);
     if (!match) {
         throw new errors_1.UserError(`Project "${name}" not found for this API key's tenant. Pass the exact project name, or set "project-id".`);
     }
     return match.uid;
 }
-/** Fetch this API key's tenant projects. `ref` is only used for the access-denied message. */
-async function fetchTenantProjects(api, ref) {
-    const res = await api.get('/api/auth/tenant-projects?page=0&size=100');
-    if (res.statusCode === 401 || res.statusCode === 403) {
-        throw new errors_1.UserError(`API key does not have access to project "${ref}".`);
+/** Pages read before a listing that keeps saying "more" is refused. */
+const MAX_PROJECT_PAGES = 1000;
+/**
+ * The first of this API key's tenant projects that `matches`, reading page by page until one does or the listing
+ * says no page follows. `ref` is only used in the error messages.
+ */
+async function findTenantProject(api, ref, matches) {
+    for (let page = 0; page < MAX_PROJECT_PAGES; page++) {
+        const res = await api.get(`/api/auth/tenant-projects?page=${page}&size=100`);
+        if (res.statusCode === 401 || res.statusCode === 403) {
+            throw new errors_1.UserError(`API key does not have access to project "${ref}".`);
+        }
+        (0, api_1.expectOk)(res, '/api/auth/tenant-projects');
+        // oteligence-auth returns PagedResponse directly ({ content, page }); a `data` wrapper is tolerated in case a
+        // gateway ever adds one.
+        const body = res.body?.content || res.body?.page ? res.body : res.body?.data;
+        const match = (body?.content ?? []).find(matches);
+        if (match || !body?.page?.hasNext)
+            return match;
     }
-    (0, api_1.expectOk)(res, '/api/auth/tenant-projects');
-    // oteligence-auth returns PagedResponse directly ({ content, page }) — there is no `data`
-    // envelope on this endpoint (unlike job-manager's APIResponse). Read top-level `content`,
-    // tolerating a `data.content` wrapper in case a gateway ever adds one.
-    return res.body?.content ?? res.body?.data?.content ?? [];
+    throw new errors_1.UserError(`Listing this API key's tenant projects returned more than ${MAX_PROJECT_PAGES} pages without finding "${ref}".`);
 }
 
 

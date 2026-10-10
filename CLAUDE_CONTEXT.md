@@ -21,7 +21,8 @@ extension bundle and configs on the runner for their image build. All analysis a
 1. `auth`: `POST /api/auth/cli/token` with the API key (plus `orgId` from the `org-id` input when set), keeping the
    JWT. A refusal with `code` `org_required` names the `org-id` input; any other 403 with a message reports the
    server's reason.
-2. `resolveLockedConfig`: `GET /api/auth/tenant-projects` to resolve a project name, then
+2. `resolveLockedConfig`: `GET /api/auth/tenant-projects`, page by page until the project name or `project-id`
+   matches or `page.hasNext` is false (refused past 1000 pages), then
    `GET /api/job-manager/projects/{uid}/envs/{env}/locked` and `.../versions` (newest first, for `lockedVersionUid`).
    A 404 on `locked` means the environment does not exist; a 200 with `data: null` means it was never locked; an empty
    or unparseable 200 is reported as an empty response.

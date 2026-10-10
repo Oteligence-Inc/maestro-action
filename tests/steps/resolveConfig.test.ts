@@ -161,3 +161,60 @@ it('reads a 200 with null data on locked as "not locked yet", not as an empty re
     /"dev" in project "banking-app" has not been locked yet/,
   );
 });
+
+describe('a project past the first page of tenant projects', () => {
+  const firstPage = {
+    content: [{ uid: 'proj_a', projectName: 'alpha' }],
+    page: { number: 0, size: 100, totalElements: 2, hasNext: true },
+  };
+  const secondPage = {
+    content: [{ uid: 'proj_2', projectName: 'banking-app' }],
+    page: { number: 1, size: 100, totalElements: 2, hasNext: false },
+  };
+
+  function lockedAndVersions(uid: string) {
+    nock(BASE).get(`/api/job-manager/projects/${uid}/envs/dev/locked`)
+      .reply(200, { data: { version: 3, goals: [], selection: [] } });
+    nock(BASE).get(`/api/job-manager/projects/${uid}/envs/dev/versions`)
+      .reply(200, { data: [{ uid: 'lv_3', versionNum: 3 }] });
+  }
+
+  it('is found by name on the page that holds it', async () => {
+    nock(BASE).get('/api/auth/tenant-projects').query({ page: '0', size: '100' }).reply(200, firstPage);
+    nock(BASE).get('/api/auth/tenant-projects').query({ page: '1', size: '100' }).reply(200, secondPage);
+    lockedAndVersions('proj_2');
+    const cfg = await resolveLockedConfig(client(), inputs);
+    expect(cfg.projectUid).toBe('proj_2');
+  });
+
+  it('is found by project-id on the page that holds it', async () => {
+    nock(BASE).get('/api/auth/tenant-projects').query({ page: '0', size: '100' }).reply(200, firstPage);
+    nock(BASE).get('/api/auth/tenant-projects').query({ page: '1', size: '100' }).reply(200, secondPage);
+    lockedAndVersions('proj_2');
+    const cfg = await resolveLockedConfig(client(), { projectId: 'proj_2', environment: 'dev' } as Inputs);
+    expect(cfg.projectUid).toBe('proj_2');
+  });
+
+  it('stops reading at the page that holds the match', async () => {
+    const second = nock(BASE).get('/api/auth/tenant-projects').query({ page: '1', size: '100' }).reply(200, secondPage);
+    nock(BASE).get('/api/auth/tenant-projects').query({ page: '0', size: '100' })
+      .reply(200, { ...firstPage, content: [{ uid: 'proj_1', projectName: 'banking-app' }] });
+    lockedAndVersions('proj_1');
+    const cfg = await resolveLockedConfig(client(), inputs);
+    expect(cfg.projectUid).toBe('proj_1');
+    expect(second.isDone()).toBe(false);
+  });
+
+  it('is reported missing only after the last page', async () => {
+    const last = nock(BASE).get('/api/auth/tenant-projects').query({ page: '1', size: '100' })
+      .reply(200, { ...secondPage, content: [{ uid: 'proj_b', projectName: 'beta' }] });
+    nock(BASE).get('/api/auth/tenant-projects').query({ page: '0', size: '100' }).reply(200, firstPage);
+    await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/not found for this API key's tenant/);
+    expect(last.isDone()).toBe(true);
+  });
+
+  it('refuses a listing that never ends instead of reading forever', async () => {
+    nock(BASE).get('/api/auth/tenant-projects').query(true).times(1000).reply(200, firstPage);
+    await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/more than 1000 pages/);
+  });
+});
