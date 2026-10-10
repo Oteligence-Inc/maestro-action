@@ -1,6 +1,6 @@
 # TODO: maestro-action
 
-**Open:** 0 · **Next ID:** 1
+**Open:** 1 · **Next ID:** 2
 
 Open bugs only. Severities reflect verified impact, not the original audit label.
 A ticket is the facet line plus Where, Failure mode (the repro), and Fix. Essays belong in
@@ -32,3 +32,12 @@ Cross-repo items (the `v0` tag move and the pin bump in the platform's `maestro-
 in `platform-overview/TODO.md`.
 
 ---
+
+## MEDIUM severity
+
+#### 1. A project past the tenant's first hundred is reported as missing
+
+- **Needs:** queued · **Repos:** maestro-action
+- **Where:** `fetchTenantProjects` in `src/steps/resolveConfig.ts`
+- **Failure mode:** **REASONED** from source: it reads `/api/auth/tenant-projects?page=0&size=100` once, and oteligence-auth answers with a `PagedResponse` whose `page.hasNext` says more pages follow, so a run naming a project beyond the first hundred fails "not found" in the customer's CI.
+- **Fix:** request each page until `page.hasNext` is false (the kit's `run-e2e-validation.find_project` reads the same endpoint that way), with a two-page stub test, then rebuild `dist/`.
