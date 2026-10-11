@@ -2,7 +2,8 @@
 
 Wire [Maestro](https://oteligence.com) into your CI/CD so every JAR build is
 instrumented with your **locked** observability rules (server-side, deterministic)
-and the resulting OpenTelemetry agent + extension JAR are emitted for `docker build`.
+and the resulting extension JAR and configs are emitted for `docker build`, beside the
+upstream OpenTelemetry agent you download for the OTel version picked in the wizard.
 
 This is the client for **Step 6** of the Maestro flow. The whole instrumentation
 pipeline (bytecode scan, cross-service graph, scoring, ByteBuddy hooks, config
@@ -39,10 +40,15 @@ jobs:
           environment: ${{ github.ref == 'refs/heads/main' && 'prod' || (github.ref == 'refs/heads/staging' && 'staging' || 'dev') }}
           jars: 'target/*.jar'
 
-      # Consume the outputs in your image build
-      - run: |
-          cp -r "${{ steps.maestro.outputs.extension-dir }}" ./otel
-          test -n "${{ steps.maestro.outputs.config-path }}" && cp "${{ steps.maestro.outputs.config-path }}" ./otel/javaagent.config
+      # Assemble otel/ for the image: the upstream agent, this service's extension JAR, its config
+      - env:
+          OTEL_AGENT_VERSION: '2.32.0'          # the OTel version picked in the wizard for this lock
+          EXT_DIR: ${{ steps.maestro.outputs.extension-dir }}
+        run: |
+          mkdir -p otel/extensions
+          curl -fsSL -o otel/opentelemetry-javaagent.jar "https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v${OTEL_AGENT_VERSION}/opentelemetry-javaagent.jar"
+          cp "$EXT_DIR"/fund-transfer-*-extension.jar otel/extensions/   # {service}-{env}-extension.jar; the bundle holds every service's
+          test -n "${{ steps.maestro.outputs.config-path }}" && cp "${{ steps.maestro.outputs.config-path }}" otel/javaagent.config
           docker build --build-arg OTEL_DIR=otel -t myapp:${{ steps.maestro.outputs.locked-version }} .
 ```
 
@@ -68,7 +74,7 @@ the app image.
 
 | Output | Description |
 |---|---|
-| `extension-dir` | Local dir with the extracted OTel agent + extension JAR. |
+| `extension-dir` | Local dir with the extracted build bundle: the extension JARs and configs. It holds every service's extension JAR (`{service}-{env}-extension.jar`) and config, and no OTel agent JAR: download the upstream agent for the OTel version picked in the wizard. Empty when `generated` is `false`. |
 | `config-path` | This service's `javaagent.config` from the build. Empty, with a warning, when the lock selects none of its methods or its name matches more than one service. |
 | `collector-config-path` | Resolved collector config (deploy to your Collector). |
 | `locked-version` | The locked version applied (e.g. `22`). |

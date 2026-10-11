@@ -23,7 +23,6 @@ afterEach(() => nock.cleanAll());
 
 function bundleZip(): Buffer {
   const zip = new AdmZip();
-  zip.addFile('opentelemetry-javaagent.jar', Buffer.from('AGENTJAR'));
   zip.addFile('extension.jar', Buffer.from('EXT'));
   return zip.toBuffer();
 }
@@ -48,7 +47,6 @@ it("downloads + extracts the bundle and writes this service's agent config and t
 
   const paths = await downloadArtifacts(client(), 'build_1', 'fund-transfer');
 
-  expect(fs.existsSync(path.join(paths.extensionDir, 'opentelemetry-javaagent.jar'))).toBe(true);
   expect(fs.existsSync(path.join(paths.extensionDir, 'extension.jar'))).toBe(true);
   expect(fs.readFileSync(paths.configPath, 'utf8')).toBe('FUND_TRANSFER_CONFIG');
   expect(fs.readFileSync(paths.collectorConfigPath, 'utf8')).toBe('COLLECTOR_YAML');
