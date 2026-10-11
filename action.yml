@@ -54,7 +54,7 @@ inputs:
 
 outputs:
   generated:
-    description: "'true' when an extension JAR was generated; 'false' when skipped (inactive subscription)"
+    description: "'true' when the build bundle was generated; 'false' when generation was skipped (an inactive subscription with skip-generate-on-inactive, or a removed service with skip-on-removed-service)"
   extension-dir:
     description: "Local path to the extracted build bundle: the extension JARs and configs, without the OTel agent JAR; empty when 'generated' is 'false'"
   config-path:

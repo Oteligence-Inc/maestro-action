@@ -70,11 +70,14 @@ the app image.
 | `api-url` | yes | | The Maestro API this run talks to: `https://prod.api.oteligence.com` for hosted Maestro, or your private-cloud install's address. It must be `https://` in every case; a private-cloud install serves plain HTTP out of the box, so put a TLS terminator in front of it. A host outside `*.oteligence.com` also needs `MAESTRO_ALLOW_CUSTOM_API_URL=1` in the step's environment. |
 | `timeout-seconds` | no | `300` | Max wait for each Maestro job. |
 | `fail-on-warnings` | no | `false` | Fail the step if this run made peer services stale. |
+| `skip-generate-on-inactive` | no | `false` | When the subscription is inactive (402), skip generation, set `generated` to `false` and let the pipeline continue without a new extension, instead of failing the step. |
+| `skip-on-removed-service` | no | `false` | When this service is no longer in the environment's lock, skip generation, set `generated` to `false` and let the pipeline continue, instead of failing the step. Off, a removed or mistyped service fails with a message. |
 
 ## Outputs
 
 | Output | Description |
 |---|---|
+| `generated` | `true` when the build ran and its bundle was extracted. `false` when generation was skipped: the subscription is inactive and `skip-generate-on-inactive` is set, or the service is not in the lock and `skip-on-removed-service` is set. When `false`, `extension-dir`, `config-path` and `collector-config-path` are empty. |
 | `extension-dir` | Local dir with the extracted build bundle: the extension JARs and configs. It holds every service's extension JAR and config, and no OTel agent JAR: download the upstream agent for the OTel version picked in the wizard. A JAR is named `{service}-{env}-extension.jar`: the service lower-cased, spaces and any character other than a-z, 0-9 or `-` turned into `-`, and one trailing `-service`, `-svc`, `-api` or `-svr` removed; the env the same way with repeated hyphens collapsed. So `fund-transfer-service` in `prod` is `fund-transfer-prod-extension.jar`. When two services reduce to the same name, the second gets `-extension-2.jar`. Empty when `generated` is `false`. |
 | `config-path` | This service's `javaagent.config` from the build. Empty, with a warning, when the lock selects none of its methods or its name matches more than one service. |
 | `collector-config-path` | Resolved collector config (deploy to your Collector). |
