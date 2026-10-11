@@ -75,7 +75,7 @@ the app image.
 
 | Output | Description |
 |---|---|
-| `extension-dir` | Local dir with the extracted build bundle: the extension JARs and configs. It holds every service's extension JAR and config, and no OTel agent JAR: download the upstream agent for the OTel version picked in the wizard. A JAR is named `{service}-{env}-extension.jar`, the service lower-cased with one trailing `-service`, `-svc`, `-api` or `-svr` removed, so `fund-transfer-service` in `prod` is `fund-transfer-prod-extension.jar`. Empty when `generated` is `false`. |
+| `extension-dir` | Local dir with the extracted build bundle: the extension JARs and configs. It holds every service's extension JAR and config, and no OTel agent JAR: download the upstream agent for the OTel version picked in the wizard. A JAR is named `{service}-{env}-extension.jar`: the service lower-cased, spaces and any character other than a-z, 0-9 or `-` turned into `-`, and one trailing `-service`, `-svc`, `-api` or `-svr` removed; the env the same way with repeated hyphens collapsed. So `fund-transfer-service` in `prod` is `fund-transfer-prod-extension.jar`. When two services reduce to the same name, the second gets `-extension-2.jar`. Empty when `generated` is `false`. |
 | `config-path` | This service's `javaagent.config` from the build. Empty, with a warning, when the lock selects none of its methods or its name matches more than one service. |
 | `collector-config-path` | Resolved collector config (deploy to your Collector). |
 | `locked-version` | The locked version applied (e.g. `22`). |
