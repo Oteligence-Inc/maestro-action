@@ -24,7 +24,7 @@ extension bundle and configs on the runner for their image build. All analysis a
 2. `resolveLockedConfig`: `GET /api/auth/tenant-projects`, page by page until the project name or `project-id`
    matches, or a page is empty or does not say another follows (refused past 1000 pages; an empty body is an error,
    not a missing project), then
-   `GET /api/job-manager/projects/{uid}/envs/{env}/locked` and `.../versions` (newest first, for `lockedVersionUid`).
+   `GET /api/job-manager/projects/{uid}/envs/{env}/locked`, whose `uid` is the `lockedVersionUid` (read with the selection, so a lock taken between two reads cannot pair one version's selection with the next one's uid; `.../versions`, newest first, only when job-manager returns no `uid`).
    A 404 on `locked` means the environment does not exist; a 200 with `data: null` means it was never locked; an empty
    or unparseable 200 is reported as an empty response.
 3. The removed-service guard: once the lock's `registeredJars` is non-empty, a `service` input it does not contain is

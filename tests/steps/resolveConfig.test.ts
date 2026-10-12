@@ -34,6 +34,21 @@ it('resolves project name → uid, locked config, and the latest version uid', a
   expect(cfg.locked.version).toBe(22);
 });
 
+it("takes the lock's own uid from the same read as its selection, without reading versions", async () => {
+  nock(BASE)
+    .get('/api/job-manager/projects/proj_direct/envs/dev/locked')
+    .reply(200, { data: { uid: 'lv_7', version: 7, goals: [], selection: [] } });
+  const versionsScope = nock(BASE)
+    .get('/api/job-manager/projects/proj_direct/envs/dev/versions')
+    .reply(200, { data: [{ uid: 'lv_8', versionNum: 8 }] });
+
+  const cfg = await resolveLockedConfig(client(), { project: 'proj_direct', environment: 'dev' } as Inputs);
+  // A lock taken between two reads would pair one version's selection with the next one's uid,
+  // and job-manager refuses a build naming a method its lock does not hold.
+  expect(cfg.lockedVersionUid).toBe('lv_7');
+  expect(versionsScope.isDone()).toBe(false);
+});
+
 it('passes a proj_ uid straight through without a tenant-projects lookup', async () => {
   const lockedScope = nock(BASE)
     .get('/api/job-manager/projects/proj_direct/envs/dev/locked')

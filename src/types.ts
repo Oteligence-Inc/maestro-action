@@ -34,6 +34,8 @@ export interface Session {
 
 /** GET .../envs/{env}/locked → LockedSpecResponse (job-manager APIResponse.data). */
 export interface LockedSpec {
+  /** The locked version's uid; absent from a job-manager older than the build check. */
+  uid?: string;
   version: number;
   selectionKind?: string;
   goals: string[];
