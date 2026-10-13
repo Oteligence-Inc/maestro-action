@@ -82,6 +82,7 @@ describe('buildProfileFromLocked', () => {
         { methodFqn: 'com.x.Pay.autoSkip', tier: 'skip', service: 'order-service', provenance: 'auto' },
         { methodFqn: 'com.x.Pay.userSkip', tier: 'SKIP', service: 'order-service', provenance: 'user' },
         { methodFqn: 'com.x.Pay.oldSkip', tier: 'skip', service: 'order-service' },
+        { methodFqn: 'com.x.Pay.removed', tier: 'standard', service: 'order-service', provenance: 'user_removed' },
       ],
     });
     expect(p.methodConfigurations['order-service::com.x.Pay.charge']).toEqual({ enabled: true, depth: 'deep' });
@@ -89,6 +90,7 @@ describe('buildProfileFromLocked', () => {
     expect(p.methodConfigurations['order-service::com.x.Pay.userSkip']).toEqual({ enabled: true, depth: 'standard' });
     // An entry with no provenance is read as the user's, as the wizard's lockedBuildKeys reads it.
     expect(p.methodConfigurations['order-service::com.x.Pay.oldSkip']).toEqual({ enabled: true, depth: 'standard' });
+    expect(p.methodConfigurations['order-service::com.x.Pay.removed']).toBeUndefined();
     expect(p.perService['order-service'].selectedCount).toBe(3);
   });
 
