@@ -93,7 +93,8 @@ the app image.
    or by SHA for a lock entry that recorded none) and confirm.
 6. Submit `MULTI_JAR_ANALYSIS` (re-applies locked rules; refreshes the cross-service
    staleness signatures), then `MULTI_JAR_EXPLORER_BUILD` (generates the extension from
-   the locked selection).
+   the locked selection: every entry except an auto-recommended SKIP one and a
+   `user_removed` one; a SKIP row the user ticked is built, as the wizard builds it).
 7. Poll each job to completion.
 8. Download + extract the bundle and configs -> step outputs.
 9. Register the JAR's SHA for this `(env, service)` (silent; the lock is unchanged).
