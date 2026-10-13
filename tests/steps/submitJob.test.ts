@@ -74,17 +74,34 @@ describe('buildProfileFromLocked', () => {
     expect(() => buildProfileFromLocked({ ...locked, selection: [{ methodFqn: 'com.x.Orphan.m' }] })).toThrow(UserError);
   });
 
-  it('excludes tier:"skip" entries so they are never instrumented', () => {
+  it('builds a SKIP-tier entry the user ticked, and leaves out only an auto one, as the wizard does', () => {
     const p = buildProfileFromLocked({
       ...locked,
       selection: [
-        { methodFqn: 'com.x.Pay.charge', tier: 'deep', service: 'order-service' },
-        { methodFqn: 'com.x.Pay.skipMe', tier: 'skip', service: 'order-service' },
+        { methodFqn: 'com.x.Pay.charge', tier: 'deep', service: 'order-service', provenance: 'auto' },
+        { methodFqn: 'com.x.Pay.autoSkip', tier: 'skip', service: 'order-service', provenance: 'auto' },
+        { methodFqn: 'com.x.Pay.userSkip', tier: 'SKIP', service: 'order-service', provenance: 'user' },
+        { methodFqn: 'com.x.Pay.oldSkip', tier: 'skip', service: 'order-service' },
       ],
     });
     expect(p.methodConfigurations['order-service::com.x.Pay.charge']).toEqual({ enabled: true, depth: 'deep' });
-    expect(p.methodConfigurations['order-service::com.x.Pay.skipMe']).toBeUndefined();
-    expect(p.perService['order-service'].selectedCount).toBe(1); // skip entry not counted
+    expect(p.methodConfigurations['order-service::com.x.Pay.autoSkip']).toBeUndefined();
+    expect(p.methodConfigurations['order-service::com.x.Pay.userSkip']).toEqual({ enabled: true, depth: 'standard' });
+    // An entry with no provenance is read as the user's, as the wizard's lockedBuildKeys reads it.
+    expect(p.methodConfigurations['order-service::com.x.Pay.oldSkip']).toEqual({ enabled: true, depth: 'standard' });
+    expect(p.perService['order-service'].selectedCount).toBe(3);
+  });
+
+  it('counts a method selected in two flows once', () => {
+    const p = buildProfileFromLocked({
+      ...locked,
+      selection: [
+        { methodFqn: 'com.x.Pay.charge', tier: 'deep', service: 'order-service', provenance: 'auto', flow: 'f1' },
+        { methodFqn: 'com.x.Pay.charge', tier: 'deep', service: 'order-service', provenance: 'auto', flow: 'f2' },
+      ],
+    });
+    expect(Object.keys(p.methodConfigurations)).toEqual(['order-service::com.x.Pay.charge']);
+    expect(p.perService['order-service'].selectedCount).toBe(1);
   });
 });
 

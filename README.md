@@ -130,6 +130,7 @@ Set `fail-on-warnings: true` to make that a hard failure instead.
 | `Service "X" is not part of "env"'s locked config` | The environment's latest lock registers no service by that name. Set `service` to one of the names the message lists, or add the service in the wizard and lock again. |
 | `The analysis names this JAR "Y", the name its lock entries and build use` | The lock and build know the service as `Y`. Register it as `Y` in the wizard and set `service: Y`. |
 | `matched N files` | v0 expects one JAR; narrow the `jars` glob. |
+| `BUILD_LOCK_SUPERSEDED: production environment 'X' builds only from its current lock` | The environment was locked again while the run was in progress, so the build named an older version. Re-run the workflow; it reads the newest lock. |
 | `No uploaded artifact ... to reference for <service>.jar` | A JAR the environment's lock recorded is no longer stored, or its stored bytes differ from the lock's SHA-256 ("... with that SHA-256"). Upload that service again in the wizard and re-lock the environment. |
 | `Job ... still running after Ns` | Raise `timeout-seconds`, or check the job in Maestro. |
 
