@@ -30501,7 +30501,8 @@ function envPath(projectUid, env) {
  * [2] Resolve the project UID + the env's locked config and locked-version UID.
  * - project name → UID via GET /api/auth/tenant-projects (passthrough if a proj_ UID was given)
  * - GET .../envs/{env}/locked         → the rule book (goals, apm, selection, registeredJars)
- * - GET .../envs/{env}/versions[0].uid → the lockedVersionUid the jobs must carry (drives staleness)
+ * - the lockedVersionUid the jobs must carry (drives staleness): the lock's own uid from the same read, or, from a
+ *   job-manager that returns none, GET .../envs/{env}/versions[0].uid
  */
 async function resolveLockedConfig(api, inputs) {
     const projectUid = await resolveProjectUid(api, inputs.project, inputs.projectId);
@@ -30520,10 +30521,14 @@ async function resolveLockedConfig(api, inputs) {
     const locked = lockedRes.body?.data;
     if (!locked)
         throw new errors_1.UserError('Locked-config response was empty.');
-    const versionsRes = await api.get(`${envPath(projectUid, inputs.environment)}/versions`);
-    (0, api_1.expectOk)(versionsRes, 'versions');
-    const versions = versionsRes.body?.data ?? [];
-    const lockedVersionUid = versions[0]?.uid; // newest first
+    // The uid from the same read as the selection: a lock taken between two reads would pair one version's selection
+    // with the next one's uid, and job-manager refuses a build naming a method its lock does not hold.
+    let lockedVersionUid = locked.uid;
+    if (!lockedVersionUid) {
+        const versionsRes = await api.get(`${envPath(projectUid, inputs.environment)}/versions`);
+        (0, api_1.expectOk)(versionsRes, 'versions');
+        lockedVersionUid = (versionsRes.body?.data ?? [])[0]?.uid; // newest first
+    }
     if (!lockedVersionUid) {
         throw new errors_1.UserError(`Env "${inputs.environment}" has no locked version UID — lock the env in Maestro first.`);
     }
