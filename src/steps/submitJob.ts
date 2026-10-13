@@ -58,6 +58,7 @@ export async function submitBuild(
     requestJson: {
       artifactGroupUid: upload.artifactGroupUid,
       analysisJobId,
+      envName: cfg.envName,
       profile,
     },
   });

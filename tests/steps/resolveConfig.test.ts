@@ -30,6 +30,7 @@ it('resolves project name → uid, locked config, and the latest version uid', a
 
   const cfg = await resolveLockedConfig(client(), inputs);
   expect(cfg.projectUid).toBe('proj_1');
+  expect(cfg.envName).toBe('dev');
   expect(cfg.lockedVersionUid).toBe('lv_9'); // newest first
   expect(cfg.locked.version).toBe(22);
 });

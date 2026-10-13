@@ -71,6 +71,8 @@ export interface LockedVersion {
 
 export interface ResolvedConfig {
   projectUid: string;
+  /** The Maestro environment the lock belongs to; the build names it so job-manager holds it to that lock. */
+  envName: string;
   lockedVersionUid: string;
   locked: LockedSpec;
 }
