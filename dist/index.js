@@ -30812,8 +30812,11 @@ function buildProfileFromLocked(locked) {
             continue;
         const id = `${svc}::${bareFqn}`;
         const tier = String(entry.tier || '').toLowerCase();
-        if (tier === 'skip')
-            continue; // skip-tier (FORCE_SKIP / deselected) must never be instrumented
+        // An auto SKIP entry is left out, as the wizard leaves it out on restore; a SKIP row the user ticked is built.
+        if (tier === 'skip' && entry.provenance === 'auto')
+            continue;
+        if (methodConfigurations[id])
+            continue; // one entry per flow; the method is configured once
         perService[svc] = perService[svc] || { selectedCount: 0 };
         perService[svc].selectedCount++;
         methodConfigurations[id] = { enabled: true, depth: tier === 'deep' ? 'deep' : 'standard' };
