@@ -92,7 +92,9 @@ export function buildProfileFromLocked(locked: LockedSpec): BuildProfile {
     if (!bareFqn) continue;
     const id = `${svc}::${bareFqn}`;
     const tier = String(entry.tier || '').toLowerCase();
-    if (tier === 'skip') continue; // skip-tier (FORCE_SKIP / deselected) must never be instrumented
+    // A user's own pick is built whatever its tier, as the wizard builds it; an auto SKIP entry and a removed one are not.
+    if ((tier === 'skip' && entry.provenance === 'auto') || entry.provenance === 'user_removed') continue;
+    if (methodConfigurations[id]) continue; // one entry per flow; the method is configured once
     perService[svc] = perService[svc] || { selectedCount: 0 };
     perService[svc].selectedCount++;
     methodConfigurations[id] = { enabled: true, depth: tier === 'deep' ? 'deep' : 'standard' };

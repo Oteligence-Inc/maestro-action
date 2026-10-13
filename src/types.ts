@@ -56,8 +56,11 @@ export interface SelectionEntry {
   /** BARE fqn "com.x.Class.method" (scope the build key via `service` — see buildProfileFromLocked). */
   methodFqn: string;
   tier?: string; // deep | high | standard | low | skip
+  /** "auto" for a recommended entry; any other value, or none, is the user's own pick. */
   provenance?: string;
   service?: string;
+  /** One entry per flow a method is selected in. */
+  flow?: string;
 }
 
 /** GET .../envs/{env}/versions → LockedVersionResponse[] (newest first). */

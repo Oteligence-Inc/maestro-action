@@ -34,7 +34,9 @@ extension bundle and configs on the runner for their image build. All analysis a
    gone) or, for an entry with none, by SHA in this project (skipped on a miss); a signed `PUT` of the bytes when the
    server asks for them; `PUT /api/file/artifact/status`.
 5. `submitAnalysis` and `submitBuild`: `POST /api/job-manager/jobs` for `MULTI_JAR_ANALYSIS`, then
-   `MULTI_JAR_EXPLORER_BUILD` with the profile `buildProfileFromLocked` derives from the lock; `pollJob` on
+   `MULTI_JAR_EXPLORER_BUILD` with the profile `buildProfileFromLocked` derives from the lock (an auto SKIP entry and a `user_removed`
+   entry are left out, a user-ticked SKIP entry is built, and a method selected in several flows is configured
+   once); `pollJob` on
    `/api/job-manager/jobs/{id}/status` after each.
 6. `analysisServiceNames`: the analysis preview (`/jobs/{id}/preview`, then its signed JSON) gives the uploaded JAR's
    `serviceKey` (its name, or `name@<8 hex>` when uploads share a name) and display name.
