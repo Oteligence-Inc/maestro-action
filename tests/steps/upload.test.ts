@@ -25,6 +25,7 @@ afterEach(() => nock.cleanAll());
 
 const cfg: ResolvedConfig = {
   projectUid: 'proj_1',
+  envName: 'prod',
   lockedVersionUid: 'lv_9',
   locked: {
     version: 22,

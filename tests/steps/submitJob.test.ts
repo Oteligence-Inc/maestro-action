@@ -25,7 +25,7 @@ const locked: LockedSpec = {
     { methodFqn: 'com.y.Acct.get', tier: 'high', service: 'payment-service', provenance: 'auto' },
   ],
 };
-const cfg: ResolvedConfig = { projectUid: 'proj_1', lockedVersionUid: 'lv_9', locked };
+const cfg: ResolvedConfig = { projectUid: 'proj_1', envName: 'prod', lockedVersionUid: 'lv_9', locked };
 const upload: UploadResult = {
   artifactGroupUid: 'grp_1',
   sha: 'abc',
@@ -150,6 +150,7 @@ describe('submitBuild', () => {
     expect(seen.projectUid).toBe('proj_1'); // stamped so ci-runs (project-scoped) finds it
     expect(seen.lockedVersionUid).toBe('lv_9');
     expect(seen.requestJson.analysisJobId).toBe('job_a');
+    expect(seen.requestJson.envName).toBe('prod'); // job-manager holds the build to this env's lock
     expect(seen.requestJson.profile.methodConfigurations).toBeDefined();
   });
 });

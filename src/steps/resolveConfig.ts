@@ -52,7 +52,7 @@ export async function resolveLockedConfig(api: MaestroApi, inputs: Inputs): Prom
   }
 
   core.info(`Locked version: v${locked.version} (${lockedVersionUid})`);
-  return { projectUid, lockedVersionUid, locked };
+  return { projectUid, envName: inputs.environment, lockedVersionUid, locked };
 }
 
 /**

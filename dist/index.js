@@ -30533,7 +30533,7 @@ async function resolveLockedConfig(api, inputs) {
         throw new errors_1.UserError(`Env "${inputs.environment}" has no locked version UID — lock the env in Maestro first.`);
     }
     core.info(`Locked version: v${locked.version} (${lockedVersionUid})`);
-    return { projectUid, lockedVersionUid, locked };
+    return { projectUid, envName: inputs.environment, lockedVersionUid, locked };
 }
 /**
  * Resolve the project UID from either a projectId (UID) or a project name.
@@ -30775,6 +30775,7 @@ async function submitBuild(api, cfg, upload, analysisJobId, profile) {
         requestJson: {
             artifactGroupUid: upload.artifactGroupUid,
             analysisJobId,
+            envName: cfg.envName,
             profile,
         },
     });

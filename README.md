@@ -95,6 +95,7 @@ the app image.
    staleness signatures), then `MULTI_JAR_EXPLORER_BUILD` (generates the extension from
    the locked selection: every entry except an auto-recommended SKIP one and a
    `user_removed` one; a SKIP row the user ticked is built, as the wizard builds it).
+   The build names its project and environment, so job-manager holds it to that environment's lock.
 7. Poll each job to completion.
 8. Download + extract the bundle and configs -> step outputs.
 9. Register the JAR's SHA for this `(env, service)` (silent; the lock is unchanged).
