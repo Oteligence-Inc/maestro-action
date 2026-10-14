@@ -4,7 +4,10 @@ import { Inputs } from '../types';
 import { envBase } from './resolveConfig';
 
 export type DeployRunStatus = 'in_progress' | 'completed';
-export type DeployRunConclusion = 'success' | 'failure' | null;
+export type DeployRunConclusion = 'success' | 'failure' | 'cancelled' | null;
+
+/** Action state holding the project uid of a run reported in progress and not yet completed; read by the post step. */
+export const OPEN_RUN_STATE = 'deployRunProjectUid';
 
 /**
  * Best-effort: report THIS GitHub workflow run to Maestro so it appears in the project's
@@ -16,6 +19,9 @@ export type DeployRunConclusion = 'success' | 'failure' | null;
  * NEVER throws: recording is telemetry, and a reporting failure (or running outside GitHub
  * Actions) must not fail the user's deploy. Run metadata comes from the standard GITHUB_*
  * environment variables the runner sets.
+ *
+ * The in_progress report leaves {@link OPEN_RUN_STATE} set and a completed one clears it, so the post
+ * step can close a run the main step never finished (cancelled, timed out, or killed).
  */
 export async function reportDeployRun(
   api: MaestroApi,
@@ -31,6 +37,8 @@ export async function reportDeployRun(
   const repo = process.env.GITHUB_REPOSITORY;
   const server = process.env.GITHUB_SERVER_URL || 'https://github.com';
   const now = localDateTimeNow(); // LocalDateTime-compatible (no timezone offset)
+
+  if (status === 'in_progress') core.saveState(OPEN_RUN_STATE, projectUid);
 
   const body = {
     serviceName: inputs.service,
@@ -62,6 +70,7 @@ export async function reportDeployRun(
   } catch (err) {
     core.warning(`Maestro: failed to report deploy run (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
   }
+  if (status === 'completed') core.saveState(OPEN_RUN_STATE, '');
 }
 
 /** YYYY-MM-DDTHH:mm:ss (no offset) — parseable by the backend's LocalDateTime field. */

@@ -8,8 +8,9 @@ extension bundle and configs on the runner for their image build. All analysis a
 
 | Path | Purpose |
 |---|---|
-| `action.yml` | Inputs, outputs, `runs: using: 'node24'`, entry `dist/index.js`. |
-| `src/index.ts` | `run()`: the step order below, the removed-service guard, the two opt-in degradations (`skip-on-removed-service`, `skip-generate-on-inactive`), and the deploy-run report at start and end. |
+| `action.yml` | Inputs, outputs, `runs: using: 'node24'`, `dist/index.js` as both `main` and `post`. |
+| `src/index.ts` | `run()`: the step order below, the removed-service guard, the two opt-in degradations (`skip-on-removed-service`, `skip-generate-on-inactive`), and the deploy-run report at start and end. `entry()` picks the stage: `run()` saves the `isPost` state first, so the same bundle run as the post step calls `post()` instead. |
+| `src/post.ts` | `post()`: when the main step reported a deploy run in progress and never completed it (the `deployRunProjectUid` state is still set), re-authenticates and reports it completed with conclusion `cancelled`. Runs on every outcome (no `post-if`), so a cancelled run and a main step killed by a timeout are both closed. Warns, never fails. |
 | `src/inputs.ts` | `parseInputs`: reads the inputs, requires `project` or `project-id` and `api-url` (there is no default API), and enforces an `https://` `api-url` on an `*.oteligence.com` host unless `MAESTRO_ALLOW_CUSTOM_API_URL=1`. |
 | `src/api.ts` | `MaestroApi` over `@actions/http-client`: bearer auth, retry on transient failures (`util/retry.ts`), signed-URL reads and writes without the auth header, `expectOk` mapping a 402 `subscription_inactive` to `SubscriptionInactiveError`. |
 | `src/steps/` | One module per step, each with its own suite under `tests/steps/`. |
@@ -50,7 +51,9 @@ extension bundle and configs on the runner for their image build. All analysis a
    that recorded none, when the analysis names the JAR differently from the registration; and when a lock from
    before per-JAR keys files a shared-name pair's selection under the shared name.
 9. `warnStalePeers`: `.../envs/{env}/staleness`, warning (or failing, with `fail-on-warnings`) for peers this run's
-   analysis made stale. `reportDeployRun` posts to `.../deploy-runs` at start and end, best-effort.
+   analysis made stale. `reportDeployRun` posts to `.../deploy-runs` at start and end, best-effort; the in-progress
+   report sets the `deployRunProjectUid` state before its request and the completed report clears it after its attempt,
+   whatever the response. job-manager's CI matrix reads a `cancelled` conclusion as a cancelled cell.
 
 ## Contracts with the platform
 

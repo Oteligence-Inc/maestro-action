@@ -29685,7 +29685,9 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.IS_POST_STATE = void 0;
 exports.run = run;
+exports.entry = entry;
 const core = __importStar(__nccwpck_require__(7484));
 const inputs_1 = __nccwpck_require__(8422);
 const api_1 = __nccwpck_require__(6879);
@@ -29700,15 +29702,20 @@ const register_1 = __nccwpck_require__(7042);
 const staleness_1 = __nccwpck_require__(4289);
 const reportDeployRun_1 = __nccwpck_require__(8013);
 const errors_1 = __nccwpck_require__(17);
+const post_1 = __nccwpck_require__(6661);
+/** Set by the main step; action.yml runs this same bundle as the post step, which sees it. */
+exports.IS_POST_STATE = 'isPost';
 /**
  * Maestro CI/CD GitHub Action — orchestrates the Step-6 9-step flow:
  * auth → resolve locked config → upload → analyse → build → download → register,
  * then emits a core.warning for any peer services this run made stale.
  *
  * Once the project is resolved, the run is reported to Maestro's deploy-run history
- * (in_progress at start, completed+conclusion at the end) — best-effort, never fatal.
+ * (in_progress at start, completed+conclusion at the end) — best-effort, never fatal. A run the
+ * job stops before it completes is closed as cancelled by the post step (src/post.ts).
  */
 async function run() {
+    core.saveState(exports.IS_POST_STATE, 'true');
     let inputs;
     try {
         inputs = (0, inputs_1.parseInputs)();
@@ -29795,9 +29802,13 @@ async function run() {
         core.setFailed((0, errors_1.formatError)(err));
     }
 }
+/** The bundle's entry for both stages: the post step once the main step has run, else the main step. */
+function entry() {
+    return core.getState(exports.IS_POST_STATE) ? (0, post_1.post)() : run();
+}
 // Only auto-run outside the test harness.
 if (require.main === require.cache[eval('__filename')]) {
-    void run();
+    void entry();
 }
 
 
@@ -29899,6 +29910,82 @@ function normaliseApiUrl(raw) {
         throw new errors_1.UserError(`api-url "${host}" is not an *.oteligence.com host. Set env MAESTRO_ALLOW_CUSTOM_API_URL=1 to override (advanced/testing only).`);
     }
     return raw.replace(/\/+$/, '');
+}
+
+
+/***/ }),
+
+/***/ 6661:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.post = post;
+const core = __importStar(__nccwpck_require__(7484));
+const inputs_1 = __nccwpck_require__(8422);
+const api_1 = __nccwpck_require__(6879);
+const auth_1 = __nccwpck_require__(4697);
+const reportDeployRun_1 = __nccwpck_require__(8013);
+const errors_1 = __nccwpck_require__(17);
+/**
+ * The post step. GitHub runs it after the job's steps whatever their outcome, including a cancelled
+ * run and a main step killed by a timeout. A run the main step reported in progress and never
+ * completed is reported completed with conclusion cancelled; otherwise it does nothing. Never fails.
+ */
+async function post() {
+    const projectUid = core.getState(reportDeployRun_1.OPEN_RUN_STATE);
+    if (!projectUid)
+        return;
+    let inputs;
+    try {
+        inputs = (0, inputs_1.parseInputs)();
+    }
+    catch {
+        return;
+    }
+    const api = new api_1.MaestroApi(inputs.apiUrl);
+    try {
+        await (0, auth_1.auth)(api, inputs);
+    }
+    catch (err) {
+        core.warning(`Maestro: could not report the stopped run as cancelled (non-fatal): ${(0, errors_1.formatError)(err)}`);
+        return;
+    }
+    await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'completed', 'cancelled');
 }
 
 
@@ -30372,9 +30459,12 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.OPEN_RUN_STATE = void 0;
 exports.reportDeployRun = reportDeployRun;
 const core = __importStar(__nccwpck_require__(7484));
 const resolveConfig_1 = __nccwpck_require__(749);
+/** Action state holding the project uid of a run reported in progress and not yet completed; read by the post step. */
+exports.OPEN_RUN_STATE = 'deployRunProjectUid';
 /**
  * Best-effort: report THIS GitHub workflow run to Maestro so it appears in the project's
  * deploy-run history (GET /api/job-manager/projects/{projectUid}/deploy-runs). The backend
@@ -30385,6 +30475,9 @@ const resolveConfig_1 = __nccwpck_require__(749);
  * NEVER throws: recording is telemetry, and a reporting failure (or running outside GitHub
  * Actions) must not fail the user's deploy. Run metadata comes from the standard GITHUB_*
  * environment variables the runner sets.
+ *
+ * The in_progress report leaves {@link OPEN_RUN_STATE} set and a completed one clears it, so the post
+ * step can close a run the main step never finished (cancelled, timed out, or killed).
  */
 async function reportDeployRun(api, inputs, projectUid, status, conclusion) {
     const runId = Number(process.env.GITHUB_RUN_ID);
@@ -30394,6 +30487,8 @@ async function reportDeployRun(api, inputs, projectUid, status, conclusion) {
     const repo = process.env.GITHUB_REPOSITORY;
     const server = process.env.GITHUB_SERVER_URL || 'https://github.com';
     const now = localDateTimeNow(); // LocalDateTime-compatible (no timezone offset)
+    if (status === 'in_progress')
+        core.saveState(exports.OPEN_RUN_STATE, projectUid);
     const body = {
         serviceName: inputs.service,
         runId,
@@ -30425,6 +30520,8 @@ async function reportDeployRun(api, inputs, projectUid, status, conclusion) {
     catch (err) {
         core.warning(`Maestro: failed to report deploy run (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
     }
+    if (status === 'completed')
+        core.saveState(exports.OPEN_RUN_STATE, '');
 }
 /** YYYY-MM-DDTHH:mm:ss (no offset) — parseable by the backend's LocalDateTime field. */
 function localDateTimeNow() {

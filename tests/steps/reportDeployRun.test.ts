@@ -1,7 +1,8 @@
 import nock from 'nock';
 jest.mock('@actions/core');
+import * as core from '@actions/core';
 import { MaestroApi } from '../../src/api';
-import { reportDeployRun } from '../../src/steps/reportDeployRun';
+import { OPEN_RUN_STATE, reportDeployRun } from '../../src/steps/reportDeployRun';
 import { Inputs } from '../../src/types';
 
 const BASE = 'https://api.oteligence.com';
@@ -93,4 +94,42 @@ it('skips (no HTTP call) when projectUid is missing', async () => {
 it('skips when not inside a GitHub Actions run (no GITHUB_RUN_ID)', async () => {
   delete process.env.GITHUB_RUN_ID;
   await expect(reportDeployRun(client(), inputs, 'proj_1', 'in_progress', null)).resolves.toBeUndefined();
+});
+
+describe('the open-run state the post step reads', () => {
+  it('records the project as open before the in_progress report is sent', async () => {
+    let savedFirst = false;
+    nock(BASE).post(PATH, () => {
+      savedFirst = (core.saveState as jest.Mock).mock.calls.some(([k, v]) => k === OPEN_RUN_STATE && v === 'proj_1');
+      return true;
+    }).reply(200, {});
+
+    await reportDeployRun(client(), inputs, 'proj_1', 'in_progress', null);
+
+    expect(savedFirst).toBe(true);
+  });
+
+  it('clears it once a completed report has been attempted, even a refused one', async () => {
+    nock(BASE).post(PATH).reply(500, {});
+
+    await reportDeployRun(client(), inputs, 'proj_1', 'completed', 'failure');
+
+    expect(core.saveState).toHaveBeenLastCalledWith(OPEN_RUN_STATE, '');
+  });
+
+  it('records nothing outside a GitHub Actions run, where no post step will report', async () => {
+    delete process.env.GITHUB_RUN_ID;
+    await reportDeployRun(client(), inputs, 'proj_1', 'in_progress', null);
+    expect(core.saveState).not.toHaveBeenCalled();
+  });
+
+  it('sends a cancelled conclusion as given', async () => {
+    let seen: any;
+    nock(BASE).post(PATH, (b) => { seen = b; return true; }).reply(200, {});
+
+    await reportDeployRun(client(), inputs, 'proj_1', 'completed', 'cancelled');
+
+    expect(seen.status).toBe('completed');
+    expect(seen.conclusion).toBe('cancelled');
+  });
 });
