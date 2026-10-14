@@ -1,6 +1,6 @@
 # TODO: maestro-action
 
-**Open:** 0 · **Next ID:** 2
+**Open:** 1 · **Next ID:** 3
 
 Open bugs only. Severities reflect verified impact, not the original audit label.
 A ticket is the facet line plus Where, Failure mode (the repro), and Fix. Essays belong in
@@ -34,3 +34,11 @@ in `platform-overview/TODO.md`.
 ---
 
 ## MEDIUM severity
+
+#### 2. A cancelled or timed-out run stays in progress on the CI/CD tab
+
+- **Needs:** capability · **Repos:** maestro-action, job-manager
+- **Where:** `run` and `reportDeployRun` in `src/index.ts` and `src/steps/reportDeployRun.ts`; `action.yml`
+- **Failure mode:** **REASONED**. The Action reports `in_progress` when it starts and `completed` from the `try` and `catch` of `run`, and has no `post` step, so a run GitHub cancels, or a job that hits its timeout, never sends a completion. job-manager's CI matrix then reads that run as `running` on its (service, environment) cell until a newer run arrives, and the run history lists it in progress. `DeployRunConclusion` has no `cancelled` value, so job-manager's `cancelled` mapping has no producer.
+- **Fix:** a `post` entry with `post-if: cancelled()` that reports `completed` with conclusion `cancelled`, reading the project uid the main step saved with `core.saveState`, and `cancelled` added to `DeployRunConclusion`.
+
