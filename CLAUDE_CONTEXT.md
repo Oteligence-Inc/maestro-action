@@ -87,6 +87,12 @@ env MAESTRO_ALLOW_CUSTOM_API_URL=1 NODE_EXTRA_CA_CERTS=/tmp/maestro-tls/cert.pem
   INPUT_JARS=<path to the service JAR> INPUT_API-URL=https://localhost:8443 node maestro-action/dist/index.js
 ```
 
+**Running `dist/index.js` against a private-cloud VM.** The VM serves plain `http://<vm>:8080` and its presigned
+URLs already point at https storage, so only the API needs a TLS front: start the proxy with
+`TLS_PROXY_GATEWAY=<vm>:8080 TLS_PROXY_S3=none`, then run the same `env ... node maestro-action/dist/index.js`
+line with `INPUT_ORG-ID` set to the VM organization's UUID. Create the files `GITHUB_OUTPUT` and
+`GITHUB_STEP_SUMMARY` name before the run, as a runner does: the action fails at its last step if they are missing.
+
 `<ak_ key>` is an API key created in the wizard's CI/CD step (or `POST /api/auth/users/api-keys`); `<org id>` is
 needed when the key's account belongs to several organizations; the project's environment must be locked. Restore
 devstack afterwards with `bash devstack/devstack.sh restart file-service` and `bash devstack/devstack.sh restart
