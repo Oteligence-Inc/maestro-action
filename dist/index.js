@@ -29739,7 +29739,11 @@ async function run() {
         const profile = (0, submitJob_1.buildProfileFromLocked)(cfg.locked);
         const buildJobId = await (0, submitJob_1.submitBuild)(api, cfg, upload, analysisJobId, profile); // [6b]
         await (0, poll_1.pollJob)(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
-        const analysisNames = await (0, analysisService_1.analysisServiceNames)(api, analysisJobId, upload.artifactUid);
+        const analysis = await (0, analysisService_1.readAnalysisOfUpload)(api, analysisJobId, upload.artifactUid);
+        for (const notice of analysis.notices) {
+            core.warning(`The analysis left part of ${inputs.service} out: ${notice}`);
+        }
+        const analysisNames = analysis.names;
         const paths = await (0, download_1.downloadArtifacts)(api, buildJobId, inputs.service, analysisNames); // [8]
         await (0, register_1.registerJarForEnv)(api, inputs, cfg, upload, buildJobId, analysisNames); // [9]
         core.setOutput('extension-dir', paths.extensionDir);
@@ -29939,30 +29943,33 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.analysisServiceNames = analysisServiceNames;
+exports.readAnalysisOfUpload = readAnalysisOfUpload;
 const core = __importStar(__nccwpck_require__(7484));
+const NOTHING = { names: [], notices: [] };
 /**
- * The analysis's names for the uploaded JAR: its key, then its display name when that differs (the key adds
- * `@<8 hex>` when uploads share a name). Either can key its javaagent.config. Empty when the upload has no
- * artifact uid or the preview cannot be read.
+ * The analysis's names for the uploaded JAR, either of which can key its javaagent.config, and what it left out
+ * of it. Empty when the upload has no artifact uid or the preview cannot be read.
  */
-async function analysisServiceNames(api, analysisJobId, artifactUid) {
+async function readAnalysisOfUpload(api, analysisJobId, artifactUid) {
     if (!artifactUid)
-        return [];
+        return NOTHING;
     try {
         const res = await api.get(`/api/job-manager/jobs/${encodeURIComponent(analysisJobId)}/preview`);
         const url = res.statusCode < 400 ? res.body?.data?.previewJsonUrl : undefined;
         if (!url)
-            return [];
+            return NOTHING;
         const preview = JSON.parse((await api.getSignedBytes(url)).toString('utf8'));
         const mine = (preview.services ?? []).find((s) => s?.jarUid === artifactUid);
         // Uploads sharing a name are keyed name@<8 hex>; a preview from an older engine carries no key.
         const names = [mine?.serviceKey, mine?.name].filter((n) => typeof n === 'string' && n !== '');
-        return [...new Set(names)];
+        const notices = Array.isArray(mine?.notices)
+            ? mine.notices.filter((n) => typeof n === 'string' && n !== '')
+            : [];
+        return { names: [...new Set(names)], notices };
     }
     catch (err) {
         core.debug(`Could not read the analysis preview: ${err}`);
-        return [];
+        return NOTHING;
     }
 }
 

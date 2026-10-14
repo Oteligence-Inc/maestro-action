@@ -17,7 +17,7 @@ import { resolveLockedConfig } from '../src/steps/resolveConfig';
 import { uploadJar } from '../src/steps/upload';
 import { submitAnalysis, submitBuild } from '../src/steps/submitJob';
 import { downloadArtifacts } from '../src/steps/download';
-import { analysisServiceNames } from '../src/steps/analysisService';
+import { readAnalysisOfUpload } from '../src/steps/analysisService';
 import { registerJarForEnv } from '../src/steps/register';
 
 const inputs = { service: 'fundtransfer', environment: 'dev', apiUrl: 'https://api.oteligence.com' };
@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 
 it("hands the register step both of the analysis's names, key first", async () => {
-  (analysisServiceNames as jest.Mock).mockResolvedValue(['fund-transfer-service@1a2b3c4d', 'fund-transfer-service']);
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fund-transfer-service@1a2b3c4d', 'fund-transfer-service'], notices: [] });
   await run();
   expect(core.setFailed).not.toHaveBeenCalled();
   expect(registerJarForEnv).toHaveBeenCalledWith(expect.anything(), inputs, expect.anything(), expect.anything(),
@@ -43,7 +43,7 @@ it("hands the register step both of the analysis's names, key first", async () =
 });
 
 it('hands it no name when the analysis gave none', async () => {
-  (analysisServiceNames as jest.Mock).mockResolvedValue([]);
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
   await run();
   expect(registerJarForEnv).toHaveBeenCalledWith(
     expect.anything(), inputs, expect.anything(), expect.anything(), 'build_1', []);
@@ -60,7 +60,7 @@ it('refuses a service input the environment does not register, naming the ones i
 });
 
 it('proceeds when the environment registers the service input', async () => {
-  (analysisServiceNames as jest.Mock).mockResolvedValue([]);
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
   (resolveLockedConfig as jest.Mock).mockResolvedValue({
     projectUid: 'proj_1',
     locked: { version: 3, goals: [], selection: [], registeredJars: { fundtransfer: { sha: 'old' } } },
@@ -68,4 +68,23 @@ it('proceeds when the environment registers the service input', async () => {
   await run();
   expect(core.setFailed).not.toHaveBeenCalled();
   expect(uploadJar).toHaveBeenCalled();
+});
+
+it('warns once per thing the analysis left out of the JAR, and fails nothing', async () => {
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({
+    names: ['fundtransfer'],
+    notices: ['1 class could not be parsed and is not analysed: A.class.', 'The embedded library lib.jar could not be read; its classes are not analysed.'],
+  });
+  await run();
+  expect(core.setFailed).not.toHaveBeenCalled();
+  expect(core.warning).toHaveBeenCalledWith(
+    'The analysis left part of fundtransfer out: 1 class could not be parsed and is not analysed: A.class.');
+  expect(core.warning).toHaveBeenCalledWith(
+    'The analysis left part of fundtransfer out: The embedded library lib.jar could not be read; its classes are not analysed.');
+});
+
+it('warns about nothing when the analysis left nothing out', async () => {
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [] });
+  await run();
+  expect(core.warning).not.toHaveBeenCalledWith(expect.stringContaining('The analysis left part of'));
 });
