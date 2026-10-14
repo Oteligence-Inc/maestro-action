@@ -7,7 +7,7 @@ import { uploadJar } from './steps/upload';
 import { submitAnalysis, submitBuild, buildProfileFromLocked } from './steps/submitJob';
 import { pollJob } from './steps/poll';
 import { downloadArtifacts } from './steps/download';
-import { analysisServiceNames } from './steps/analysisService';
+import { readAnalysisOfUpload } from './steps/analysisService';
 import { registerJarForEnv } from './steps/register';
 import { warnStalePeers } from './steps/staleness';
 import { reportDeployRun } from './steps/reportDeployRun';
@@ -59,7 +59,11 @@ export async function run(): Promise<void> {
     const buildJobId = await submitBuild(api, cfg, upload, analysisJobId, profile); // [6b]
     await pollJob(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
 
-    const analysisNames = await analysisServiceNames(api, analysisJobId, upload.artifactUid);
+    const analysis = await readAnalysisOfUpload(api, analysisJobId, upload.artifactUid);
+    for (const notice of analysis.notices) {
+      core.warning(`The analysis left part of ${inputs.service} out: ${notice}`);
+    }
+    const analysisNames = analysis.names;
     const paths = await downloadArtifacts(api, buildJobId, inputs.service, analysisNames); // [8]
     await registerJarForEnv(api, inputs, cfg, upload, buildJobId, analysisNames); // [9]
 

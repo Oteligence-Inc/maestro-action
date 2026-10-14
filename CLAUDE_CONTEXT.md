@@ -40,8 +40,9 @@ extension bundle and configs on the runner for their image build. All analysis a
    input), because job-manager resolves the build's environment from them and refuses an unknown name (409
    `build_env_not_found`); `pollJob` on
    `/api/job-manager/jobs/{id}/status` after each.
-6. `analysisServiceNames`: the analysis preview (`/jobs/{id}/preview`, then its signed JSON) gives the uploaded JAR's
-   `serviceKey` (its name, or `name@<8 hex>` when uploads share a name) and display name.
+6. `readAnalysisOfUpload`: the analysis preview (`/jobs/{id}/preview`, then its signed JSON) gives the uploaded JAR's
+   `serviceKey` (its name, or `name@<8 hex>` when uploads share a name) and display name, and its `notices` (what
+   the analysis left out of the JAR); `run` emits one `core.warning` per notice.
 7. `downloadArtifacts`: `/jobs/{id}/download`; extracts the bundle and writes this service's `javaagent.config`,
    chosen by the analysis key, then the `service` input, then a unique letters-only match.
 8. `registerJarForEnv`: `PUT .../envs/{env}/services/{service}/jar` under the `service` input. It warns when the
