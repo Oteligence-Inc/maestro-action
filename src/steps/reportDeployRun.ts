@@ -9,9 +9,9 @@ export type DeployRunConclusion = 'success' | 'failure' | null;
 /**
  * Best-effort: report THIS GitHub workflow run to Maestro so it appears in the project's
  * deploy-run history (GET /api/job-manager/projects/{projectUid}/deploy-runs). The backend
- * upserts by (project, service, provider, runId), so we call it twice — once at start
- * ({@code in_progress}) and once at the end ({@code completed} + conclusion) — and the two
- * reports converge on one row.
+ * upserts by (project, service, environment, provider, runId), so we call it twice, once at start
+ * ({@code in_progress}) and once at the end ({@code completed} + conclusion), and the two
+ * reports converge on one row; a run that deploys this service to two environments keeps one each.
  *
  * NEVER throws: recording is telemetry, and a reporting failure (or running outside GitHub
  * Actions) must not fail the user's deploy. Run metadata comes from the standard GITHUB_*
