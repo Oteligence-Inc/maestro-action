@@ -9,7 +9,8 @@ checklist and the proven / observed / reasoned vocabulary.
 - **This runs on customer runners with a customer API key.** It is the one component a customer's security team
   reads first. Never echo a response body, a token or a signed URL into the log (`formatError` is the only path to
   `core.setFailed`).
-- **`dist/` is what GitHub runs.** After any `src/` change run `npm run build` and commit `dist/`; `ci.yml` fails a
+- **`dist/` is what GitHub runs**, as two bundles: `dist/index.js` (main) and `dist/post/index.js` (the post step,
+  built from `src/postMain.ts`). After any `src/` change run `npm run build` and commit `dist/`; `ci.yml` fails a
   stale bundle. The platform's `maestro-deploy.yml` callers pin a commit SHA, so a merge here reaches them only when
   their pin moves.
 - **Build:** `npm ci`, then `npm run typecheck`, `npm test` (jest, HTTP mocked with nock), `npm run build`. There is no

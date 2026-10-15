@@ -5,4 +5,4 @@ lib/
 coverage/
 .idea/
 # NOTE: dist/ is intentionally NOT ignored — JavaScript actions run the committed
-# bundle at dist/index.js. The release workflow regenerates and commits it.
+# bundles at dist/index.js and dist/post/index.js. CI and the release workflow refuse a stale dist/.
