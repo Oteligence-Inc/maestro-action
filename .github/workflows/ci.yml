@@ -2,7 +2,7 @@ name: CI
 
 # Lint/typecheck/test/build on every push + PR. No backend needed — the HTTP layer
 # is mocked with nock. Also guards that the committed dist/ bundle matches src/
-# (GitHub runs dist/index.js from the tagged ref, so a stale bundle ships stale code).
+# (GitHub runs dist/index.js and dist/post/index.js from the tagged ref, so a stale bundle ships stale code).
 
 on:
   push:

@@ -2,7 +2,7 @@ import nock from 'nock';
 jest.mock('@actions/core');
 import * as core from '@actions/core';
 import { MaestroApi } from '../../src/api';
-import { OPEN_RUN_STATE, reportDeployRun } from '../../src/steps/reportDeployRun';
+import { OPEN_RUN_STATE, PENDING_CONCLUSION_STATE, reportDeployRun } from '../../src/steps/reportDeployRun';
 import { Inputs } from '../../src/types';
 
 const BASE = 'https://api.oteligence.com';
@@ -96,25 +96,63 @@ it('skips when not inside a GitHub Actions run (no GITHUB_RUN_ID)', async () => 
   await expect(reportDeployRun(client(), inputs, 'proj_1', 'in_progress', null)).resolves.toBeUndefined();
 });
 
-describe('the open-run state the post step reads', () => {
-  it('records the project as open before the in_progress report is sent', async () => {
+describe('the run state the post step reads', () => {
+  const stateWrites = () => (core.saveState as jest.Mock).mock.calls;
+
+  it('records the project as open before the in_progress report is sent, and leaves it open', async () => {
     let savedFirst = false;
     nock(BASE).post(PATH, () => {
-      savedFirst = (core.saveState as jest.Mock).mock.calls.some(([k, v]) => k === OPEN_RUN_STATE && v === 'proj_1');
+      savedFirst = stateWrites().some(([k, v]) => k === OPEN_RUN_STATE && v === 'proj_1');
       return true;
     }).reply(200, {});
 
     await reportDeployRun(client(), inputs, 'proj_1', 'in_progress', null);
 
     expect(savedFirst).toBe(true);
+    expect(core.saveState).toHaveBeenLastCalledWith(OPEN_RUN_STATE, 'proj_1');
   });
 
-  it('clears it once a completed report has been attempted, even a refused one', async () => {
-    nock(BASE).post(PATH).reply(500, {});
+  it('records the conclusion before the completed report and clears the open run once Maestro accepts it', async () => {
+    let pendingFirst = false;
+    nock(BASE).post(PATH, () => {
+      pendingFirst = stateWrites().some(([k, v]) => k === PENDING_CONCLUSION_STATE && v === 'success');
+      return true;
+    }).reply(200, {});
+
+    await reportDeployRun(client(), inputs, 'proj_1', 'completed', 'success');
+
+    expect(pendingFirst).toBe(true);
+    expect(core.saveState).toHaveBeenLastCalledWith(OPEN_RUN_STATE, '');
+  });
+
+  it('keeps the run open when Maestro refuses the completed report', async () => {
+    nock(BASE).post(PATH).reply(404, {});
 
     await reportDeployRun(client(), inputs, 'proj_1', 'completed', 'failure');
 
-    expect(core.saveState).toHaveBeenLastCalledWith(OPEN_RUN_STATE, '');
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('returned 404'));
+    expect(core.saveState).toHaveBeenCalledWith(PENDING_CONCLUSION_STATE, 'failure');
+    expect(core.saveState).not.toHaveBeenCalledWith(OPEN_RUN_STATE, '');
+  });
+
+  it('keeps the run open when the completed report cannot be sent', async () => {
+    nock(BASE).post(PATH).replyWithError('socket hang up');
+
+    await reportDeployRun(client(), inputs, 'proj_1', 'completed', 'success');
+
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('failed to report deploy run'));
+    expect(core.saveState).not.toHaveBeenCalledWith(OPEN_RUN_STATE, '');
+  });
+
+  it('still reports when the state cannot be written', async () => {
+    (core.saveState as jest.Mock).mockImplementationOnce(() => { throw new Error('Missing file at path: /x'); });
+    let sent = false;
+    nock(BASE).post(PATH, () => { sent = true; return true; }).reply(200, {});
+
+    await expect(reportDeployRun(client(), inputs, 'proj_1', 'in_progress', null)).resolves.toBeUndefined();
+
+    expect(sent).toBe(true);
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('could not record deploy-run state'));
   });
 
   it('records nothing outside a GitHub Actions run, where no post step will report', async () => {

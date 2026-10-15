@@ -6,8 +6,10 @@ import { envBase } from './resolveConfig';
 export type DeployRunStatus = 'in_progress' | 'completed';
 export type DeployRunConclusion = 'success' | 'failure' | 'cancelled' | null;
 
-/** Action state holding the project uid of a run reported in progress and not yet completed; read by the post step. */
+/** Action state holding the project uid of a run reported in progress whose completion Maestro has not accepted. */
 export const OPEN_RUN_STATE = 'deployRunProjectUid';
+/** Action state holding the conclusion of the last completed report attempted; the post step resends it. */
+export const PENDING_CONCLUSION_STATE = 'deployRunConclusion';
 
 /**
  * Best-effort: report THIS GitHub workflow run to Maestro so it appears in the project's
@@ -20,8 +22,9 @@ export const OPEN_RUN_STATE = 'deployRunProjectUid';
  * Actions) must not fail the user's deploy. Run metadata comes from the standard GITHUB_*
  * environment variables the runner sets.
  *
- * The in_progress report leaves {@link OPEN_RUN_STATE} set and a completed one clears it, so the post
- * step can close a run the main step never finished (cancelled, timed out, or killed).
+ * The in_progress report sets {@link OPEN_RUN_STATE} before its request; a completed report records its
+ * conclusion before its request and clears the open run only once Maestro accepts it. The post step closes
+ * whatever is still open: with the recorded conclusion, or as cancelled when the main step never got that far.
  */
 export async function reportDeployRun(
   api: MaestroApi,
@@ -38,7 +41,8 @@ export async function reportDeployRun(
   const server = process.env.GITHUB_SERVER_URL || 'https://github.com';
   const now = localDateTimeNow(); // LocalDateTime-compatible (no timezone offset)
 
-  if (status === 'in_progress') core.saveState(OPEN_RUN_STATE, projectUid);
+  if (status === 'in_progress') saveStateSafely(OPEN_RUN_STATE, projectUid);
+  else if (conclusion) saveStateSafely(PENDING_CONCLUSION_STATE, conclusion);
 
   const body = {
     serviceName: inputs.service,
@@ -66,11 +70,20 @@ export async function reportDeployRun(
       core.warning(`Maestro: deploy-run report returned ${res.statusCode} (non-fatal).`);
     } else {
       core.info(`Maestro: reported deploy run ${runId} (${status}${conclusion ? '/' + conclusion : ''}).`);
+      if (status === 'completed') saveStateSafely(OPEN_RUN_STATE, '');
     }
   } catch (err) {
     core.warning(`Maestro: failed to report deploy run (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
   }
-  if (status === 'completed') core.saveState(OPEN_RUN_STATE, '');
+}
+
+/** State is written to the runner's GITHUB_STATE file, which can throw; reporting must not. */
+function saveStateSafely(name: string, value: string): void {
+  try {
+    core.saveState(name, value);
+  } catch (err) {
+    core.warning(`Maestro: could not record deploy-run state (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /** YYYY-MM-DDTHH:mm:ss (no offset) — parseable by the backend's LocalDateTime field. */

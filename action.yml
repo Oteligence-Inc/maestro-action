@@ -71,5 +71,5 @@ outputs:
 runs:
   using: 'node24'
   main: 'dist/index.js'
-  # Same bundle; it sees the main step's state and only closes a deploy run the main step left open.
-  post: 'dist/index.js'
+  # Closes a deploy run the main step left open; a separate bundle that cannot run the pipeline.
+  post: 'dist/post/index.js'

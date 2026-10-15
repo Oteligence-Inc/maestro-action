@@ -13,10 +13,6 @@ import { warnStalePeers } from './steps/staleness';
 import { reportDeployRun } from './steps/reportDeployRun';
 import { formatError, RemovedServiceError, SubscriptionInactiveError } from './util/errors';
 import { Inputs } from './types';
-import { post } from './post';
-
-/** Set by the main step; action.yml runs this same bundle as the post step, which sees it. */
-export const IS_POST_STATE = 'isPost';
 
 /**
  * Maestro CI/CD GitHub Action — orchestrates the Step-6 9-step flow:
@@ -25,10 +21,9 @@ export const IS_POST_STATE = 'isPost';
  *
  * Once the project is resolved, the run is reported to Maestro's deploy-run history
  * (in_progress at start, completed+conclusion at the end) — best-effort, never fatal. A run the
- * job stops before it completes is closed as cancelled by the post step (src/post.ts).
+ * job stops before it completes is closed by the post step (src/post.ts).
  */
 export async function run(): Promise<void> {
-  core.saveState(IS_POST_STATE, 'true');
   let inputs: Inputs;
   try {
     inputs = parseInputs();
@@ -128,12 +123,7 @@ export async function run(): Promise<void> {
   }
 }
 
-/** The bundle's entry for both stages: the post step once the main step has run, else the main step. */
-export function entry(): Promise<void> {
-  return core.getState(IS_POST_STATE) ? post() : run();
-}
-
 // Only auto-run outside the test harness.
 if (require.main === module) {
-  void entry();
+  void run();
 }
