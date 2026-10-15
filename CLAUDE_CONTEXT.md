@@ -72,7 +72,15 @@ extension bundle and configs on the runner for their image build. All analysis a
 
 `npm test` runs jest with nock for HTTP and module mocks for `run()` (`tests/index.test.ts`), so the call-site wiring
 is tested as well as each step. `tests/postBundle.test.ts` runs the committed `dist/post/index.js` and fails if the
-post bundle would run the pipeline. `e2e.yml` runs the action with `uses: ./` nightly against hosted dev: the CicdTest org's `maestro-action-e2e`
+post bundle would run the pipeline.
+
+**Proving the post step on a real runner.** A hosted cancel can take longer to reach the runner than the
+Maestro step takes against hosted dev (about 20 seconds), so cancelling an E2E run usually lands after the step
+has finished, and fractional `timeout-minutes` values do not fire. The step must be held open: push a
+throwaway branch whose `dist/index.js` sleeps after the in-progress report, with a push-triggered copy of the
+E2E job carrying a 1-minute step or job `timeout-minutes` (or cancel it by hand), read the run's
+`Post Run ./` log and job-manager's `Recorded deploy run` lines, and delete the branch afterwards. The same
+branch cut from `main` is the control. `e2e.yml` runs the action with `uses: ./` nightly against hosted dev: the CicdTest org's `maestro-action-e2e`
 project, whose `dev` lock was made from the committed `fixtures/order-service-1.0.0.jar`.
 
 **Running `dist/index.js` against devstack.** The action requires an https `api-url`, and its uploader and download
