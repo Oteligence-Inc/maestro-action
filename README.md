@@ -107,6 +107,13 @@ After step 9 the Action calls `GET .../staleness` and emits a **`::warning`** na
 **peer** services *this run* made stale (so they can be re-built). This is the only
 staleness signal that reaches CI/CD-only users.
 
+Each run also appears on the project's CI/CD tab: the Action reports it in progress once the project
+is resolved and the environment's lock includes the service, and completed with its outcome at the
+end. The Action's post step, which GitHub runs after the job's other steps, closes a run that was left
+open: as **cancelled** when the run was cancelled or stopped by a `timeout-minutes` before the Action
+finished, or with its real outcome when the final report did not reach Maestro. It re-authenticates
+with the same API key. Reporting is best-effort and never fails the step.
+
 ## Cross-service staleness
 
 When this service's change alters the cross-service call graph, peer services' deployed
@@ -160,7 +167,7 @@ Actions Runner 2.327.1 or later, on an OS and architecture Node 24 supports (not
 npm install
 npm run typecheck   # tsc --noEmit
 npm test            # jest (HTTP mocked with nock)
-npm run build       # ncc bundle -> dist/index.js (committed; runtime entrypoint)
+npm run build       # ncc bundles -> dist/index.js and dist/post/index.js (committed; what GitHub runs)
 ```
 
 ## CI / workflows

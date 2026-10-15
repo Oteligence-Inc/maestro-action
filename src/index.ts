@@ -20,7 +20,8 @@ import { Inputs } from './types';
  * then emits a core.warning for any peer services this run made stale.
  *
  * Once the project is resolved, the run is reported to Maestro's deploy-run history
- * (in_progress at start, completed+conclusion at the end) — best-effort, never fatal.
+ * (in_progress at start, completed+conclusion at the end) — best-effort, never fatal. A run the
+ * job stops before it completes is closed by the post step (src/post.ts).
  */
 export async function run(): Promise<void> {
   let inputs: Inputs;

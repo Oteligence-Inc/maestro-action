@@ -12,6 +12,9 @@ jest.mock('../src/steps/staleness');
 jest.mock('../src/steps/reportDeployRun');
 import * as core from '@actions/core';
 import { run } from '../src/index';
+import { reportDeployRun } from '../src/steps/reportDeployRun';
+import { pollJob } from '../src/steps/poll';
+import { SubscriptionInactiveError } from '../src/util/errors';
 import { parseInputs } from '../src/inputs';
 import { resolveLockedConfig } from '../src/steps/resolveConfig';
 import { uploadJar } from '../src/steps/upload';
@@ -87,4 +90,47 @@ it('warns about nothing when the analysis left nothing out', async () => {
   (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [] });
   await run();
   expect(core.warning).not.toHaveBeenCalledWith(expect.stringContaining('The analysis left part of'));
+});
+
+describe('the deploy-run reports the post step relies on', () => {
+  const reports = () => (reportDeployRun as jest.Mock).mock.calls.map((c) => [c[2], c[3], c[4]]);
+
+  beforeEach(() => {
+    (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  });
+
+  it('opens the run before uploading and completes it as a success', async () => {
+    (uploadJar as jest.Mock).mockImplementation(async () => {
+      expect(reports()).toEqual([['proj_1', 'in_progress', null]]);
+      return { artifactUid: 'art_1', sha: 'abc' };
+    });
+    await run();
+    expect(reports()).toEqual([['proj_1', 'in_progress', null], ['proj_1', 'completed', 'success']]);
+  });
+
+  it('completes it as a failure when a step throws', async () => {
+    (pollJob as jest.Mock).mockRejectedValueOnce(new Error('job failed'));
+    await run();
+    expect(reports()).toEqual([['proj_1', 'in_progress', null], ['proj_1', 'completed', 'failure']]);
+    expect(core.setFailed).toHaveBeenCalled();
+  });
+
+  it('completes it as a success when an inactive subscription is skipped by request', async () => {
+    (parseInputs as jest.Mock).mockReturnValue({ ...inputs, skipGenerateOnInactive: true });
+    (submitAnalysis as jest.Mock).mockRejectedValue(new SubscriptionInactiveError({ status: 'subscription_inactive' }));
+    await run();
+    expect(reports()).toEqual([['proj_1', 'in_progress', null], ['proj_1', 'completed', 'success']]);
+    expect(core.setFailed).not.toHaveBeenCalled();
+  });
+
+  it('completes a removed service skipped by request as a success without opening it', async () => {
+    (parseInputs as jest.Mock).mockReturnValue({ ...inputs, skipOnRemovedService: true });
+    (resolveLockedConfig as jest.Mock).mockResolvedValue({
+      projectUid: 'proj_1',
+      locked: { version: 3, goals: [], selection: [], registeredJars: { other: { sha: 'x' } } },
+    });
+    await run();
+    expect(reports()).toEqual([['proj_1', 'completed', 'success']]);
+    expect(core.setFailed).not.toHaveBeenCalled();
+  });
 });

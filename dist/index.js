@@ -29706,7 +29706,8 @@ const errors_1 = __nccwpck_require__(17);
  * then emits a core.warning for any peer services this run made stale.
  *
  * Once the project is resolved, the run is reported to Maestro's deploy-run history
- * (in_progress at start, completed+conclusion at the end) — best-effort, never fatal.
+ * (in_progress at start, completed+conclusion at the end) — best-effort, never fatal. A run the
+ * job stops before it completes is closed by the post step (src/post.ts).
  */
 async function run() {
     let inputs;
@@ -30372,9 +30373,14 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.PENDING_CONCLUSION_STATE = exports.OPEN_RUN_STATE = void 0;
 exports.reportDeployRun = reportDeployRun;
 const core = __importStar(__nccwpck_require__(7484));
 const resolveConfig_1 = __nccwpck_require__(749);
+/** Action state holding the project uid of a run reported in progress whose completion Maestro has not accepted. */
+exports.OPEN_RUN_STATE = 'deployRunProjectUid';
+/** Action state holding the conclusion of the last completed report attempted; the post step resends it. */
+exports.PENDING_CONCLUSION_STATE = 'deployRunConclusion';
 /**
  * Best-effort: report THIS GitHub workflow run to Maestro so it appears in the project's
  * deploy-run history (GET /api/job-manager/projects/{projectUid}/deploy-runs). The backend
@@ -30385,6 +30391,10 @@ const resolveConfig_1 = __nccwpck_require__(749);
  * NEVER throws: recording is telemetry, and a reporting failure (or running outside GitHub
  * Actions) must not fail the user's deploy. Run metadata comes from the standard GITHUB_*
  * environment variables the runner sets.
+ *
+ * The in_progress report sets {@link OPEN_RUN_STATE} before its request; a completed report records its
+ * conclusion before its request and clears the open run only once Maestro accepts it. The post step closes
+ * whatever is still open: with the recorded conclusion, or as cancelled when the main step never got that far.
  */
 async function reportDeployRun(api, inputs, projectUid, status, conclusion) {
     const runId = Number(process.env.GITHUB_RUN_ID);
@@ -30394,6 +30404,10 @@ async function reportDeployRun(api, inputs, projectUid, status, conclusion) {
     const repo = process.env.GITHUB_REPOSITORY;
     const server = process.env.GITHUB_SERVER_URL || 'https://github.com';
     const now = localDateTimeNow(); // LocalDateTime-compatible (no timezone offset)
+    if (status === 'in_progress')
+        saveStateSafely(exports.OPEN_RUN_STATE, projectUid);
+    else if (conclusion)
+        saveStateSafely(exports.PENDING_CONCLUSION_STATE, conclusion);
     const body = {
         serviceName: inputs.service,
         runId,
@@ -30420,10 +30434,21 @@ async function reportDeployRun(api, inputs, projectUid, status, conclusion) {
         }
         else {
             core.info(`Maestro: reported deploy run ${runId} (${status}${conclusion ? '/' + conclusion : ''}).`);
+            if (status === 'completed')
+                saveStateSafely(exports.OPEN_RUN_STATE, '');
         }
     }
     catch (err) {
         core.warning(`Maestro: failed to report deploy run (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+}
+/** State is written to the runner's GITHUB_STATE file, which can throw; reporting must not. */
+function saveStateSafely(name, value) {
+    try {
+        core.saveState(name, value);
+    }
+    catch (err) {
+        core.warning(`Maestro: could not record deploy-run state (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
     }
 }
 /** YYYY-MM-DDTHH:mm:ss (no offset) — parseable by the backend's LocalDateTime field. */
