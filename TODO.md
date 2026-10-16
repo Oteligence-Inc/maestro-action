@@ -21,7 +21,7 @@ not optional:** unscoped, that command rewrites every register it finds.
     - **Fix:** the concrete change, or **Decision needed:** the closed question with its options
 
 **`Needs`** is what the item waits on, and may list several. `decision` · `approval` · `input` **block**;
-`capability` · `upstream` · `vendor` queue; `queued` means no blocker was recorded. Label any
+`capability` · `upstream` · `vendor` · `ready` queue; `ready` means the item was checked and nothing blocks it. Label any
 *mechanism* sentence **PROVEN** / **OBSERVED** / **REASONED**.
 
 **Add:** take `Next ID`, then raise it. **Remove:** delete an entry only once a failure-first test of
