@@ -85,8 +85,8 @@ project, whose `dev` lock was made from the committed `fixtures/order-service-1.
 
 **Running `dist/index.js` against devstack.** The action requires an https `api-url`, and its uploader and download
 fetches accept only https, while devstack's gateway (`:8082`) and MinIO (`:9000`) speak http.
-`scripts/devstack-tls-proxy.mjs` fronts both (`:8443` and `:9443`; the MinIO front keeps the Host header, which a
-presigned URL's signature covers), and file-service and job-manager, which sign upload and download URLs, are
+`scripts/devstack-tls-proxy.mjs` fronts both (`:8443` and `:9443`, on 127.0.0.1 unless `TLS_PROXY_BIND` says
+otherwise; the MinIO front keeps the Host header, which a presigned URL's signature covers), and file-service and job-manager, which sign upload and download URLs, are
 restarted with `AWS_PRESIGN_ENDPOINT_URL` pointing at the MinIO front. From the work root, in bash or zsh:
 
 ```
