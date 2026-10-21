@@ -21,9 +21,9 @@ function get(url: string): Promise<{ status: number; body: string }> {
   });
 }
 
-function listening(port: number): Promise<boolean> {
+function listening(port: number, host = '127.0.0.1'): Promise<boolean> {
   return new Promise((resolve) => {
-    const s = net.connect(port, '127.0.0.1');
+    const s = net.connect(port, host);
     s.on('connect', () => {
       s.destroy();
       resolve(true);
@@ -37,6 +37,7 @@ describe('devstack-tls-proxy fronting a private-cloud gateway', () => {
   let upstream: http.Server;
   let upstreamPort: number;
   let proxy: ChildProcess;
+  let banner = '';
 
   beforeAll(async () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tls-proxy-'));
@@ -53,7 +54,10 @@ describe('devstack-tls-proxy fronting a private-cloud gateway', () => {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     await new Promise<void>((resolve, reject) => {
-      proxy.stdout?.on('data', (d) => String(d).includes('8443') && resolve());
+      proxy.stdout?.on('data', (d) => {
+        banner += String(d);
+        if (banner.includes('8443')) resolve();
+      });
       proxy.on('exit', (code) => reject(new Error(`proxy exited ${code}`)));
     });
   });
@@ -74,5 +78,12 @@ describe('devstack-tls-proxy fronting a private-cloud gateway', () => {
   it('leaves :9443 closed when TLS_PROXY_S3 is none', async () => {
     expect(await listening(9443)).toBe(false);
     expect(await listening(8443)).toBe(true);
+  });
+
+  it('listens on loopback only, so no other host is relayed to the gateway', async () => {
+    expect(banner).toContain('(127.0.0.1)');
+    const external = Object.values(os.networkInterfaces()).flat()
+      .find((a) => a && a.family === 'IPv4' && !a.internal);
+    if (external) expect(await listening(8443, external.address)).toBe(false);
   });
 });

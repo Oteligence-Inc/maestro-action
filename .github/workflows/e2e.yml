@@ -47,9 +47,9 @@ jobs:
       # The Action is https-only and allow-lists *.oteligence.com; an act run against another host needs this.
       MAESTRO_ALLOW_CUSTOM_API_URL: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '24' # matches action.yml `runs: using: node24`
           cache: npm
