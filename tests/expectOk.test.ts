@@ -1,5 +1,5 @@
 import { expectOk, messageOf, traceOf, ApiResponse } from '../src/api';
-import { SubscriptionInactiveError, HttpError } from '../src/util/errors';
+import { SubscriptionInactiveError, HttpError, ReaderKeyError, UserError } from '../src/util/errors';
 
 const res = (statusCode: number, body: unknown): ApiResponse => ({ statusCode, body });
 
@@ -93,5 +93,38 @@ describe('I7 — denial reason + trace reach CI', () => {
     expect(traceOf({ correlationId: 'c1' })).toBe('c1');
     expect(traceOf({ data: { traceId: 't2' } })).toBe('t2');
     expect(traceOf({})).toBeUndefined();
+  });
+});
+
+describe('expectOk — 403 reader_read_only from either service', () => {
+  const READER_MESSAGE =
+    'READER_READ_ONLY: the Reader role can read but not change anything; an organization admin can give this user the Project Admin role.';
+
+  it('file-service flat body → ReaderKeyError naming the key owner and the fix', () => {
+    const err = () =>
+      expectOk(
+        res(403, { error: READER_MESSAGE, message: READER_MESSAGE, code: 'reader_read_only', status: 403 }),
+        '/api/file/artifact/upload/batch',
+      );
+    expect(err).toThrow(ReaderKeyError);
+    expect(err).toThrow(UserError);
+    expect(err).toThrow(/MAESTRO_API_KEY has the Reader role/);
+    expect(err).toThrow(/Project Admin/);
+  });
+
+  it('job-manager nested body → ReaderKeyError', () => {
+    expect(() =>
+      expectOk(
+        res(403, { status: 'FORBIDDEN', message: READER_MESSAGE, data: { code: 'reader_read_only' } }),
+        '/api/job-manager/jobs',
+      ),
+    ).toThrow(ReaderKeyError);
+  });
+
+  it('another 403 stays an HttpError carrying the server message', () => {
+    const err = () =>
+      expectOk(res(403, { code: 'tenant_not_provisioned', message: 'no tenant' }), '/api/job-manager/jobs');
+    expect(err).toThrow(HttpError);
+    expect(err).not.toThrow(ReaderKeyError);
   });
 });
