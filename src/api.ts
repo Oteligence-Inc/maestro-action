@@ -1,6 +1,6 @@
 import { HttpClient } from '@actions/http-client';
 import { Readable } from 'stream';
-import { HttpError, SubscriptionInactiveError } from './util/errors';
+import { HttpError, ReaderKeyError, SubscriptionInactiveError } from './util/errors';
 import { withRetry } from './util/retry';
 
 export interface ApiResponse<T = any> {
@@ -119,6 +119,13 @@ export function expectOk(res: ApiResponse, path: string): void {
         nested && typeof nested === 'object' && nested.code ? nested : res.body;
       if (gate?.code === 'subscription_inactive') {
         throw new SubscriptionInactiveError(gate, traceId);
+      }
+    }
+    // job-manager nests the code under data; file-service sends it at the top level.
+    if (res.statusCode === 403) {
+      const code = res.body?.data?.code ?? res.body?.code;
+      if (code === 'reader_read_only') {
+        throw new ReaderKeyError(traceId);
       }
     }
     throw new HttpError(res.statusCode, path, messageOf(res.body), traceId);

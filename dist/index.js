@@ -29596,6 +29596,13 @@ function expectOk(res, path) {
                 throw new errors_1.SubscriptionInactiveError(gate, traceId);
             }
         }
+        // job-manager nests the code under data; file-service sends it at the top level.
+        if (res.statusCode === 403) {
+            const code = res.body?.data?.code ?? res.body?.code;
+            if (code === 'reader_read_only') {
+                throw new errors_1.ReaderKeyError(traceId);
+            }
+        }
         throw new errors_1.HttpError(res.statusCode, path, messageOf(res.body), traceId);
     }
 }
@@ -31005,7 +31012,7 @@ async function uploadJar(api, inputs, cfg) {
 // Typed errors with user-facing messages (Build Spec §8). Server stack traces and
 // response bodies are never echoed — only safe, actionable text.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.JobTimeout = exports.JobFailed = exports.RemovedServiceError = exports.SubscriptionInactiveError = exports.UserError = exports.HttpError = void 0;
+exports.JobTimeout = exports.JobFailed = exports.ReaderKeyError = exports.RemovedServiceError = exports.SubscriptionInactiveError = exports.UserError = exports.HttpError = void 0;
 exports.formatError = formatError;
 class HttpError extends Error {
     constructor(status, path, 
@@ -31077,6 +31084,19 @@ class RemovedServiceError extends UserError {
     }
 }
 exports.RemovedServiceError = RemovedServiceError;
+/**
+ * The API key's user has the Reader role (HTTP 403 `reader_read_only` from job-manager or file-service), which can
+ * read but not upload, build or report a deploy. A {@link UserError}: the fix is the user's role, not a retry.
+ */
+class ReaderKeyError extends UserError {
+    constructor(traceId) {
+        const traceClause = traceId ? ` [trace: ${traceId}]` : '';
+        super('The member who owns MAESTRO_API_KEY has the Reader role, which can read but not upload or build. ' +
+            'An organization admin can give them the Project Admin role; the next run picks it up.' + traceClause);
+        this.name = 'ReaderKeyError';
+    }
+}
+exports.ReaderKeyError = ReaderKeyError;
 /** A Maestro job ended in a non-COMPLETED terminal state. */
 class JobFailed extends Error {
     constructor(jobId, status) {

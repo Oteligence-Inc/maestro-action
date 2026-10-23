@@ -76,6 +76,21 @@ export class RemovedServiceError extends UserError {
   }
 }
 
+/**
+ * The API key's user has the Reader role (HTTP 403 `reader_read_only` from job-manager or file-service), which can
+ * read but not upload, build or report a deploy. A {@link UserError}: the fix is the user's role, not a retry.
+ */
+export class ReaderKeyError extends UserError {
+  constructor(traceId?: string) {
+    const traceClause = traceId ? ` [trace: ${traceId}]` : '';
+    super(
+      'The member who owns MAESTRO_API_KEY has the Reader role, which can read but not upload or build. ' +
+        'An organization admin can give them the Project Admin role; the next run picks it up.' + traceClause,
+    );
+    this.name = 'ReaderKeyError';
+  }
+}
+
 /** A Maestro job ended in a non-COMPLETED terminal state. */
 export class JobFailed extends Error {
   constructor(jobId: string, status: string) {
