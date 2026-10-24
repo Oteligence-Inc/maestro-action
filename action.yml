@@ -30,6 +30,9 @@ inputs:
   api-url:
     description: "The Maestro API this run talks to: https://prod.api.oteligence.com for hosted Maestro, your platform's own address for a private-cloud install. Must be https://"
     required: true
+  trusted-api-host:
+    description: "A private-cloud install's API hostname (e.g. maestro.example.internal), with no scheme, port or path. api-url may then point at that host and no other; leave it unset for hosted Maestro, whose *.oteligence.com hosts need no naming"
+    required: false
   timeout-seconds:
     description: 'Max wait for each Maestro job to complete'
     required: false

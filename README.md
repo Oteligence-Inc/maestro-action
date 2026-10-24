@@ -35,6 +35,7 @@ jobs:
         with:
           api-key: ${{ secrets.MAESTRO_API_KEY }}
           api-url: 'https://prod.api.oteligence.com'  # hosted Maestro; a private-cloud install uses its own
+          # trusted-api-host: 'maestro.example.internal'  # a private-cloud install names its API host here
           project: 'banking-app'                # same across all service repos
           service: 'fund-transfer-service'      # this service's name in Maestro
           environment: ${{ github.ref == 'refs/heads/main' && 'prod' || (github.ref == 'refs/heads/staging' && 'staging' || 'dev') }}
@@ -67,7 +68,8 @@ the app image.
 | `service` | yes | none | The name the environment registers this service under: the analysis's name for the JAR (its `spring.application.name`, else the JAR's file name without its version), or, for one of two JARs that share that name, the file-derived name the wizard registered it under. A run whose input the environment's latest lock does not register fails and lists the names it does. A run warns when the analysis keys the JAR differently from the key the lock recorded for the registration (the build may then carry none of its locked methods), or, under a lock that recorded none, when the analysis names it differently. |
 | `environment` | yes | none | Target env: `dev` / `staging` / `prod` / custom. |
 | `jars` | yes | none | Glob to the JAR (e.g. `target/*.jar`). v0 expects exactly one match. |
-| `api-url` | yes | | The Maestro API this run talks to: `https://prod.api.oteligence.com` for hosted Maestro, or your private-cloud install's address. It must be `https://` in every case; a private-cloud install serves plain HTTP out of the box, so put a TLS terminator in front of it. A host outside `*.oteligence.com` also needs `MAESTRO_ALLOW_CUSTOM_API_URL=1` in the step's environment. |
+| `api-url` | yes | | The Maestro API this run talks to: `https://prod.api.oteligence.com` for hosted Maestro, or your private-cloud install's address. It must be `https://` in every case; a private-cloud install serves plain HTTP out of the box, so put a TLS terminator in front of it. A host outside `*.oteligence.com` must also be named in `trusted-api-host`. |
+| `trusted-api-host` | no | | A private-cloud install's API hostname, such as `maestro.example.internal`: no scheme, port or path. The Action then accepts `api-url` on that host and refuses every other, an `*.oteligence.com` host included. Leave it unset for hosted Maestro. |
 | `timeout-seconds` | no | `300` | Max wait for each Maestro job. |
 | `fail-on-warnings` | no | `false` | Fail the step if this run made peer services stale. |
 | `skip-generate-on-inactive` | no | `false` | When the subscription is inactive (402), skip generation, set `generated` to `false` and let the pipeline continue without a new extension, instead of failing the step. |

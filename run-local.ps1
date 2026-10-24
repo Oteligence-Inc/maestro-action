@@ -35,13 +35,13 @@ if (-not (Test-Path -LiteralPath $jarPath -PathType Leaf)) {
   throw "Jar not found: $Jar"
 }
 
-# Required to allow a non-*.oteligence.com host (ngrok/caddy). Still must be https://.
-$env:MAESTRO_ALLOW_CUSTOM_API_URL = "1"
 $env:RUNNER_TEMP = (New-Item -ItemType Directory "$env:TEMP\maestro-run" -Force).FullName
 
 # Hyphenated names set via .NET API to dodge all PowerShell parsing ambiguity.
 [Environment]::SetEnvironmentVariable('INPUT_API-KEY', $ApiKey, 'Process')
 [Environment]::SetEnvironmentVariable('INPUT_API-URL', $ApiUrl, 'Process')
+# Names the ngrok/caddy host as trusted, which a host outside *.oteligence.com needs. Still must be https://.
+[Environment]::SetEnvironmentVariable('INPUT_TRUSTED-API-HOST', ([Uri]$ApiUrl).IdnHost, 'Process')
 ${env:INPUT_PROJECT}        = $Project
 ${env:INPUT_SERVICE}        = $Service
 ${env:INPUT_ENVIRONMENT}    = $Environment

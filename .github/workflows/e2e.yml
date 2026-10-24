@@ -11,6 +11,7 @@ name: E2E
 #
 # Locally with nektos/act, from the repo root:
 #   act workflow_dispatch -W .github/workflows/e2e.yml -s MAESTRO_API_KEY=<ak_ key> -s MAESTRO_API_URL=https://develop.api.oteligence.com
+# Against an https host outside *.oteligence.com, add --var MAESTRO_TRUSTED_API_HOST=<that hostname>.
 # `uses: ./` resolves to this repo's action.yml, so act runs the freshly built dist/.
 
 on:
@@ -43,9 +44,6 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    env:
-      # The Action is https-only and allow-lists *.oteligence.com; an act run against another host needs this.
-      MAESTRO_ALLOW_CUSTOM_API_URL: '1'
     steps:
       - uses: actions/checkout@v7
 
@@ -62,6 +60,8 @@ jobs:
         with:
           api-key: ${{ secrets.MAESTRO_API_KEY }}
           api-url: ${{ secrets.MAESTRO_API_URL }}
+          # Empty for an *.oteligence.com API. A variable, not a secret, so the runner does not mask the host in errors.
+          trusted-api-host: ${{ vars.MAESTRO_TRUSTED_API_HOST }}
           project: ${{ inputs.project || 'maestro-action-e2e' }}
           service: ${{ inputs.service || 'order-service' }}
           environment: ${{ inputs.environment || 'dev' }}
