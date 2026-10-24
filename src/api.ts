@@ -1,6 +1,6 @@
 import { HttpClient } from '@actions/http-client';
 import { Readable } from 'stream';
-import { HttpError, ReaderKeyError, SubscriptionInactiveError } from './util/errors';
+import { HttpError, ReaderKeyError, SubscriptionInactiveError, UserError } from './util/errors';
 import { withRetry } from './util/retry';
 
 export interface ApiResponse<T = any> {
@@ -16,6 +16,11 @@ export interface ApiResponse<T = any> {
  */
 export class MaestroApi {
   private readonly client = new HttpClient('maestro-action/0.1', [], { allowRetries: false });
+  // A followed redirect would send the upload's stream again after it was read; a presigned PUT never moves.
+  private readonly uploadClient = new HttpClient('maestro-action/0.1', [], {
+    allowRetries: false,
+    allowRedirects: false,
+  });
   private token: string | null = null;
 
   constructor(private readonly baseUrl: string) {}
@@ -36,13 +41,19 @@ export class MaestroApi {
 
   /** Upload raw bytes to a presigned S3 URL — NO auth header (the URL is the credential). */
   async putBytes(presignedUrl: string, bytes: Buffer): Promise<void> {
+    requireHttps(presignedUrl);
     await withRetry(async () => {
-      const res = await this.client.request('PUT', presignedUrl, Readable.from(bytes), {
+      const res = await this.uploadClient.request('PUT', presignedUrl, Readable.from(bytes), {
         'Content-Type': 'application/octet-stream',
         'Content-Length': String(bytes.length),
       });
       const status = res.message.statusCode ?? 0;
       await res.readBody(); // drain
+      if (status >= 300 && status < 400) {
+        throw new UserError(
+          `Maestro storage answered the upload with a redirect (HTTP ${status}); the Action does not follow one.`,
+        );
+      }
       if (status >= 400) {
         // 5xx/429/408 are retried by withRetry; other 4xx fail fast.
         throw new HttpError(status, '<presigned-s3-url>');
@@ -50,21 +61,11 @@ export class MaestroApi {
     });
   }
 
-  /** GET a signed URL and return the raw body text (preview JSON, etc.). No auth header. */
-  async getSignedText(signedUrl: string): Promise<string> {
-    return withRetry(async () => {
-      const res = await this.client.get(signedUrl);
-      const status = res.message.statusCode ?? 0;
-      const text = await res.readBody();
-      if (status >= 400) throw new HttpError(status, '<signed-url>');
-      return text;
-    });
-  }
-
   /** GET a signed URL and return the raw body as a Buffer (zip bundle download). */
   async getSignedBytes(signedUrl: string): Promise<Buffer> {
+    requireHttps(signedUrl);
     return withRetry(async () => {
-      const res = await this.client.get(signedUrl);
+      const res = await this.client.get(signedUrl).catch(namedDowngrade);
       const status = res.message.statusCode ?? 0;
       const chunks: Buffer[] = [];
       await new Promise<void>((resolve, reject) => {
@@ -176,4 +177,28 @@ export function traceOf(body: any): string | undefined {
     body.data?.traceId ??
     body.data?.correlationId;
   return typeof t === 'string' && t ? t.slice(0, 120) : undefined;
+}
+
+/** Artifacts and bundles travel over https only. The URL is a credential, so the refusal never echoes it. */
+export function requireHttps(signedUrl: string): void {
+  let protocol: string;
+  try {
+    protocol = new URL(signedUrl).protocol;
+  } catch {
+    throw new UserError('Maestro returned a storage URL the Action cannot read.');
+  }
+  if (protocol !== 'https:') {
+    throw new UserError(
+      `Maestro returned a storage URL over ${protocol}//; the Action moves JARs and bundles over https only. ` +
+        'Serve the install\'s presigned storage URLs over https (AWS_PRESIGN_ENDPOINT_URL on a private-cloud install).',
+    );
+  }
+}
+
+/** http-client refuses a redirect from https to http with advice the Action cannot follow; say what happened. */
+function namedDowngrade(err: unknown): never {
+  if (err instanceof Error && /Redirect from HTTPS to HTTP/.test(err.message)) {
+    throw new UserError('Maestro storage redirected the Action from https to http; it follows https only.');
+  }
+  throw err;
 }
