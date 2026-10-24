@@ -75,6 +75,7 @@ the app image.
 | `skip-generate-on-inactive` | no | `false` | When the subscription is inactive (402), skip generation, set `generated` to `false` and let the pipeline continue without a new extension, instead of failing the step. |
 | `skip-on-removed-service` | no | `false` | When this service is no longer in the environment's lock, skip generation, set `generated` to `false` and let the pipeline continue, instead of failing the step. Off, a removed or mistyped service fails with a message. |
 | `signing-public-key` | no | | The Ed25519 public key your Maestro platform signs builds with: its PEM, or the base64 of its X.509 SubjectPublicKeyInfo. Set, the step fails unless the build carries a statement this key signed (see *Verifying the download*). Unset, a signed build is reported as `not-checked` and an unsigned one as `unsigned`. Take it from your own records, for example a repository variable, never from the Maestro server; a private key is refused. |
+| `require-signed-build` | no | `false` | `true` fails the step when `signing-public-key` is empty. A workflow variable that is missing in a repository, fork or environment reads as empty, which would otherwise switch the signature check off. |
 
 ## Outputs
 
@@ -154,12 +155,20 @@ record entry together cannot also make the signature verify.
 
 With `signing-public-key` set, the step also fails, and removes what it downloaded, when:
 
-- the bundle carries no statement or no signature (the platform holds no signing key);
+- the bundle carries no statement or no signature (the platform holds no signing key, or the download was altered);
 - the statement names another key, or the signature does not verify with this one (a statement or signature altered);
 - the statement's inputs digest, JARs, bindings or files differ from the record the remaining checks use;
 - the statement names another lock version than the one this run built, or a schema this action does not know.
 
-Without it, the Action reports the signature and checks nothing about it.
+Without it, the Action reports the signature and checks nothing about it; `require-signed-build: true` makes an
+empty key an error instead.
+
+**What the signature shows:** the files are the bytes a job processor holding the key built from the inputs its
+statement names, so storage or a server that rewrites a file and its record afterwards is caught. **What it does not
+show:** that those inputs are the lock you made. The lock, the analysis and the uploads reach the job processor
+through the platform, and the lock version the Action compares is the one the server reports, so a compromised
+platform can still have a genuine build made from inputs of its choosing. The four files outside the record
+(`build-annex.json`, `lock-record.json`, `summary.html`, `SUMMARY.txt`) are not signed either.
 
 To check a bundle by hand, from the folder it was extracted to, with the public key in `signing-public-key.pem`
 (OpenSSL 3, which reads raw Ed25519 input with `-rawin`):
@@ -171,7 +180,16 @@ jq -r '.files | to_entries[] | "\(.value)  \(.key)"' build-statement.json | sha2
 
 The first prints `Signature Verified Successfully`; the second prints `OK` for each file the statement covers (on
 macOS, `shasum -a 256 -c -` in place of `sha256sum -c -`). The two configs the Action downloads separately are in the
-bundle too, under their bundle names.
+bundle too, under their bundle names. Then list every file the statement does not name, in bash:
+
+```bash
+export LC_ALL=C
+comm -13 <(jq -r '.files | keys[]' build-statement.json | sort) <(find . -type f ! -name signing-public-key.pem | sed 's|^\./||' | sort)
+```
+
+It prints only `SUMMARY.txt`, `build-annex.json`, `build-statement.json`, `build-statement.sig`, `summary.html` and,
+for a build from a lock, `lock-record.json`. Any other name is a file the build did not make. `LC_ALL=C` matters:
+`comm` compares in the locale's order and reports every line when that differs from `sort`'s.
 
 After step 9 the Action calls `GET .../staleness` and emits a **`::warning`** naming any
 **peer** services *this run* made stale (so they can be re-built). This is the only

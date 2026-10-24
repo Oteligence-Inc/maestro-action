@@ -25918,6 +25918,11 @@ function parseInputs() {
     const skipGenerateOnInactive = (core.getInput('skip-generate-on-inactive') || 'false').toLowerCase() === 'true';
     const skipOnRemovedService = (core.getInput('skip-on-removed-service') || 'false').toLowerCase() === 'true';
     const signingKey = parseSigningKey(core.getInput('signing-public-key'));
+    const requireSignedBuild = (core.getInput('require-signed-build') || 'false').toLowerCase() === 'true';
+    if (requireSignedBuild && !signingKey) {
+        throw new errors_1.UserError('require-signed-build is set but signing-public-key is empty: an unset variable reads as empty. ' +
+            'Supply the platform\'s public key.');
+    }
     return {
         apiKey, project, projectId, orgId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
         failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey,

@@ -329,7 +329,7 @@ it('reports a signed build as not checked when the workflow supplies no key, and
 });
 
 it('refuses an unsigned build when the workflow supplies a key', async () => {
-  expect(await refusal(download(keyed()))).toMatch(/not signed, but this workflow requires a signed build/);
+  expect(await refusal(download(keyed()))).toMatch(/not signed, but this workflow requires a signed build.*or the download was altered/);
   const statementOnly = sign(download(keyed()));
   fs.rmSync(path.join(statementOnly.extensionDir, SIGNATURE));
   expect(await refusal(statementOnly)).toMatch(/not signed, but this workflow requires a signed build/);
@@ -386,6 +386,14 @@ it('refuses a record whose bindings, JARs or inputs differ from the signed state
   await expect(verifyBuild(record({ applicationJars: [UPLOAD, PEER] }))).resolves.toMatchObject({ signature: 'verified' });
 });
 
+it('names a claimed key only when it has the shape of a fingerprint', async () => {
+  const d = download(keyed());
+  const odd = statementFor(d.record as BuildRecord, KEY.privateKey, { signingKey: 'x\n::warning::injected' });
+  const message = await refusal(sign(d, KEY.privateKey, odd));
+  expect(message).toMatch(/signed by another key \(a key it does not name\)/);
+  expect(message).not.toMatch(/injected/);
+});
+
 it('refuses a signed build of another lock', async () => {
   expect(await refusal(sign(download(keyed({ lockedVersionUid: 'lv_6' }))))).toMatch(
     /made from lock version lv_7, not lv_6, the lock this run built/,
@@ -400,7 +408,16 @@ it('refuses a signed statement that is not JSON, or has a schema it does not kno
 });
 
 it("refuses a build whose record reads differs before reading its signature, as a platform fault", async () => {
-  expect(await refusal(sign(download(keyed(), { status: 'differs' })))).toMatch(/platform could not reproduce this build/);
+  // Signed by another key: a signature check that ran first would refuse it for the key instead.
+  const message = await refusal(sign(download(keyed(), { status: 'differs' }), OTHER.privateKey));
+  expect(message).toMatch(/platform could not reproduce this build/);
+  expect(message).not.toMatch(/another key/);
+});
+
+it('reports a bundle with a statement and no signature as unsigned when the workflow supplies no key', async () => {
+  const half = sign(download());
+  fs.rmSync(path.join(half.extensionDir, SIGNATURE));
+  await expect(verifyBuild(half)).resolves.toEqual({ record: 'recorded', signature: 'unsigned' });
 });
 
 it('names the key as the platform does: the SHA-256 of its SubjectPublicKeyInfo', () => {

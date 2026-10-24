@@ -29928,6 +29928,11 @@ function parseInputs() {
     const skipGenerateOnInactive = (core.getInput('skip-generate-on-inactive') || 'false').toLowerCase() === 'true';
     const skipOnRemovedService = (core.getInput('skip-on-removed-service') || 'false').toLowerCase() === 'true';
     const signingKey = parseSigningKey(core.getInput('signing-public-key'));
+    const requireSignedBuild = (core.getInput('require-signed-build') || 'false').toLowerCase() === 'true';
+    if (requireSignedBuild && !signingKey) {
+        throw new errors_1.UserError('require-signed-build is set but signing-public-key is empty: an unset variable reads as empty. ' +
+            'Supply the platform\'s public key.');
+    }
     return {
         apiKey, project, projectId, orgId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
         failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey,
@@ -31202,6 +31207,7 @@ class BuildVerificationError extends errors_1.UserError {
 }
 exports.BuildVerificationError = BuildVerificationError;
 const SHA256 = /^[0-9a-f]{64}$/;
+const FINGERPRINT = /^sha256:[0-9a-f]{64}$/;
 /**
  * Checks every downloaded file against the record of its build's inputs, and the build's signature when the workflow
  * supplies a key, before anything registers or deploys it. Refuses, and deletes the downloaded files, on anything it
@@ -31315,11 +31321,11 @@ function checkSignature(d, record) {
     const hasStatement = isFile(statementPath);
     const hasSignature = isFile(signaturePath);
     if (!d.signingKey) {
-        return hasStatement || hasSignature ? 'not-checked' : 'unsigned';
+        return hasStatement && hasSignature ? 'not-checked' : 'unsigned';
     }
     if (!hasStatement || !hasSignature) {
-        refuse('The build is not signed, but this workflow requires a signed build (signing-public-key is set). ' +
-            'The Maestro platform that built it holds no signing key; ask its operator to set one.');
+        refuse('The build is not signed, but this workflow requires a signed build (signing-public-key is set). Either the ' +
+            'Maestro platform that built it holds no signing key, or the download was altered.');
     }
     const statementBytes = fs.readFileSync(statementPath);
     const signatureBytes = fs.readFileSync(signaturePath);
@@ -31335,7 +31341,11 @@ function checkSignature(d, record) {
     }
     const expectedKey = keyFingerprint(d.signingKey);
     if (statement.signingKey !== expectedKey) {
-        refuse(`The build is signed by another key (${String(statement.signingKey)}), not the key this workflow supplies ` +
+        // Unverified text: named only when it has a fingerprint's shape.
+        const claimed = typeof statement.signingKey === 'string' && FINGERPRINT.test(statement.signingKey)
+            ? statement.signingKey
+            : 'a key it does not name';
+        refuse(`The build is signed by another key (${claimed}), not the key this workflow supplies ` +
             `in signing-public-key (${expectedKey}).`);
     }
     if (!crypto.verify(null, statementBytes, d.signingKey, signatureBytes)) {

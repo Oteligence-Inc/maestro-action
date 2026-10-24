@@ -235,6 +235,22 @@ describe('signing-public-key', () => {
     }
   });
 
+  it('require-signed-build refuses an empty key, and is off by default', () => {
+    process.env['INPUT_API-KEY'] = 'k';
+    process.env['INPUT_PROJECT-ID'] = 'proj_1';
+    process.env['INPUT_SERVICE'] = 'svc';
+    process.env['INPUT_ENVIRONMENT'] = 'dev';
+    process.env['INPUT_JARS'] = 'target/x.jar';
+    process.env['INPUT_API-URL'] = 'https://prod.api.oteligence.com';
+    process.env['INPUT_SIGNING-PUBLIC-KEY'] = '';
+    delete process.env['INPUT_REQUIRE-SIGNED-BUILD'];
+    expect(parseInputs().signingKey).toBeNull();
+    process.env['INPUT_REQUIRE-SIGNED-BUILD'] = 'TRUE';
+    expect(() => parseInputs()).toThrow(/require-signed-build is set but signing-public-key is empty/);
+    process.env['INPUT_SIGNING-PUBLIC-KEY'] = pem;
+    expect(parseInputs().signingKey?.asymmetricKeyType).toBe('ed25519');
+  });
+
   it('reaches the parsed inputs', () => {
     process.env['INPUT_API-KEY'] = 'k';
     process.env['INPUT_PROJECT-ID'] = 'proj_1';

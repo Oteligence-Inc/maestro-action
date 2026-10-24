@@ -63,13 +63,15 @@ extension bundle and configs on the runner for their image build. All analysis a
    and is carried here, not taken from the server; a record that covers one of them is refused by name.
    The signature (`checkSignature`) runs after the record's status check and before the bindings and file checks.
    With `signing-public-key` (`Inputs.signingKey`, parsed by `parseSigningKey`: PEM or base64 SPKI DER, Ed25519
-   only, a private key refused) the bundle must carry `build-statement.json` and `build-statement.sig`; the
+   only, a private key refused; `require-signed-build: true` makes an empty one an input error) the bundle must carry `build-statement.json` and `build-statement.sig`; the
    statement's `signingKey` must be the key's fingerprint (`keyFingerprint`: `sha256:` and the hex SHA-256 of its
    SPKI DER), the signature must verify over the statement's bytes (`crypto.verify(null, ...)`), its `schema` must
    be `oteligence.build-statement/1`, its `lockedVersionUid` must be the lock this run resolved, and its
    `inputsDigest`, `applicationJars` (as a set), `bindings` and `files` must equal the record's, so every later check
-   holds the files to the signed record. Without the input, a bundle carrying either file is `not-checked` and one
-   carrying neither is `unsigned`; nothing is refused for it. `run` sets `build-signature` to the outcome.
+   holds the files to the signed record. Without the input, a bundle carrying both files is `not-checked` and any other
+   is `unsigned`; nothing is refused for it. The signature covers what the record covers and anchors the lock only
+   to the uid the server reported, so it catches tampering after the build, not a platform that builds from inputs
+   it chose. `run` sets `build-signature` to the outcome.
    A refusal is a `BuildVerificationError` (a `UserError`), the downloaded files (the bundle and both configs) are
    deleted, and nothing registers.
 8. `registerJarForEnv`: `PUT .../envs/{env}/services/{service}/jar` under the `service` input. It warns when the
