@@ -18,6 +18,8 @@ export interface Downloaded {
   /** `undefined`: the server's response has no `buildRecord` at all; `null`: it has none for this build. */
   record: BuildRecord | null | undefined;
   uploadSha: string;
+  /** The analysis's key for the uploaded JAR, which the record's `bindings` are keyed by. */
+  serviceKey: string | undefined;
   extensionDir: string;
   configPath: string;
   configFileName: string | null;
@@ -50,6 +52,12 @@ async function check(d: Downloaded): Promise<'recorded' | 'matched'> {
   if (record === null) {
     refuse("The build has no record to verify its files against. Run the job again; contact support if it persists.");
   }
+  if (typeof record === 'object' && !Object.prototype.hasOwnProperty.call(record, 'bindings')) {
+    refuse(
+      'This Maestro server does not record which upload it built each service from, so the download cannot be verified. ' +
+        'Upgrade the server.',
+    );
+  }
   if (!wellFormed(record)) {
     refuse("The build's record is malformed, so the download cannot be verified.");
   }
@@ -67,6 +75,16 @@ async function check(d: Downloaded): Promise<'recorded' | 'matched'> {
   }
   if (!record.applicationJars.includes(d.uploadSha)) {
     refuse(`The build's record does not name the JAR this run uploaded (SHA-256 ${d.uploadSha}).`);
+  }
+  if (!d.serviceKey) {
+    refuse('The Action could not name the service the analysis made of the uploaded JAR, so it cannot check the build built it.');
+  }
+  const bound = Object.prototype.hasOwnProperty.call(record.bindings, d.serviceKey) ? record.bindings[d.serviceKey] : undefined;
+  if (bound === undefined) {
+    refuse(`The build's record binds no JAR to ${d.serviceKey}, the service the analysis made of the uploaded JAR.`);
+  }
+  if (bound !== d.uploadSha) {
+    refuse(`The build bound ${d.serviceKey} to another JAR (SHA-256 ${bound}), not the one this run uploaded (SHA-256 ${d.uploadSha}).`);
   }
 
   const seen = new Set<string>();
@@ -121,6 +139,12 @@ function wellFormed(r: unknown): r is BuildRecord {
     !Array.isArray(o.files) &&
     Object.entries(o.files as Record<string, unknown>).every(
       ([name, hash]) => name.length > 0 && !name.includes('/') && typeof hash === 'string' && SHA256.test(hash),
+    ) &&
+    !!o.bindings &&
+    typeof o.bindings === 'object' &&
+    !Array.isArray(o.bindings) &&
+    Object.entries(o.bindings as Record<string, unknown>).every(
+      ([key, hash]) => key.length > 0 && typeof hash === 'string' && SHA256.test(hash),
     )
   );
 }

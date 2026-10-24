@@ -68,6 +68,7 @@ it("hands the register step both of the analysis's names, key first", async () =
   expect(core.setFailed).not.toHaveBeenCalled();
   expect(registerJarForEnv).toHaveBeenCalledWith(expect.anything(), inputs, expect.anything(), expect.anything(),
     'build_1', ['fund-transfer-service@1a2b3c4d', 'fund-transfer-service']);
+  expect(verifyBuild).toHaveBeenCalledWith(expect.objectContaining({ serviceKey: 'fund-transfer-service@1a2b3c4d' }));
 });
 
 it('hands it no name when the analysis gave none', async () => {
@@ -75,6 +76,7 @@ it('hands it no name when the analysis gave none', async () => {
   await run();
   expect(registerJarForEnv).toHaveBeenCalledWith(
     expect.anything(), inputs, expect.anything(), expect.anything(), 'build_1', []);
+  expect(verifyBuild).toHaveBeenCalledWith(expect.objectContaining({ serviceKey: undefined }));
 });
 
 it('refuses a service input the environment does not register, naming the ones it does', async () => {

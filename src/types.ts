@@ -62,6 +62,8 @@ export interface BuildRecord {
   files: Record<string, string>;
   /** The build that wrote the record. */
   firstJobId: string;
+  /** Service key (the analysis's) to the lower-case hex SHA-256 of the upload the build bound to it. */
+  bindings: Record<string, string>;
 }
 
 export interface SelectionEntry {

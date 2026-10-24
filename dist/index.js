@@ -29755,7 +29755,7 @@ async function run() {
         const analysisNames = analysis.names;
         const paths = await (0, download_1.downloadArtifacts)(api, buildJobId, inputs.service, analysisNames); // [8]
         // [8b] Every downloaded file against the record of the build's inputs, before anything registers or deploys it.
-        const buildRecord = await (0, verify_1.verifyBuild)({ ...paths, uploadSha: upload.sha });
+        const buildRecord = await (0, verify_1.verifyBuild)({ ...paths, uploadSha: upload.sha, serviceKey: analysisNames[0] });
         core.info(`Verified the build's files against its record (${buildRecord}).`);
         await (0, register_1.registerJarForEnv)(api, inputs, cfg, upload, buildJobId, analysisNames); // [9]
         core.setOutput('extension-dir', paths.extensionDir);
@@ -31117,6 +31117,10 @@ async function check(d) {
     if (record === null) {
         refuse("The build has no record to verify its files against. Run the job again; contact support if it persists.");
     }
+    if (typeof record === 'object' && !Object.prototype.hasOwnProperty.call(record, 'bindings')) {
+        refuse('This Maestro server does not record which upload it built each service from, so the download cannot be verified. ' +
+            'Upgrade the server.');
+    }
     if (!wellFormed(record)) {
         refuse("The build's record is malformed, so the download cannot be verified.");
     }
@@ -31132,6 +31136,16 @@ async function check(d) {
     }
     if (!record.applicationJars.includes(d.uploadSha)) {
         refuse(`The build's record does not name the JAR this run uploaded (SHA-256 ${d.uploadSha}).`);
+    }
+    if (!d.serviceKey) {
+        refuse('The Action could not name the service the analysis made of the uploaded JAR, so it cannot check the build built it.');
+    }
+    const bound = Object.prototype.hasOwnProperty.call(record.bindings, d.serviceKey) ? record.bindings[d.serviceKey] : undefined;
+    if (bound === undefined) {
+        refuse(`The build's record binds no JAR to ${d.serviceKey}, the service the analysis made of the uploaded JAR.`);
+    }
+    if (bound !== d.uploadSha) {
+        refuse(`The build bound ${d.serviceKey} to another JAR (SHA-256 ${bound}), not the one this run uploaded (SHA-256 ${d.uploadSha}).`);
     }
     const seen = new Set();
     for (const entry of fs.readdirSync(d.extensionDir, { withFileTypes: true })) {
@@ -31183,7 +31197,11 @@ function wellFormed(r) {
         !!o.files &&
         typeof o.files === 'object' &&
         !Array.isArray(o.files) &&
-        Object.entries(o.files).every(([name, hash]) => name.length > 0 && !name.includes('/') && typeof hash === 'string' && SHA256.test(hash)));
+        Object.entries(o.files).every(([name, hash]) => name.length > 0 && !name.includes('/') && typeof hash === 'string' && SHA256.test(hash)) &&
+        !!o.bindings &&
+        typeof o.bindings === 'object' &&
+        !Array.isArray(o.bindings) &&
+        Object.entries(o.bindings).every(([key, hash]) => key.length > 0 && typeof hash === 'string' && SHA256.test(hash)));
 }
 function refuse(message) {
     throw new BuildVerificationError(message);

@@ -68,7 +68,7 @@ export async function run(): Promise<void> {
     const analysisNames = analysis.names;
     const paths = await downloadArtifacts(api, buildJobId, inputs.service, analysisNames); // [8]
     // [8b] Every downloaded file against the record of the build's inputs, before anything registers or deploys it.
-    const buildRecord = await verifyBuild({ ...paths, uploadSha: upload.sha });
+    const buildRecord = await verifyBuild({ ...paths, uploadSha: upload.sha, serviceKey: analysisNames[0] });
     core.info(`Verified the build's files against its record (${buildRecord}).`);
     await registerJarForEnv(api, inputs, cfg, upload, buildJobId, analysisNames); // [9]
 
