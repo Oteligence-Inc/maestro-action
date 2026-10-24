@@ -12,7 +12,7 @@ extension bundle and configs on the runner for their image build. All analysis a
 | `src/index.ts` | `run()`: the step order below, the removed-service guard, the two opt-in degradations (`skip-on-removed-service`, `skip-generate-on-inactive`), and the deploy-run report at start and end. |
 | `src/post.ts`, `src/postMain.ts` | The post step, its own bundle so it can never run the pipeline. `post()` acts only while `deployRunProjectUid` is set (a run Maestro has not accepted as completed): it re-authenticates and reports the run completed with the `deployRunConclusion` the main step last tried to send, or `cancelled` when the main step was stopped before it got that far (a cancel, or a timeout, which therefore reads as cancelled). Warns when it cannot report, and never fails the step. |
 | `src/inputs.ts` | `parseInputs`: reads the inputs, requires `project` or `project-id` and `api-url` (there is no default API), and holds `api-url` to `https://` on an `*.oteligence.com` host, or, when `trusted-api-host` names a hostname, on exactly that host. |
-| `src/api.ts` | `MaestroApi` over `@actions/http-client`: bearer auth, retry on transient failures (`util/retry.ts`), signed-URL reads and writes without the auth header, `expectOk` mapping a 402 `subscription_inactive` to `SubscriptionInactiveError`. |
+| `src/api.ts` | `MaestroApi` over `@actions/http-client`: bearer auth, retry on transient failures (`util/retry.ts`), signed-URL reads and writes without the auth header and over https only (`requireHttps` refuses another scheme by name, never echoing the URL), `expectOk` mapping a 402 `subscription_inactive` to `SubscriptionInactiveError`. |
 | `src/steps/` | One module per step, each with its own suite under `tests/steps/`. |
 | `src/util/errors.ts` | The only messages that reach the log. `formatError` never echoes a response body or stack. |
 | `dist/` | The two ncc bundles GitHub executes, `dist/index.js` and `dist/post/index.js`; committed, and `ci.yml` fails when either is stale. |
@@ -104,9 +104,9 @@ project, whose `dev` lock was made from the committed `fixtures/order-service-1.
 serves build records.
 
 **Running `dist/index.js` against devstack.** The action requires an https `api-url`, while devstack's gateway (`:8082`)
-and MinIO (`:9000`) speak http. The signed upload and download URLs must be https too: the action's one
-`HttpClient` refuses an `http:` URL once it has called the https API (`Protocol "http:" not supported. Expected
-"https:"`), so both services that sign storage URLs are pointed at the MinIO front.
+and MinIO (`:9000`) speak http. The signed upload and download URLs must be https too: `MaestroApi.requireHttps`
+refuses any other scheme before sending anything, on every runner (a proxied runner used to send an http signed URL in
+cleartext), so both services that sign storage URLs are pointed at the MinIO front.
 `scripts/devstack-tls-proxy.mjs` fronts both (`:8443` and `:9443`, on 127.0.0.1 unless `TLS_PROXY_BIND` says
 otherwise; the MinIO front keeps the Host header, which a presigned URL's signature covers; `TLS_PROXY_TAMPER=<text>`,
 for tests only, flips the last byte of a MinIO response whose path holds the text, which the kit uses to show the

@@ -29483,6 +29483,7 @@ exports.MaestroApi = void 0;
 exports.expectOk = expectOk;
 exports.messageOf = messageOf;
 exports.traceOf = traceOf;
+exports.requireHttps = requireHttps;
 const http_client_1 = __nccwpck_require__(4844);
 const stream_1 = __nccwpck_require__(2203);
 const errors_1 = __nccwpck_require__(17);
@@ -29497,6 +29498,11 @@ class MaestroApi {
     constructor(baseUrl) {
         this.baseUrl = baseUrl;
         this.client = new http_client_1.HttpClient('maestro-action/0.1', [], { allowRetries: false });
+        // A followed redirect would send the upload's stream again after it was read; a presigned PUT never moves.
+        this.uploadClient = new http_client_1.HttpClient('maestro-action/0.1', [], {
+            allowRetries: false,
+            allowRedirects: false,
+        });
         this.token = null;
     }
     setToken(token) {
@@ -29513,34 +29519,28 @@ class MaestroApi {
     }
     /** Upload raw bytes to a presigned S3 URL — NO auth header (the URL is the credential). */
     async putBytes(presignedUrl, bytes) {
+        requireHttps(presignedUrl);
         await (0, retry_1.withRetry)(async () => {
-            const res = await this.client.request('PUT', presignedUrl, stream_1.Readable.from(bytes), {
+            const res = await this.uploadClient.request('PUT', presignedUrl, stream_1.Readable.from(bytes), {
                 'Content-Type': 'application/octet-stream',
                 'Content-Length': String(bytes.length),
             });
             const status = res.message.statusCode ?? 0;
             await res.readBody(); // drain
+            if (status >= 300 && status < 400) {
+                throw new errors_1.UserError(`Maestro storage answered the upload with a redirect (HTTP ${status}); the Action does not follow one.`);
+            }
             if (status >= 400) {
                 // 5xx/429/408 are retried by withRetry; other 4xx fail fast.
                 throw new errors_1.HttpError(status, '<presigned-s3-url>');
             }
         });
     }
-    /** GET a signed URL and return the raw body text (preview JSON, etc.). No auth header. */
-    async getSignedText(signedUrl) {
-        return (0, retry_1.withRetry)(async () => {
-            const res = await this.client.get(signedUrl);
-            const status = res.message.statusCode ?? 0;
-            const text = await res.readBody();
-            if (status >= 400)
-                throw new errors_1.HttpError(status, '<signed-url>');
-            return text;
-        });
-    }
     /** GET a signed URL and return the raw body as a Buffer (zip bundle download). */
     async getSignedBytes(signedUrl) {
+        requireHttps(signedUrl);
         return (0, retry_1.withRetry)(async () => {
-            const res = await this.client.get(signedUrl);
+            const res = await this.client.get(signedUrl).catch(namedDowngrade);
             const status = res.message.statusCode ?? 0;
             const chunks = [];
             await new Promise((resolve, reject) => {
@@ -29648,6 +29648,27 @@ function traceOf(body) {
         body.data?.traceId ??
         body.data?.correlationId;
     return typeof t === 'string' && t ? t.slice(0, 120) : undefined;
+}
+/** Artifacts and bundles travel over https only. The URL is a credential, so the refusal never echoes it. */
+function requireHttps(signedUrl) {
+    let protocol;
+    try {
+        protocol = new URL(signedUrl).protocol;
+    }
+    catch {
+        throw new errors_1.UserError('Maestro returned a storage URL the Action cannot read.');
+    }
+    if (protocol !== 'https:') {
+        throw new errors_1.UserError(`Maestro returned a storage URL over ${protocol}//; the Action moves JARs and bundles over https only. ` +
+            'Serve the install\'s presigned storage URLs over https (AWS_PRESIGN_ENDPOINT_URL on a private-cloud install).');
+    }
+}
+/** http-client refuses a redirect from https to http with advice the Action cannot follow; say what happened. */
+function namedDowngrade(err) {
+    if (err instanceof Error && /Redirect from HTTPS to HTTP/.test(err.message)) {
+        throw new errors_1.UserError('Maestro storage redirected the Action from https to http; it follows https only.');
+    }
+    throw err;
 }
 
 
