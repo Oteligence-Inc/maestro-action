@@ -1,3 +1,5 @@
+import { types } from 'util';
+
 // Typed errors with user-facing messages (Build Spec §8). Server stack traces and
 // response bodies are never echoed — only safe, actionable text.
 
@@ -125,9 +127,15 @@ export function formatError(err: unknown): string {
     const trace = err.traceId ? ` [trace: ${err.traceId}]` : '';
     return `Maestro API error (HTTP ${err.status})${trace}. Please retry; if it persists, contact support.`;
   }
-  if (err instanceof Error) {
-    // Generic — keep the message, drop the stack.
-    return err.message;
+  if (err instanceof Error || types.isNativeError(err)) {
+    // Generic: keep the message, drop the stack. Node's dual-stack connect fails with an empty-message
+    // AggregateError whose causes say which address refused.
+    if (err.message) return err.message;
+    const inner = (err as { errors?: unknown }).errors;
+    const causes = Array.isArray(inner) ? inner.map((e) => (types.isNativeError(e) ? e.message : '')) : [];
+    const code = (err as NodeJS.ErrnoException).code;
+    const detail = causes.filter(Boolean).join('; ') || code || err.name;
+    return `Could not reach the Maestro API: ${detail}`;
   }
   return 'Unknown error';
 }

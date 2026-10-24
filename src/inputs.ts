@@ -3,9 +3,8 @@ import { Inputs } from './types';
 import { UserError } from './util/errors';
 
 /**
- * Parse + validate the action inputs. Masks the API key in logs (Build Spec §13 #1)
- * and enforces an https-only, oteligence.com-allow-listed api-url (§13 #2/#9) — a
- * custom host requires the explicit MAESTRO_ALLOW_CUSTOM_API_URL=1 opt-in.
+ * Parse + validate the action inputs. Masks the API key in logs and holds api-url to https on exactly the
+ * host trusted-api-host names when it is set, else on an *.oteligence.com host.
  */
 export function parseInputs(): Inputs {
   const apiKey = core.getInput('api-key', { required: true });
@@ -24,7 +23,10 @@ export function parseInputs(): Inputs {
   const environment = core.getInput('environment', { required: true });
   const jarsGlob = core.getInput('jars', { required: true });
 
-  const apiUrl = normaliseApiUrl(core.getInput('api-url', { required: true }));
+  const apiUrl = normaliseApiUrl(
+    core.getInput('api-url', { required: true }),
+    core.getInput('trusted-api-host'),
+  );
 
   const timeoutRaw = core.getInput('timeout-seconds') || '300';
   const timeoutSeconds = Number.parseInt(timeoutRaw, 10);
@@ -44,8 +46,11 @@ export function parseInputs(): Inputs {
   };
 }
 
-/** Strips a trailing slash, enforces https + the oteligence.com allow-list. */
-export function normaliseApiUrl(raw: string): string {
+/**
+ * Strips a trailing slash; requires https, and exactly the trusted host when one is set, else an
+ * *.oteligence.com host.
+ */
+export function normaliseApiUrl(raw: string, trustedApiHost = ''): string {
   let url: URL;
   try {
     url = new URL(raw);
@@ -56,12 +61,36 @@ export function normaliseApiUrl(raw: string): string {
     throw new UserError(`api-url must use https:// — got "${raw}".`);
   }
   const host = url.hostname.toLowerCase();
+  const trusted = trustedHostname(trustedApiHost);
+  if (trusted && host !== trusted) {
+    throw new UserError(`api-url host "${host}" is not the trusted-api-host "${trusted}".`);
+  }
   const isOteligence = host === 'oteligence.com' || host.endsWith('.oteligence.com');
-  const allowCustom = process.env.MAESTRO_ALLOW_CUSTOM_API_URL === '1';
-  if (!isOteligence && !allowCustom) {
+  if (!isOteligence && !trusted) {
     throw new UserError(
-      `api-url "${host}" is not an *.oteligence.com host. Set env MAESTRO_ALLOW_CUSTOM_API_URL=1 to override (advanced/testing only).`,
+      `api-url "${host}" is not an *.oteligence.com host. A private-cloud install names its API host in the trusted-api-host input.`,
     );
   }
   return raw.replace(/\/+$/, '');
+}
+
+/**
+ * The trusted-api-host input in the form URL parsing gives api-url's hostname (lowercase, punycode, canonical IP),
+ * or "" when unset. The refusal does not echo the input, which may carry a pasted URL's password.
+ */
+function trustedHostname(raw: string): string {
+  const name = raw.trim().toLowerCase();
+  if (!name) return '';
+  let parsed: URL | undefined;
+  try {
+    parsed = new URL(`https://${name}`);
+  } catch {
+    parsed = undefined;
+  }
+  if (!parsed || name.includes('*') || parsed.port || parsed.href !== `https://${parsed.host}/`) {
+    throw new UserError(
+      'trusted-api-host must be a hostname only, such as maestro.example.internal, with no scheme, port, path or wildcard.',
+    );
+  }
+  return parsed.hostname;
 }

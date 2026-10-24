@@ -2,10 +2,6 @@ import { normaliseApiUrl, parseInputs } from '../src/inputs';
 import { UserError } from '../src/util/errors';
 
 describe('normaliseApiUrl', () => {
-  afterEach(() => {
-    delete process.env.MAESTRO_ALLOW_CUSTOM_API_URL;
-  });
-
   it('accepts an oteligence host and strips a trailing slash', () => {
     expect(normaliseApiUrl('https://api.oteligence.com/')).toBe('https://api.oteligence.com');
   });
@@ -18,13 +14,78 @@ describe('normaliseApiUrl', () => {
     expect(() => normaliseApiUrl('http://api.oteligence.com')).toThrow(UserError);
   });
 
-  it('rejects a non-oteligence host without the opt-in', () => {
-    expect(() => normaliseApiUrl('https://evil.example.com')).toThrow(/oteligence\.com/);
+  it('rejects a non-oteligence host that no trusted-api-host names, and says which input to set', () => {
+    expect(() => normaliseApiUrl('https://evil.example.com')).toThrow(/oteligence\.com.*trusted-api-host/);
   });
 
-  it('allows a custom host when MAESTRO_ALLOW_CUSTOM_API_URL=1', () => {
+  it('accepts the host trusted-api-host names, case and port aside', () => {
+    expect(normaliseApiUrl('https://Maestro.Bank.internal:8443/', 'maestro.bank.INTERNAL')).toBe(
+      'https://Maestro.Bank.internal:8443',
+    );
+    expect(normaliseApiUrl('https://localhost:8443', ' localhost ')).toBe('https://localhost:8443');
+  });
+
+  it('accepts a trusted host in any form that names the same host, as URL parsing writes it', () => {
+    expect(normaliseApiUrl('https://bücher.example', 'Bücher.example')).toBe('https://bücher.example');
+    expect(normaliseApiUrl('https://[fd00::1]:8443', '[fd00:0:0::1]')).toBe('https://[fd00::1]:8443');
+  });
+
+  it('refuses a host that only starts or ends like the trusted one', () => {
+    const lookalikes = [
+      'https://evil-maestro.bank.internal',
+      'https://x.maestro.bank.internal',
+      'https://maestro.bank.internalx',
+    ];
+    for (const url of lookalikes) {
+      expect(() => normaliseApiUrl(url, 'maestro.bank.internal')).toThrow(/not the trusted-api-host/);
+    }
+  });
+
+  it('refuses a host that only ends in oteligence.com without the dot', () => {
+    expect(() => normaliseApiUrl('https://nototeligence.com')).toThrow(/trusted-api-host/);
+  });
+
+  it('never echoes a refused trusted-api-host, which may carry a password', () => {
+    expect(() => normaliseApiUrl('https://maestro.bank.internal', 'https://ci:s3cret@maestro.bank.internal')).toThrow(
+      /^(?!.*s3cret).*hostname only/,
+    );
+  });
+
+  it('still refuses http:// on the trusted host', () => {
+    expect(() => normaliseApiUrl('http://maestro.bank.internal', 'maestro.bank.internal')).toThrow(/https/);
+  });
+
+  it('refuses a host other than the trusted one, an oteligence host included', () => {
+    expect(() => normaliseApiUrl('https://evil.example.com', 'maestro.bank.internal')).toThrow(
+      /not the trusted-api-host "maestro\.bank\.internal"/,
+    );
+    expect(() => normaliseApiUrl('https://maestro.bank.internal.evil.example', 'maestro.bank.internal')).toThrow(
+      UserError,
+    );
+    expect(() => normaliseApiUrl('https://prod.api.oteligence.com', 'maestro.bank.internal')).toThrow(UserError);
+  });
+
+  it.each([
+    'https://maestro.bank.internal',
+    'maestro.bank.internal:8443',
+    '*.bank.internal',
+    'maestro.bank.internal/api',
+    'user@maestro.bank.internal',
+    'maestro.bank.internal?x',
+    'fd00::1',
+  ])('refuses a trusted-api-host that is not a bare hostname: %s', (trusted) => {
+    expect(() => normaliseApiUrl('https://maestro.bank.internal', trusted)).toThrow(
+      /trusted-api-host must be a hostname/,
+    );
+  });
+
+  it('no longer reads the retired MAESTRO_ALLOW_CUSTOM_API_URL switch', () => {
     process.env.MAESTRO_ALLOW_CUSTOM_API_URL = '1';
-    expect(normaliseApiUrl('https://localhost:8082')).toBe('https://localhost:8082');
+    try {
+      expect(() => normaliseApiUrl('https://localhost:8082')).toThrow(/trusted-api-host/);
+    } finally {
+      delete process.env.MAESTRO_ALLOW_CUSTOM_API_URL;
+    }
   });
 
   it('rejects a host that merely contains oteligence.com as a substring', () => {
@@ -55,6 +116,16 @@ describe('parseInputs — project / project-id', () => {
     expect(() => parseInputs()).toThrow(/api-url/);
     process.env['INPUT_API-URL'] = 'https://develop.api.oteligence.com/';
     expect(parseInputs().apiUrl).toBe('https://develop.api.oteligence.com');
+  });
+
+  it('passes trusted-api-host through to the api-url check', () => {
+    seedRequired();
+    process.env['INPUT_PROJECT-ID'] = 'proj_1';
+    process.env['INPUT_API-URL'] = 'https://maestro.bank.internal/';
+    delete process.env['INPUT_TRUSTED-API-HOST'];
+    expect(() => parseInputs()).toThrow(/trusted-api-host/);
+    process.env['INPUT_TRUSTED-API-HOST'] = 'maestro.bank.internal';
+    expect(parseInputs().apiUrl).toBe('https://maestro.bank.internal');
   });
 
   it('throws when neither project nor project-id is provided', () => {

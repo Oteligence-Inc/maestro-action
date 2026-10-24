@@ -25867,9 +25867,8 @@ exports.normaliseApiUrl = normaliseApiUrl;
 const core = __importStar(__nccwpck_require__(7484));
 const errors_1 = __nccwpck_require__(17);
 /**
- * Parse + validate the action inputs. Masks the API key in logs (Build Spec §13 #1)
- * and enforces an https-only, oteligence.com-allow-listed api-url (§13 #2/#9) — a
- * custom host requires the explicit MAESTRO_ALLOW_CUSTOM_API_URL=1 opt-in.
+ * Parse + validate the action inputs. Masks the API key in logs and holds api-url to https on exactly the
+ * host trusted-api-host names when it is set, else on an *.oteligence.com host.
  */
 function parseInputs() {
     const apiKey = core.getInput('api-key', { required: true });
@@ -25886,7 +25885,7 @@ function parseInputs() {
     const service = core.getInput('service', { required: true });
     const environment = core.getInput('environment', { required: true });
     const jarsGlob = core.getInput('jars', { required: true });
-    const apiUrl = normaliseApiUrl(core.getInput('api-url', { required: true }));
+    const apiUrl = normaliseApiUrl(core.getInput('api-url', { required: true }), core.getInput('trusted-api-host'));
     const timeoutRaw = core.getInput('timeout-seconds') || '300';
     const timeoutSeconds = Number.parseInt(timeoutRaw, 10);
     if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
@@ -25900,8 +25899,11 @@ function parseInputs() {
         failOnWarnings, skipGenerateOnInactive, skipOnRemovedService,
     };
 }
-/** Strips a trailing slash, enforces https + the oteligence.com allow-list. */
-function normaliseApiUrl(raw) {
+/**
+ * Strips a trailing slash; requires https, and exactly the trusted host when one is set, else an
+ * *.oteligence.com host.
+ */
+function normaliseApiUrl(raw, trustedApiHost = '') {
     let url;
     try {
         url = new URL(raw);
@@ -25913,12 +25915,35 @@ function normaliseApiUrl(raw) {
         throw new errors_1.UserError(`api-url must use https:// — got "${raw}".`);
     }
     const host = url.hostname.toLowerCase();
+    const trusted = trustedHostname(trustedApiHost);
+    if (trusted && host !== trusted) {
+        throw new errors_1.UserError(`api-url host "${host}" is not the trusted-api-host "${trusted}".`);
+    }
     const isOteligence = host === 'oteligence.com' || host.endsWith('.oteligence.com');
-    const allowCustom = process.env.MAESTRO_ALLOW_CUSTOM_API_URL === '1';
-    if (!isOteligence && !allowCustom) {
-        throw new errors_1.UserError(`api-url "${host}" is not an *.oteligence.com host. Set env MAESTRO_ALLOW_CUSTOM_API_URL=1 to override (advanced/testing only).`);
+    if (!isOteligence && !trusted) {
+        throw new errors_1.UserError(`api-url "${host}" is not an *.oteligence.com host. A private-cloud install names its API host in the trusted-api-host input.`);
     }
     return raw.replace(/\/+$/, '');
+}
+/**
+ * The trusted-api-host input in the form URL parsing gives api-url's hostname (lowercase, punycode, canonical IP),
+ * or "" when unset. The refusal does not echo the input, which may carry a pasted URL's password.
+ */
+function trustedHostname(raw) {
+    const name = raw.trim().toLowerCase();
+    if (!name)
+        return '';
+    let parsed;
+    try {
+        parsed = new URL(`https://${name}`);
+    }
+    catch {
+        parsed = undefined;
+    }
+    if (!parsed || name.includes('*') || parsed.port || parsed.href !== `https://${parsed.host}/`) {
+        throw new errors_1.UserError('trusted-api-host must be a hostname only, such as maestro.example.internal, with no scheme, port, path or wildcard.');
+    }
+    return parsed.hostname;
 }
 
 
@@ -26377,15 +26402,16 @@ async function findTenantProject(api, ref, matches) {
 /***/ }),
 
 /***/ 17:
-/***/ ((__unused_webpack_module, exports) => {
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
-// Typed errors with user-facing messages (Build Spec §8). Server stack traces and
-// response bodies are never echoed — only safe, actionable text.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.JobTimeout = exports.JobFailed = exports.ReaderKeyError = exports.RemovedServiceError = exports.SubscriptionInactiveError = exports.UserError = exports.HttpError = void 0;
 exports.formatError = formatError;
+const util_1 = __nccwpck_require__(9023);
+// Typed errors with user-facing messages (Build Spec §8). Server stack traces and
+// response bodies are never echoed — only safe, actionable text.
 class HttpError extends Error {
     constructor(status, path, 
     /** A short, already-sanitised server message (never the raw body). */
@@ -26502,9 +26528,16 @@ function formatError(err) {
         const trace = err.traceId ? ` [trace: ${err.traceId}]` : '';
         return `Maestro API error (HTTP ${err.status})${trace}. Please retry; if it persists, contact support.`;
     }
-    if (err instanceof Error) {
-        // Generic — keep the message, drop the stack.
-        return err.message;
+    if (err instanceof Error || util_1.types.isNativeError(err)) {
+        // Generic: keep the message, drop the stack. Node's dual-stack connect fails with an empty-message
+        // AggregateError whose causes say which address refused.
+        if (err.message)
+            return err.message;
+        const inner = err.errors;
+        const causes = Array.isArray(inner) ? inner.map((e) => (util_1.types.isNativeError(e) ? e.message : '')) : [];
+        const code = err.code;
+        const detail = causes.filter(Boolean).join('; ') || code || err.name;
+        return `Could not reach the Maestro API: ${detail}`;
     }
     return 'Unknown error';
 }

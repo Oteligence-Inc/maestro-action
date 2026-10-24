@@ -11,7 +11,7 @@ extension bundle and configs on the runner for their image build. All analysis a
 | `action.yml` | Inputs, outputs, `runs: using: 'node24'`, `main` `dist/index.js` and `post` `dist/post/index.js` (no `post-if`, so it runs on every outcome). |
 | `src/index.ts` | `run()`: the step order below, the removed-service guard, the two opt-in degradations (`skip-on-removed-service`, `skip-generate-on-inactive`), and the deploy-run report at start and end. |
 | `src/post.ts`, `src/postMain.ts` | The post step, its own bundle so it can never run the pipeline. `post()` acts only while `deployRunProjectUid` is set (a run Maestro has not accepted as completed): it re-authenticates and reports the run completed with the `deployRunConclusion` the main step last tried to send, or `cancelled` when the main step was stopped before it got that far (a cancel, or a timeout, which therefore reads as cancelled). Warns when it cannot report, and never fails the step. |
-| `src/inputs.ts` | `parseInputs`: reads the inputs, requires `project` or `project-id` and `api-url` (there is no default API), and enforces an `https://` `api-url` on an `*.oteligence.com` host unless `MAESTRO_ALLOW_CUSTOM_API_URL=1`. |
+| `src/inputs.ts` | `parseInputs`: reads the inputs, requires `project` or `project-id` and `api-url` (there is no default API), and holds `api-url` to `https://` on an `*.oteligence.com` host, or, when `trusted-api-host` names a hostname, on exactly that host. |
 | `src/api.ts` | `MaestroApi` over `@actions/http-client`: bearer auth, retry on transient failures (`util/retry.ts`), signed-URL reads and writes without the auth header, `expectOk` mapping a 402 `subscription_inactive` to `SubscriptionInactiveError`. |
 | `src/steps/` | One module per step, each with its own suite under `tests/steps/`. |
 | `src/util/errors.ts` | The only messages that reach the log. `formatError` never echoes a response body or stack. |
@@ -119,7 +119,7 @@ node maestro-action/scripts/devstack-tls-proxy.mjs /tmp/maestro-tls/cert.pem /tm
 cp devstack/devstack.local.env /tmp/maestro-tls/local.env && echo AWS_PRESIGN_ENDPOINT_URL=https://localhost:9443 >> /tmp/maestro-tls/local.env
 OTELIGENCE_LOCAL_ENV=/tmp/maestro-tls/local.env bash devstack/devstack.sh restart file-service
 OTELIGENCE_LOCAL_ENV=/tmp/maestro-tls/local.env bash devstack/devstack.sh restart job-manager
-env MAESTRO_ALLOW_CUSTOM_API_URL=1 NODE_EXTRA_CA_CERTS=/tmp/maestro-tls/cert.pem RUNNER_TEMP=/tmp/maestro-tls/runner GITHUB_OUTPUT=/tmp/maestro-tls/out.txt \
+env INPUT_TRUSTED-API-HOST=localhost NODE_EXTRA_CA_CERTS=/tmp/maestro-tls/cert.pem RUNNER_TEMP=/tmp/maestro-tls/runner GITHUB_OUTPUT=/tmp/maestro-tls/out.txt \
   INPUT_API-KEY=<ak_ key> INPUT_ORG-ID=<org id> INPUT_PROJECT=<project> INPUT_SERVICE=<service> INPUT_ENVIRONMENT=<env> \
   INPUT_JARS=<path to the service JAR> INPUT_API-URL=https://localhost:8443 node maestro-action/dist/index.js
 ```
