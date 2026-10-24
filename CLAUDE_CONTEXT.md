@@ -40,12 +40,24 @@ extension bundle and configs on the runner for their image build. All analysis a
    once). The build request carries `projectUid` and `requestJson.envName` (`ResolvedConfig.envName`, the `environment`
    input), because job-manager resolves the build's environment from them and refuses an unknown name (409
    `build_env_not_found`); `pollJob` on
-   `/api/job-manager/jobs/{id}/status` after each.
+   `/api/job-manager/jobs/{id}/status` after each. A FAILED or NO_ASSET job throws `JobFailed` carrying the status's
+   `customerReason` (control characters collapsed, 500 characters at most) when job-manager gives one. A job id
+   that is not letters, digits, `-` and `_` is refused at submit (`extractJobId`), since it becomes a path segment
+   under `RUNNER_TEMP` and a log line.
 6. `readAnalysisOfUpload`: the analysis preview (`/jobs/{id}/preview`, then its signed JSON) gives the uploaded JAR's
    `serviceKey` (its name, or `name@<8 hex>` when uploads share a name) and display name, and its `notices` (what
    the analysis left out of the JAR); `run` emits one `core.warning` per notice.
-7. `downloadArtifacts`: `/jobs/{id}/download`; extracts the bundle and writes this service's `javaagent.config`,
-   chosen by the analysis key, then the `service` input, then a unique letters-only match.
+7. `downloadArtifacts`: `/jobs/{id}/download`; empties the job's folder, extracts the bundle and writes this service's
+   `javaagent.config`, chosen by the analysis key, then the `service` input, then a unique letters-only match. It returns
+   the response's `buildRecord` (`undefined` when the field is absent, a server older than build records; `null` when
+   the build has none) and the bundle names job-manager gives the two configs (`fileName`, `collectorConfigFileName`).
+   A failure after the folder is emptied removes it again, so no unverified file is left.
+7b. `verifyBuild` (`src/steps/verify.ts`): accepts only a well-formed record whose status is `recorded` or `matched`,
+   which names the uploaded JAR's SHA, and whose `files` hash-match every extracted file (by name, no subfolders, no
+   extra or missing file) and both downloaded configs. `LEFT_OUT` (the annex, the lock record and the two summaries)
+   mirrors discrete-job-functions' `BundleFiles.UNCOVERED` and is carried here, not taken from the server; a record
+   that covers one of them is refused by name. A refusal is a `BuildVerificationError` (a `UserError`), the
+   downloaded files (the bundle and both configs) are deleted, and nothing registers.
 8. `registerJarForEnv`: `PUT .../envs/{env}/services/{service}/jar` under the `service` input. It warns when the
    analysis key differs from the `serviceKey` the lock's `registeredJars` recorded for that registration; for a lock
    that recorded none, when the analysis names the JAR differently from the registration; and when a lock from
@@ -67,6 +79,10 @@ extension bundle and configs on the runner for their image build. All analysis a
   exits 0 with `generated=false`. Other 402 codes fail the step with the server's message.
 - **Callers.** The platform's six `maestro-deploy.yml` workflows pin this action by commit SHA and pass their
   `spring.application.name` as `service`.
+- **Build record.** job-manager's download returns `buildRecord: {status, inputsDigest, applicationJars, files,
+  firstJobId}` (lower-case hex SHA-256) from the tenant's `build_records` row discrete-job-functions' build wrote.
+  An Action release that verifies must reach customers (the `v0` tag) only after the servers it talks to return the
+  field: a server without it is refused with "does not record its builds".
 
 ## Tests
 
@@ -81,12 +97,18 @@ throwaway branch whose `dist/index.js` sleeps after the in-progress report, with
 E2E job carrying a 1-minute step or job `timeout-minutes` (or cancel it by hand), read the run's
 `Post Run ./` log and job-manager's `Recorded deploy run` lines, and delete the branch afterwards. The same
 branch cut from `main` is the control. `e2e.yml` runs the action with `uses: ./` nightly against hosted dev: the CicdTest org's `maestro-action-e2e`
-project, whose `dev` lock was made from the committed `fixtures/order-service-1.0.0.jar`.
+project, whose `dev` lock was made from the committed `fixtures/order-service-1.0.0.jar`; it fails unless the
+`build-record` output is `recorded` or `matched`, so merge a change here only once hosted dev runs a job-manager that
+serves build records.
 
-**Running `dist/index.js` against devstack.** The action requires an https `api-url`, and its uploader and download
-fetches accept only https, while devstack's gateway (`:8082`) and MinIO (`:9000`) speak http.
+**Running `dist/index.js` against devstack.** The action requires an https `api-url`, while devstack's gateway (`:8082`)
+and MinIO (`:9000`) speak http. The signed upload and download URLs must be https too: the action's one
+`HttpClient` refuses an `http:` URL once it has called the https API (`Protocol "http:" not supported. Expected
+"https:"`), so both services that sign storage URLs are pointed at the MinIO front.
 `scripts/devstack-tls-proxy.mjs` fronts both (`:8443` and `:9443`, on 127.0.0.1 unless `TLS_PROXY_BIND` says
-otherwise; the MinIO front keeps the Host header, which a presigned URL's signature covers), and file-service and job-manager, which sign upload and download URLs, are
+otherwise; the MinIO front keeps the Host header, which a presigned URL's signature covers; `TLS_PROXY_TAMPER=<text>`,
+for tests only, flips the last byte of a MinIO response whose path holds the text, which the kit uses to show the
+refusal), and file-service and job-manager, which sign upload and download URLs, are
 restarted with `AWS_PRESIGN_ENDPOINT_URL` pointing at the MinIO front. From the work root, in bash or zsh:
 
 ```

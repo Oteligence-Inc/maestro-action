@@ -176,3 +176,73 @@ it('throws when the build returned no bundle URL', async () => {
   nock(BASE).get('/api/job-manager/jobs/build_2/download').reply(200, { data: { individualArtifacts: {} } });
   await expect(downloadArtifacts(client(), 'build_2', 'fund-transfer')).rejects.toBeInstanceOf(UserError);
 });
+
+it("returns the build's record and the bundle names of the configs it wrote", async () => {
+  const record = { status: 'recorded', inputsDigest: 'd', applicationJars: [], files: {}, firstJobId: 'build_5' };
+  nock(BASE)
+    .get('/api/job-manager/jobs/build_5/download')
+    .reply(200, {
+      status: 'OK',
+      data: {
+        bundleZipUrl: 'https://s3.example.com/bundle.zip',
+        buildRecord: record,
+        individualArtifacts: {
+          agentConfigsByService: [
+            { serviceName: 'fund-transfer', signedUrl: 'https://s3.example.com/ft.config', fileName: 'javaagent-fund-transfer.config' },
+          ],
+          collectorConfigUrl: 'https://s3.example.com/collector.yaml',
+          collectorConfigFileName: 'collector-config.yaml',
+        },
+      },
+    });
+  nock('https://s3.example.com').get('/bundle.zip').reply(200, bundleZip());
+  nock('https://s3.example.com').get('/ft.config').reply(200, 'CFG');
+  nock('https://s3.example.com').get('/collector.yaml').reply(200, 'COL');
+
+  const paths = await downloadArtifacts(client(), 'build_5', 'fund-transfer');
+
+  expect(paths.record).toEqual(record);
+  expect(paths.configFileName).toBe('javaagent-fund-transfer.config');
+  expect(paths.collectorConfigFileName).toBe('collector-config.yaml');
+});
+
+it('tells a server with no build records (no field) from a build with none (null)', async () => {
+  stubBuild('build_6', {});
+  expect((await downloadArtifacts(client(), 'build_6', 'fund-transfer')).record).toBeUndefined();
+
+  nock(BASE)
+    .get('/api/job-manager/jobs/build_7/download')
+    .reply(200, { status: 'OK', data: { bundleZipUrl: 'https://s3.example.com/bundle.zip', buildRecord: null, individualArtifacts: {} } });
+  nock('https://s3.example.com').get('/bundle.zip').reply(200, bundleZip());
+  expect((await downloadArtifacts(client(), 'build_7', 'fund-transfer')).record).toBeNull();
+});
+
+it('extracts into an empty folder, so nothing left from an earlier run is checked or shipped', async () => {
+  const stale = path.join(process.env.RUNNER_TEMP as string, 'maestro', 'build_8', 'extension');
+  fs.mkdirSync(stale, { recursive: true });
+  fs.writeFileSync(path.join(stale, 'left-over.jar'), 'OLD');
+  stubBuild('build_8', {});
+
+  const paths = await downloadArtifacts(client(), 'build_8', 'fund-transfer');
+
+  expect(fs.readdirSync(paths.extensionDir)).toEqual(['extension.jar']);
+});
+
+it('removes what it extracted when a later download fails, so nothing unverified is left for the workflow', async () => {
+  nock(BASE)
+    .get('/api/job-manager/jobs/build_9/download')
+    .reply(200, {
+      data: {
+        bundleZipUrl: 'https://s3.example.com/bundle.zip',
+        individualArtifacts: {
+          agentConfigsByService: [{ serviceName: 'fund-transfer', signedUrl: 'https://s3.example.com/agent.config' }],
+        },
+      },
+    });
+  nock('https://s3.example.com').get('/bundle.zip').reply(200, bundleZip());
+  nock('https://s3.example.com').get('/agent.config').times(10).reply(403, 'denied');
+  const base = path.join(process.env.RUNNER_TEMP!, 'maestro', 'build_9');
+
+  await expect(downloadArtifacts(client(), 'build_9', 'fund-transfer')).rejects.toThrow();
+  expect(fs.existsSync(base)).toBe(false);
+});

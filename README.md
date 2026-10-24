@@ -84,6 +84,7 @@ the app image.
 | `locked-version` | The locked version applied (e.g. `22`). |
 | `jar-sha` | SHA-256 of the uploaded JAR. |
 | `job-id` | Maestro build job ID, for audit. |
+| `build-record` | How the build's files stand against the record of its inputs: `recorded` (the first build of these inputs) or `matched` (an earlier build of the same inputs produced the same files). Empty when `generated` is `false`. The Action refuses every other outcome. |
 
 ## What it does (the 9-step flow)
 
@@ -96,12 +97,42 @@ the app image.
    the locked selection: every entry except an auto-recommended SKIP one and a
    `user_removed` one; a SKIP row the user ticked is built, as the wizard builds it).
    The build names its project and environment, so job-manager holds it to that environment's lock.
-7. Poll each job to completion.
+7. Poll each job to completion. A job that fails names Maestro's reason for it in the step's error (for example
+   `The build could not be recorded. Try again, or contact support if it keeps failing.`), else points at the
+   dashboard.
 8. Download + extract the bundle and configs -> step outputs. When the analysis left classes or embedded libraries
    of the JAR out (one it could not read, parse, or read for its Java version), the Action emits a **`::warning`**
    per kind, such as `The analysis left part of order-service out: 1 class could not be parsed and is not analysed:
    com/acme/Broken.class.` The step still succeeds; `fail-on-warnings` does not apply to these.
-9. Register the JAR's SHA for this `(env, service)` (silent; the lock is unchanged).
+9. Verify the download against the build's record (below), then register the JAR's SHA for this `(env, service)`
+   (silent; the lock is unchanged).
+
+## Verifying the download
+
+Maestro records every build: one record per set of build inputs (the application JARs the build read, the lock as
+built, the analysis it read, the environment and its overrides, the Java and OpenTelemetry lines, and the platform's
+build code and JDK), holding the SHA-256 of every bundle file a rebuild reproduces. The first build of a set of inputs
+writes the record; it is never changed, and every later build of the same inputs is held to it.
+
+Before it registers anything, the Action checks that the record names the JAR this run uploaded, and that every file it
+extracted and both configs it downloaded hash to the record. `build-annex.json`, `lock-record.json`, `summary.html` and
+`SUMMARY.txt` name the build job, the project or the lock version, so they are outside the record and not checked. The
+step fails, and removes what it downloaded, when:
+
+- the build's files differ from the record of the same inputs (the platform could not reproduce the build; run the job
+  again, and contact support if it keeps happening);
+- a downloaded file's bytes differ from the record, a file is in the download but not in the record, or a recorded
+  file is missing;
+- the record does not name the uploaded JAR, or there is no record (a Maestro server older than build records says so
+  in its own message);
+- the record covers one of the four files above (a server newer than this action; update the action).
+
+A download that stops part way (a signed URL refused, a bundle that does not extract) also leaves no files behind.
+
+**What it shows:** the files are the bytes the build produced, unchanged in storage or in transit, and, when the
+output is `matched`, that a rebuild of the same inputs reproduced them. **What it does not show:** it trusts the Maestro
+platform that both builds the files and serves the record, so it is no protection against a compromised platform; a
+build whose Maven output differs on every CI run reads `recorded` each time, since its inputs differ.
 
 After step 9 the Action calls `GET .../staleness` and emits a **`::warning`** naming any
 **peer** services *this run* made stale (so they can be re-built). This is the only

@@ -131,6 +131,16 @@ describe('submitAnalysis', () => {
     nock(BASE).post('/api/job-manager/jobs').reply(201, { data: {} });
     await expect(submitAnalysis(client(), cfg, upload)).rejects.toBeInstanceOf(UserError);
   });
+
+  it('refuses a job id it would put in a path or a log line unsafely', async () => {
+    for (const id of ['..', '../..', 'job/1', 'job 1', 'a::error::b', 42, '']) {
+      nock(BASE).post('/api/job-manager/jobs').reply(201, { data: { id } });
+      await expect(submitAnalysis(client(), cfg, upload)).rejects.toThrow(/job id this action does not accept/);
+    }
+    // Control: the ids Maestro issues pass.
+    nock(BASE).post('/api/job-manager/jobs').reply(201, { data: { id: '1f0b9c2e-7a1d-4c3e-9b2a-5d6e7f8a9b0c' } });
+    await expect(submitAnalysis(client(), cfg, upload)).resolves.toBe('1f0b9c2e-7a1d-4c3e-9b2a-5d6e7f8a9b0c');
+  });
 });
 
 describe('submitBuild', () => {

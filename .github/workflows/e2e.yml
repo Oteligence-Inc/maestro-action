@@ -74,7 +74,12 @@ jobs:
           echo "locked-version = ${{ steps.maestro.outputs.locked-version }}"
           echo "jar-sha        = ${{ steps.maestro.outputs.jar-sha }}"
           echo "job-id         = ${{ steps.maestro.outputs.job-id }}"
+          echo "build-record   = ${{ steps.maestro.outputs.build-record }}"
           test -n "${{ steps.maestro.outputs.locked-version }}" || { echo "::error::no locked-version output"; exit 1; }
+          case "${{ steps.maestro.outputs.build-record }}" in
+            recorded|matched) ;;
+            *) echo "::error::build-record is not recorded or matched"; exit 1 ;;
+          esac
           test -d "${{ steps.maestro.outputs.extension-dir }}"  || { echo "::error::extension-dir missing"; exit 1; }
           test -f "${{ steps.maestro.outputs.config-path }}"    || { echo "::error::config-path missing"; exit 1; }
           echo "E2E outputs + artifacts OK."

@@ -26,7 +26,7 @@ export async function pollJob(api: MaestroApi, jobId: string, opts: PollOpts): P
   await sleep(initialWaitMs);
   let lastStatus = '';
   for (let i = 0; i < maxAttempts; i++) {
-    const res = await api.get<{ data?: { status?: string }; status?: string }>(
+    const res = await api.get<{ data?: { status?: string; customerReason?: string | null }; status?: string }>(
       `/api/job-manager/jobs/${encodeURIComponent(jobId)}/status`,
     );
     expectOk(res, `/jobs/${jobId}/status`);
@@ -37,7 +37,7 @@ export async function pollJob(api: MaestroApi, jobId: string, opts: PollOpts): P
     }
     if (TERMINAL.has(status)) {
       if (status === 'COMPLETED') return status;
-      throw new JobFailed(jobId, status);
+      throw new JobFailed(jobId, status, res.body?.data?.customerReason);
     }
     await sleep(intervalMs);
   }

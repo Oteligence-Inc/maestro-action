@@ -29702,6 +29702,7 @@ const upload_1 = __nccwpck_require__(2590);
 const submitJob_1 = __nccwpck_require__(4388);
 const poll_1 = __nccwpck_require__(9858);
 const download_1 = __nccwpck_require__(9579);
+const verify_1 = __nccwpck_require__(3202);
 const analysisService_1 = __nccwpck_require__(7626);
 const register_1 = __nccwpck_require__(7042);
 const staleness_1 = __nccwpck_require__(4289);
@@ -29753,6 +29754,9 @@ async function run() {
         }
         const analysisNames = analysis.names;
         const paths = await (0, download_1.downloadArtifacts)(api, buildJobId, inputs.service, analysisNames); // [8]
+        // [8b] Every downloaded file against the record of the build's inputs, before anything registers or deploys it.
+        const buildRecord = await (0, verify_1.verifyBuild)({ ...paths, uploadSha: upload.sha });
+        core.info(`Verified the build's files against its record (${buildRecord}).`);
         await (0, register_1.registerJarForEnv)(api, inputs, cfg, upload, buildJobId, analysisNames); // [9]
         core.setOutput('extension-dir', paths.extensionDir);
         core.setOutput('config-path', paths.configPath);
@@ -29760,6 +29764,7 @@ async function run() {
         core.setOutput('locked-version', String(cfg.locked.version));
         core.setOutput('jar-sha', upload.sha);
         core.setOutput('job-id', buildJobId);
+        core.setOutput('build-record', buildRecord);
         core.setOutput('generated', 'true');
         // v6 staleness signal — attributed to the analysis job that re-stamped current signatures.
         await (0, staleness_1.warnStalePeers)(api, inputs, cfg, analysisJobId, inputs.failOnWarnings);
@@ -29778,6 +29783,7 @@ async function run() {
             core.setOutput('extension-dir', '');
             core.setOutput('config-path', '');
             core.setOutput('collector-config-path', '');
+            core.setOutput('build-record', '');
             await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'completed', 'success');
             return; // exit 0 — removed service is not a failure when opted in
         }
@@ -29795,6 +29801,7 @@ async function run() {
             core.setOutput('extension-dir', '');
             core.setOutput('config-path', '');
             core.setOutput('collector-config-path', '');
+            core.setOutput('build-record', '');
             // Telemetry only (never fatal); records that this run reached completion in a degraded mode.
             await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'completed', 'success');
             return; // exit 0 — the step succeeds; deploy is not blocked
@@ -30124,17 +30131,37 @@ async function downloadArtifacts(api, buildJobId, service, analysisNames = []) {
     }
     const baseDir = path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'maestro', buildJobId);
     const extensionDir = path.join(baseDir, 'extension');
+    // Every file in the folder is checked against the build's record, so nothing from an earlier run may be in it.
+    fs.rmSync(baseDir, { recursive: true, force: true });
     fs.mkdirSync(extensionDir, { recursive: true });
-    const zipBytes = await api.getSignedBytes(data.bundleZipUrl);
-    new adm_zip_1.default(zipBytes).extractAllTo(extensionDir, /* overwrite */ true);
-    core.info(`Extracted extension bundle to ${extensionDir}`);
-    const configPath = await writeIfPresent(api, serviceConfigUrl(data.individualArtifacts?.agentConfigsByService ?? [], service, analysisNames), baseDir, 'javaagent.config');
-    const collectorConfigPath = await writeIfPresent(api, data.individualArtifacts?.collectorConfigUrl, baseDir, 'collector-config.yaml');
-    return { extensionDir, configPath, collectorConfigPath };
+    let config;
+    let configPath;
+    let collectorConfigPath;
+    try {
+        const zipBytes = await api.getSignedBytes(data.bundleZipUrl);
+        new adm_zip_1.default(zipBytes).extractAllTo(extensionDir, /* overwrite */ true);
+        core.info(`Extracted extension bundle to ${extensionDir}`);
+        config = serviceConfig(data.individualArtifacts?.agentConfigsByService ?? [], service, analysisNames);
+        configPath = await writeIfPresent(api, config?.signedUrl ?? undefined, baseDir, 'javaagent.config');
+        collectorConfigPath = await writeIfPresent(api, data.individualArtifacts?.collectorConfigUrl, baseDir, 'collector-config.yaml');
+    }
+    catch (err) {
+        // A download that stops part way leaves no files the build's record has not vouched for.
+        fs.rmSync(baseDir, { recursive: true, force: true });
+        throw err;
+    }
+    return {
+        extensionDir,
+        configPath,
+        collectorConfigPath,
+        record: 'buildRecord' in data ? (data.buildRecord ?? null) : undefined,
+        configFileName: config?.fileName ?? null,
+        collectorConfigFileName: data.individualArtifacts?.collectorConfigFileName ?? null,
+    };
 }
 /** This service's config: by the analysis's name for the upload, the registered name, then a unique letters-only
  *  match. None for an ambiguous match or a lone config of another service. */
-function serviceConfigUrl(configs, service, analysisNames) {
+function serviceConfig(configs, service, analysisNames) {
     const wanted = compactServiceToken(service);
     const compactMatches = configs.filter((c) => wanted !== null && compactServiceToken(c.serviceName) === wanted);
     const match = analysisNames.map((n) => configs.find((c) => c.serviceName === n)).find((c) => c) ??
@@ -30144,7 +30171,7 @@ function serviceConfigUrl(configs, service, analysisNames) {
     if (!match && configs.length > 0) {
         core.warning(`No single javaagent.config for service "${service}" among: ${configs.map((c) => c.serviceName).join(', ')}.`);
     }
-    return match?.signedUrl ?? undefined;
+    return match;
 }
 /** The build's name for the one config of a profile with no services. */
 const ALL_SERVICES = 'all services';
@@ -30240,7 +30267,7 @@ async function pollJob(api, jobId, opts) {
         if (TERMINAL.has(status)) {
             if (status === 'COMPLETED')
                 return status;
-            throw new errors_1.JobFailed(jobId, status);
+            throw new errors_1.JobFailed(jobId, status, res.body?.data?.customerReason);
         }
         await sleep(intervalMs);
     }
@@ -30766,9 +30793,15 @@ exports.buildProfileFromLocked = buildProfileFromLocked;
 const core = __importStar(__nccwpck_require__(7484));
 const api_1 = __nccwpck_require__(6879);
 const errors_1 = __nccwpck_require__(17);
+/** A job id the action may put in a path and a log line: letters, digits, '-' and '_' only. */
+const SAFE_JOB_ID = /^[A-Za-z0-9_-]{1,128}$/;
 function extractJobId(body) {
     const data = body?.data ?? body;
-    return data?.id ?? data?.jobId;
+    const id = data?.id ?? data?.jobId;
+    if (id !== undefined && id !== null && !(typeof id === 'string' && SAFE_JOB_ID.test(id))) {
+        throw new errors_1.UserError('Maestro returned a job id this action does not accept. Check the api-url points at Maestro.');
+    }
+    return id ?? undefined;
 }
 /**
  * [6a] Submit MULTI_JAR_ANALYSIS carrying lockedVersionUid — this re-applies the locked
@@ -31004,6 +31037,161 @@ async function uploadJar(api, inputs, cfg) {
 
 /***/ }),
 
+/***/ 3202:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.BuildVerificationError = exports.LEFT_OUT = void 0;
+exports.verifyBuild = verifyBuild;
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+const errors_1 = __nccwpck_require__(17);
+const sha_1 = __nccwpck_require__(634);
+/**
+ * The bundle files a build record leaves out, because they name the build job, the project or the lock version.
+ * Mirrors discrete-job-functions' `BundleFiles.UNCOVERED`; carried here rather than taken from the server, so a
+ * server cannot switch a file's check off by listing it.
+ */
+exports.LEFT_OUT = new Set(['build-annex.json', 'lock-record.json', 'summary.html', 'SUMMARY.txt']);
+/** The build's files are not the files of its record, or the record cannot vouch for them. */
+class BuildVerificationError extends errors_1.UserError {
+}
+exports.BuildVerificationError = BuildVerificationError;
+const SHA256 = /^[0-9a-f]{64}$/;
+/**
+ * Checks every downloaded file against the record of its build's inputs, before anything registers or deploys it.
+ * Returns the record's status; refuses, and deletes the downloaded files, on anything it cannot vouch for.
+ */
+async function verifyBuild(d) {
+    try {
+        return await check(d);
+    }
+    catch (err) {
+        for (const p of [d.extensionDir, d.configPath, d.collectorConfigPath]) {
+            if (p)
+                fs.rmSync(p, { recursive: true, force: true });
+        }
+        throw err;
+    }
+}
+async function check(d) {
+    const record = d.record;
+    if (record === undefined) {
+        refuse('This Maestro server does not record its builds, so the download cannot be verified. Upgrade the server.');
+    }
+    if (record === null) {
+        refuse("The build has no record to verify its files against. Run the job again; contact support if it persists.");
+    }
+    if (!wellFormed(record)) {
+        refuse("The build's record is malformed, so the download cannot be verified.");
+    }
+    if (record.status === 'differs') {
+        refuse('The platform could not reproduce this build: its files differ from the record of the same inputs, written by ' +
+            `build ${record.firstJobId}. Run the job again; contact support if it keeps happening.`);
+    }
+    if (record.status !== 'recorded' && record.status !== 'matched') {
+        refuse(`The build's record has a status this action does not know ("${record.status}"). Update the action.`);
+    }
+    if (record.applicationJars.length === 0) {
+        refuse("The build's record names no application JAR, so it cannot show the build read the uploaded one.");
+    }
+    if (!record.applicationJars.includes(d.uploadSha)) {
+        refuse(`The build's record does not name the JAR this run uploaded (SHA-256 ${d.uploadSha}).`);
+    }
+    const seen = new Set();
+    for (const entry of fs.readdirSync(d.extensionDir, { withFileTypes: true })) {
+        if (!entry.isFile()) {
+            refuse(`The download holds ${entry.name}, which is not a file; a build bundle holds files only.`);
+        }
+        if (exports.LEFT_OUT.has(entry.name))
+            continue;
+        const expected = record.files[entry.name];
+        if (expected === undefined) {
+            refuse(`${entry.name} is in the download but not in the record of its build.`);
+        }
+        await expectHash(path.join(d.extensionDir, entry.name), entry.name, expected);
+        seen.add(entry.name);
+    }
+    for (const name of Object.keys(record.files)) {
+        if (exports.LEFT_OUT.has(name)) {
+            refuse(`The build's record covers ${name}, which this action leaves out because it names the build. Update the action.`);
+        }
+        if (!seen.has(name))
+            refuse(`${name} is in the record of the build but missing from the download.`);
+    }
+    await expectConfig(record, d.configPath, d.configFileName, 'javaagent config');
+    await expectConfig(record, d.collectorConfigPath, d.collectorConfigFileName, 'collector config');
+    return record.status;
+}
+async function expectConfig(record, file, name, what) {
+    if (!file)
+        return;
+    if (!name || record.files[name] === undefined) {
+        refuse(`The downloaded ${what} is not in the record of its build.`);
+    }
+    await expectHash(file, name, record.files[name]);
+}
+async function expectHash(file, name, expected) {
+    const actual = await (0, sha_1.sha256File)(file);
+    if (actual !== expected) {
+        refuse(`The download does not match the record of its build: ${name} has SHA-256 ${actual}, recorded ${expected}.`);
+    }
+}
+function wellFormed(r) {
+    if (!r || typeof r !== 'object')
+        return false;
+    const o = r;
+    return (typeof o.status === 'string' &&
+        typeof o.inputsDigest === 'string' &&
+        Array.isArray(o.applicationJars) &&
+        o.applicationJars.every((s) => typeof s === 'string' && SHA256.test(s)) &&
+        !!o.files &&
+        typeof o.files === 'object' &&
+        !Array.isArray(o.files) &&
+        Object.entries(o.files).every(([name, hash]) => name.length > 0 && !name.includes('/') && typeof hash === 'string' && SHA256.test(hash)));
+}
+function refuse(message) {
+    throw new BuildVerificationError(message);
+}
+
+
+/***/ }),
+
 /***/ 17:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -31099,8 +31287,12 @@ class ReaderKeyError extends UserError {
 exports.ReaderKeyError = ReaderKeyError;
 /** A Maestro job ended in a non-COMPLETED terminal state. */
 class JobFailed extends Error {
-    constructor(jobId, status) {
-        super(`Maestro job ${jobId} ended with status ${status}. Check the run at the Maestro dashboard.`);
+    /** @param reason the job's customer reason, which Maestro writes for its customers to read */
+    constructor(jobId, status, reason) {
+        const said = (reason ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 500);
+        super(said
+            ? `Maestro job ${jobId} ended with status ${status}: ${said}`
+            : `Maestro job ${jobId} ended with status ${status}. Check the run at the Maestro dashboard.`);
         this.name = 'JobFailed';
     }
 }

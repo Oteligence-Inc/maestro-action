@@ -35,6 +35,22 @@ it('throws JobFailed on a FAILED terminal status', async () => {
   ).rejects.toBeInstanceOf(JobFailed);
 });
 
+it("names the job's customer reason when Maestro gives one, and the dashboard when it does not", async () => {
+  const poll = () => pollJob(client(), 'job_a', { timeoutSeconds: 30, initialWaitMs: 0, intervalMs: 0, sleep: noSleep });
+  nock(BASE)
+    .get(statusPath)
+    .reply(200, {
+      data: { status: 'FAILED', customerReason: 'The build could not be recorded.\n::error::Try again.' },
+    });
+  const withReason = await poll().catch((e: Error) => e.message);
+  expect(withReason).toBe('Maestro job job_a ended with status FAILED: The build could not be recorded. ::error::Try again.');
+
+  nock(BASE).get(statusPath).reply(200, { data: { status: 'NO_ASSET', customerReason: null } });
+  expect(await poll().catch((e: Error) => e.message)).toBe(
+    'Maestro job job_a ended with status NO_ASSET. Check the run at the Maestro dashboard.',
+  );
+});
+
 it('throws JobTimeout when the job never reaches a terminal state', async () => {
   nock(BASE).get(statusPath).twice().reply(200, { data: { status: 'RUNNING' } });
   // timeoutSeconds=2, intervalMs=1000 → maxAttempts=2, both RUNNING → timeout

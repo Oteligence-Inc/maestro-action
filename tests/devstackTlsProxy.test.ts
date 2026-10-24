@@ -87,3 +87,53 @@ describe('devstack-tls-proxy fronting a private-cloud gateway', () => {
     if (external) expect(await listening(8443, external.address)).toBe(false);
   });
 });
+
+describe('devstack-tls-proxy flipping a byte on request, for the refusal test', () => {
+  let dir: string;
+  let upstream: http.Server;
+  let proxy: ChildProcess;
+  let output = '';
+
+  beforeAll(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tls-proxy-tamper-'));
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=localhost',
+      '-keyout', path.join(dir, 'key.pem'), '-out', path.join(dir, 'cert.pem')], { stdio: 'ignore' });
+    upstream = http.createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'text/plain', 'content-length': '6' });
+      res.end('ABCDEF');
+    });
+    await new Promise<void>((r) => upstream.listen(0, '127.0.0.1', () => r()));
+    const port = (upstream.address() as net.AddressInfo).port;
+    proxy = spawn(process.execPath, [SCRIPT, path.join(dir, 'cert.pem'), path.join(dir, 'key.pem')], {
+      env: { ...process.env, TLS_PROXY_GATEWAY: `127.0.0.1:${port}`, TLS_PROXY_S3: `127.0.0.1:${port}`,
+        TLS_PROXY_TAMPER: 'collector-config.yaml' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    await new Promise<void>((resolve, reject) => {
+      proxy.stdout?.on('data', (d) => {
+        output += String(d);
+        if (output.includes('9443')) resolve();
+      });
+      proxy.on('exit', (code) => reject(new Error(`proxy exited ${code}`)));
+    });
+  });
+
+  afterAll(async () => {
+    proxy?.kill();
+    await new Promise<void>((r) => upstream.close(() => r()));
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('flips the last byte of a matching storage download, logging its path without the signature', async () => {
+    const res = await get('https://localhost:9443/bucket/multi-jar/b1/collector-config.yaml?X-Amz-Signature=secret');
+    expect(res.body).toBe('ABCDEG');
+    for (let i = 0; i < 50 && !output.includes('tampered'); i++) await new Promise((r) => setTimeout(r, 20));
+    expect(output).toContain('tampered /bucket/multi-jar/b1/collector-config.yaml');
+    expect(output).not.toContain('secret');
+  });
+
+  it('passes every other download and the gateway through unchanged', async () => {
+    expect((await get('https://localhost:9443/bucket/multi-jar/b1/javaagent.config')).body).toBe('ABCDEF');
+    expect((await get('https://localhost:8443/api/job-manager/x/collector-config.yaml')).body).toBe('ABCDEF');
+  });
+});

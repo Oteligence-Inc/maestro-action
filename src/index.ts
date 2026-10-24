@@ -7,6 +7,7 @@ import { uploadJar } from './steps/upload';
 import { submitAnalysis, submitBuild, buildProfileFromLocked } from './steps/submitJob';
 import { pollJob } from './steps/poll';
 import { downloadArtifacts } from './steps/download';
+import { verifyBuild } from './steps/verify';
 import { readAnalysisOfUpload } from './steps/analysisService';
 import { registerJarForEnv } from './steps/register';
 import { warnStalePeers } from './steps/staleness';
@@ -66,6 +67,9 @@ export async function run(): Promise<void> {
     }
     const analysisNames = analysis.names;
     const paths = await downloadArtifacts(api, buildJobId, inputs.service, analysisNames); // [8]
+    // [8b] Every downloaded file against the record of the build's inputs, before anything registers or deploys it.
+    const buildRecord = await verifyBuild({ ...paths, uploadSha: upload.sha });
+    core.info(`Verified the build's files against its record (${buildRecord}).`);
     await registerJarForEnv(api, inputs, cfg, upload, buildJobId, analysisNames); // [9]
 
     core.setOutput('extension-dir', paths.extensionDir);
@@ -74,6 +78,7 @@ export async function run(): Promise<void> {
     core.setOutput('locked-version', String(cfg.locked.version));
     core.setOutput('jar-sha', upload.sha);
     core.setOutput('job-id', buildJobId);
+    core.setOutput('build-record', buildRecord);
     core.setOutput('generated', 'true');
 
     // v6 staleness signal — attributed to the analysis job that re-stamped current signatures.
@@ -95,6 +100,7 @@ export async function run(): Promise<void> {
       core.setOutput('extension-dir', '');
       core.setOutput('config-path', '');
       core.setOutput('collector-config-path', '');
+      core.setOutput('build-record', '');
       await reportDeployRun(api, inputs, projectUid, 'completed', 'success');
       return; // exit 0 — removed service is not a failure when opted in
     }
@@ -114,6 +120,7 @@ export async function run(): Promise<void> {
       core.setOutput('extension-dir', '');
       core.setOutput('config-path', '');
       core.setOutput('collector-config-path', '');
+      core.setOutput('build-record', '');
       // Telemetry only (never fatal); records that this run reached completion in a degraded mode.
       await reportDeployRun(api, inputs, projectUid, 'completed', 'success');
       return; // exit 0 — the step succeeds; deploy is not blocked

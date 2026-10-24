@@ -49,7 +49,19 @@ export interface LockedSpec {
     string,
     { sha?: string; versionLabel?: string; artifactUid?: string | null; serviceKey?: string; analysisService?: string }
   >;
-  expectedArtifactHashes?: Record<string, unknown> | null;
+}
+
+/** GET .../jobs/{id}/download -> data.buildRecord: the record the build's files are verified against. */
+export interface BuildRecord {
+  /** recorded (the first build of these inputs), matched, or differs. */
+  status: string;
+  inputsDigest: string;
+  /** Lower-case hex SHA-256 of every application JAR the build read. */
+  applicationJars: string[];
+  /** Bundle file name to the lower-case hex SHA-256 of its bytes. */
+  files: Record<string, string>;
+  /** The build that wrote the record. */
+  firstJobId: string;
 }
 
 export interface SelectionEntry {
@@ -107,6 +119,11 @@ export interface DownloadPaths {
   extensionDir: string;
   configPath: string;
   collectorConfigPath: string;
+  /** `undefined` when the response carries no `buildRecord` field (a server that predates build records). */
+  record: BuildRecord | null | undefined;
+  /** The bundle file names the two separately downloaded configs carry in the record. */
+  configFileName: string | null;
+  collectorConfigFileName: string | null;
 }
 
 /** GET .../envs/{env}/staleness → StalenessResponse.services[]. */
