@@ -114,8 +114,9 @@ built, the analysis it read, the environment and its overrides, the Java and Ope
 build code and JDK), holding the SHA-256 of every bundle file a rebuild reproduces. The first build of a set of inputs
 writes the record; it is never changed, and every later build of the same inputs is held to it.
 
-Before it registers anything, the Action checks that the record names the JAR this run uploaded, and that every file it
-extracted and both configs it downloaded hash to the record. `build-annex.json`, `lock-record.json`, `summary.html` and
+Before it registers anything, the Action checks that the record names the JAR this run uploaded and binds it to the
+service the analysis made of that JAR, and that every file it extracted and both configs it downloaded hash to the
+record. `build-annex.json`, `lock-record.json`, `summary.html` and
 `SUMMARY.txt` name the build job, the project or the lock version, so they are outside the record and not checked. The
 step fails, and removes what it downloaded, when:
 
@@ -123,8 +124,9 @@ step fails, and removes what it downloaded, when:
   again, and contact support if it keeps happening);
 - a downloaded file's bytes differ from the record, a file is in the download but not in the record, or a recorded
   file is missing;
-- the record does not name the uploaded JAR, or there is no record (a Maestro server older than build records says so
-  in its own message);
+- the record does not name the uploaded JAR, binds another JAR to this service, or binds none to it (also when the
+  analysis could not be read, so the Action cannot name the service), or there is no record (a Maestro server older than
+  build records says so in its own message);
 - the record covers one of the four files above (a server newer than this action; update the action).
 
 A download that stops part way (a signed URL refused, a bundle that does not extract) also leaves no files behind.

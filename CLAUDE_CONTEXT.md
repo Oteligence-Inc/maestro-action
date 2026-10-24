@@ -53,7 +53,8 @@ extension bundle and configs on the runner for their image build. All analysis a
    the build has none) and the bundle names job-manager gives the two configs (`fileName`, `collectorConfigFileName`).
    A failure after the folder is emptied removes it again, so no unverified file is left.
 7b. `verifyBuild` (`src/steps/verify.ts`): accepts only a well-formed record whose status is `recorded` or `matched`,
-   which names the uploaded JAR's SHA, and whose `files` hash-match every extracted file (by name, no subfolders, no
+   which names the uploaded JAR's SHA, whose `bindings` bind the analysis's key for the upload (`serviceKey`, the
+   first of `readAnalysisOfUpload`'s names) to that SHA (a run whose analysis named no key is refused), and whose `files` hash-match every extracted file (by name, no subfolders, no
    extra or missing file) and both downloaded configs. `LEFT_OUT` (the annex, the lock record and the two summaries)
    mirrors discrete-job-functions' `BundleFiles.UNCOVERED` and is carried here, not taken from the server; a record
    that covers one of them is refused by name. A refusal is a `BuildVerificationError` (a `UserError`), the
@@ -80,7 +81,7 @@ extension bundle and configs on the runner for their image build. All analysis a
 - **Callers.** The platform's six `maestro-deploy.yml` workflows pin this action by commit SHA and pass their
   `spring.application.name` as `service`.
 - **Build record.** job-manager's download returns `buildRecord: {status, inputsDigest, applicationJars, files,
-  firstJobId}` (lower-case hex SHA-256) from the tenant's `build_records` row discrete-job-functions' build wrote.
+  firstJobId, bindings}` (lower-case hex SHA-256; `bindings` maps each service key to the upload the build bound to it) from the tenant's `build_records` row discrete-job-functions' build wrote.
   An Action release that verifies must reach customers (the `v0` tag) only after the servers it talks to return the
   field: a server without it is refused with "does not record its builds".
 

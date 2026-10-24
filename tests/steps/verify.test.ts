@@ -34,9 +34,11 @@ function download(overrides: Partial<Downloaded> = {}, recordOverrides: Partial<
       applicationJars: [PEER, UPLOAD],
       files,
       firstJobId: 'build_0',
+      bindings: { orders: UPLOAD, payments: PEER },
       ...recordOverrides,
     },
     uploadSha: UPLOAD,
+    serviceKey: 'orders',
     extensionDir: ext,
     configPath: path.join(base, 'javaagent.config'),
     configFileName: 'javaagent-orders.config',
@@ -84,6 +86,11 @@ it('refuses a malformed record', async () => {
     { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: { 'a.jar': 'NOT-HEX' }, firstJobId: 'b' },
     { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: { '': sha('x') }, firstJobId: 'b' },
     { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: null, firstJobId: 'b' },
+    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: {}, firstJobId: 'b' },
+    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: {}, firstJobId: 'b', bindings: [UPLOAD] },
+    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: {}, firstJobId: 'b', bindings: null },
+    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: {}, firstJobId: 'b', bindings: { orders: 'NOT-HEX' } },
+    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: {}, firstJobId: 'b', bindings: { '': UPLOAD } },
   ];
   for (const record of bad) {
     expect(await refusal(download({ record: record as BuildRecord }))).toMatch(/malformed/);
@@ -105,6 +112,27 @@ it('refuses a record naming no JAR, and one not naming the uploaded JAR', async 
   expect(await refusal(download({}, { applicationJars: [PEER] }))).toMatch(
     new RegExp(`does not name the JAR this run uploaded \\(SHA-256 ${UPLOAD}\\)`),
   );
+});
+
+it('refuses a build that bound another JAR to this service, though the upload is in its group', async () => {
+  const message = await refusal(download({}, { bindings: { orders: PEER, payments: UPLOAD } }));
+  expect(message).toMatch(new RegExp(`bound orders to another JAR \\(SHA-256 ${PEER}\\), not the one this run uploaded`));
+});
+
+it('refuses a record that binds nothing to the analysis key of the upload', async () => {
+  expect(await refusal(download({}, { bindings: { payments: UPLOAD } }))).toMatch(
+    /binds no JAR to orders, the service the analysis made of the uploaded JAR/,
+  );
+});
+
+it('refuses when the analysis gave the upload no service key, rather than checking a service it cannot name', async () => {
+  expect(await refusal(download({ serviceKey: undefined }))).toMatch(/could not name the service the analysis made/);
+  expect(await refusal(download({ serviceKey: '' }))).toMatch(/could not name the service the analysis made/);
+});
+
+it('checks the binding by the analysis key, not the display name', async () => {
+  const keyed = download({ serviceKey: 'orders@0a1b2c3d' }, { bindings: { 'orders@0a1b2c3d': UPLOAD, orders: PEER } });
+  await expect(verifyBuild(keyed)).resolves.toBe('recorded');
 });
 
 it('refuses an extracted file whose bytes differ from the record', async () => {
