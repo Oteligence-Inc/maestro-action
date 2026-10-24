@@ -77,16 +77,15 @@ it('refuses a build with no record', async () => {
 
 it('refuses a malformed record', async () => {
   const bad: unknown[] = [
-    { status: 'recorded', inputsDigest: 'x', applicationJars: 'not-a-list', files: {}, firstJobId: 'b' },
-    { status: 'recorded', inputsDigest: 'x', applicationJars: ['NOT-HEX'], files: {}, firstJobId: 'b' },
-    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: ['a'], firstJobId: 'b' },
-    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: { 'a/b.jar': sha('x') }, firstJobId: 'b' },
-    { status: 7, inputsDigest: 'x', applicationJars: [UPLOAD], files: {}, firstJobId: 'b' },
-    { status: 'recorded', inputsDigest: 7, applicationJars: [UPLOAD], files: {}, firstJobId: 'b' },
-    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: { 'a.jar': 'NOT-HEX' }, firstJobId: 'b' },
-    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: { '': sha('x') }, firstJobId: 'b' },
-    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: null, firstJobId: 'b' },
-    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: {}, firstJobId: 'b' },
+    { status: 'recorded', inputsDigest: 'x', applicationJars: 'not-a-list', files: {}, firstJobId: 'b', bindings: { orders: UPLOAD } },
+    { status: 'recorded', inputsDigest: 'x', applicationJars: ['NOT-HEX'], files: {}, firstJobId: 'b', bindings: { orders: UPLOAD } },
+    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: ['a'], firstJobId: 'b', bindings: { orders: UPLOAD } },
+    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: { 'a/b.jar': sha('x') }, firstJobId: 'b', bindings: { orders: UPLOAD } },
+    { status: 7, inputsDigest: 'x', applicationJars: [UPLOAD], files: {}, firstJobId: 'b', bindings: { orders: UPLOAD } },
+    { status: 'recorded', inputsDigest: 7, applicationJars: [UPLOAD], files: {}, firstJobId: 'b', bindings: { orders: UPLOAD } },
+    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: { 'a.jar': 'NOT-HEX' }, firstJobId: 'b', bindings: { orders: UPLOAD } },
+    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: { '': sha('x') }, firstJobId: 'b', bindings: { orders: UPLOAD } },
+    { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: null, firstJobId: 'b', bindings: { orders: UPLOAD } },
     { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: {}, firstJobId: 'b', bindings: [UPLOAD] },
     { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: {}, firstJobId: 'b', bindings: null },
     { status: 'recorded', inputsDigest: 'x', applicationJars: [UPLOAD], files: {}, firstJobId: 'b', bindings: { orders: 'NOT-HEX' } },
@@ -94,6 +93,20 @@ it('refuses a malformed record', async () => {
   ];
   for (const record of bad) {
     expect(await refusal(download({ record: record as BuildRecord }))).toMatch(/malformed/);
+  }
+});
+
+it('refuses a server whose record carries no bindings as a server to upgrade, not as a malformed record', async () => {
+  const d = download();
+  const { bindings: _dropped, ...older } = d.record as BuildRecord;
+  const message = await refusal({ ...d, record: older as BuildRecord });
+  expect(message).toMatch(/does not record which upload it built each service from.*Upgrade the server/);
+  expect(message).not.toMatch(/malformed/);
+});
+
+it('reads only the record\'s own bindings, never an inherited member', async () => {
+  for (const key of ['constructor', 'toString', '__proto__']) {
+    expect(await refusal(download({ serviceKey: key }))).toMatch(new RegExp(`binds no JAR to ${key},`));
   }
 });
 

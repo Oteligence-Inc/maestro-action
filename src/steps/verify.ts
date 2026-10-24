@@ -52,6 +52,12 @@ async function check(d: Downloaded): Promise<'recorded' | 'matched'> {
   if (record === null) {
     refuse("The build has no record to verify its files against. Run the job again; contact support if it persists.");
   }
+  if (typeof record === 'object' && !Object.prototype.hasOwnProperty.call(record, 'bindings')) {
+    refuse(
+      'This Maestro server does not record which upload it built each service from, so the download cannot be verified. ' +
+        'Upgrade the server.',
+    );
+  }
   if (!wellFormed(record)) {
     refuse("The build's record is malformed, so the download cannot be verified.");
   }
@@ -73,7 +79,7 @@ async function check(d: Downloaded): Promise<'recorded' | 'matched'> {
   if (!d.serviceKey) {
     refuse('The Action could not name the service the analysis made of the uploaded JAR, so it cannot check the build built it.');
   }
-  const bound = record.bindings[d.serviceKey];
+  const bound = Object.prototype.hasOwnProperty.call(record.bindings, d.serviceKey) ? record.bindings[d.serviceKey] : undefined;
   if (bound === undefined) {
     refuse(`The build's record binds no JAR to ${d.serviceKey}, the service the analysis made of the uploaded JAR.`);
   }

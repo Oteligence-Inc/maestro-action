@@ -83,7 +83,8 @@ extension bundle and configs on the runner for their image build. All analysis a
 - **Build record.** job-manager's download returns `buildRecord: {status, inputsDigest, applicationJars, files,
   firstJobId, bindings}` (lower-case hex SHA-256; `bindings` maps each service key to the upload the build bound to it) from the tenant's `build_records` row discrete-job-functions' build wrote.
   An Action release that verifies must reach customers (the `v0` tag) only after the servers it talks to return the
-  field: a server without it is refused with "does not record its builds".
+  record with its `bindings`: a server with no `buildRecord` is refused with "does not record its builds", and one
+  whose record has no `bindings` with "does not record which upload it built each service from".
 
 ## Tests
 
