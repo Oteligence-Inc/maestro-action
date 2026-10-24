@@ -102,8 +102,9 @@ project, whose `dev` lock was made from the committed `fixtures/order-service-1.
 serves build records.
 
 **Running `dist/index.js` against devstack.** The action requires an https `api-url`, while devstack's gateway (`:8082`)
-and MinIO (`:9000`) speak http. (The signed upload and download fetches follow whatever scheme the presigned URL
-names; only `api-url` is held to https.)
+and MinIO (`:9000`) speak http. The signed upload and download URLs must be https too: the action's one
+`HttpClient` refuses an `http:` URL once it has called the https API (`Protocol "http:" not supported. Expected
+"https:"`), so both services that sign storage URLs are pointed at the MinIO front.
 `scripts/devstack-tls-proxy.mjs` fronts both (`:8443` and `:9443`, on 127.0.0.1 unless `TLS_PROXY_BIND` says
 otherwise; the MinIO front keeps the Host header, which a presigned URL's signature covers; `TLS_PROXY_TAMPER=<text>`,
 for tests only, flips the last byte of a MinIO response whose path holds the text, which the kit uses to show the
