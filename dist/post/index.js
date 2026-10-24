@@ -25884,8 +25884,10 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.parseInputs = parseInputs;
+exports.parseSigningKey = parseSigningKey;
 exports.normaliseApiUrl = normaliseApiUrl;
 const core = __importStar(__nccwpck_require__(7484));
+const crypto = __importStar(__nccwpck_require__(6982));
 const errors_1 = __nccwpck_require__(17);
 /**
  * Parse + validate the action inputs. Masks the API key in logs and holds api-url to https on exactly the
@@ -25915,10 +25917,48 @@ function parseInputs() {
     const failOnWarnings = (core.getInput('fail-on-warnings') || 'false').toLowerCase() === 'true';
     const skipGenerateOnInactive = (core.getInput('skip-generate-on-inactive') || 'false').toLowerCase() === 'true';
     const skipOnRemovedService = (core.getInput('skip-on-removed-service') || 'false').toLowerCase() === 'true';
+    const signingKey = parseSigningKey(core.getInput('signing-public-key'));
+    const requireSignedBuild = (core.getInput('require-signed-build') || 'false').toLowerCase() === 'true';
+    if (requireSignedBuild && !signingKey) {
+        throw new errors_1.UserError('require-signed-build is set but signing-public-key is empty: an unset variable reads as empty. ' +
+            'Supply the platform\'s public key.');
+    }
     return {
         apiKey, project, projectId, orgId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
-        failOnWarnings, skipGenerateOnInactive, skipOnRemovedService,
+        failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey,
     };
+}
+/**
+ * The `signing-public-key` input: an Ed25519 public key as PEM, or as the base64 of its X.509 SubjectPublicKeyInfo
+ * DER. Null when unset. A private key is refused rather than reduced to its public half.
+ */
+function parseSigningKey(raw) {
+    const text = raw.trim();
+    if (!text)
+        return null;
+    if (/PRIVATE KEY/.test(text)) {
+        throw new errors_1.UserError('signing-public-key holds a private key. Supply the public key only, and replace the signing key: a private key ' +
+            'in a workflow is exposed.');
+    }
+    let key;
+    try {
+        if (text.includes('-----BEGIN')) {
+            key = crypto.createPublicKey(text);
+        }
+        else {
+            const compact = text.replace(/\s+/g, '');
+            if (!/^[A-Za-z0-9+/]+={0,2}$/.test(compact))
+                throw new Error('not base64');
+            key = crypto.createPublicKey({ key: Buffer.from(compact, 'base64'), format: 'der', type: 'spki' });
+        }
+    }
+    catch {
+        throw new errors_1.UserError('signing-public-key is not a public key: give the PEM, or the base64 of its X.509 SubjectPublicKeyInfo DER.');
+    }
+    if (key.asymmetricKeyType !== 'ed25519') {
+        throw new errors_1.UserError(`signing-public-key must be an Ed25519 key, not ${key.asymmetricKeyType ?? 'an unknown type'}.`);
+    }
+    return key;
 }
 /**
  * Strips a trailing slash; requires https, and exactly the trusted host when one is set, else an

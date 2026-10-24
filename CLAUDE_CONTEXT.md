@@ -54,11 +54,26 @@ extension bundle and configs on the runner for their image build. All analysis a
    A failure after the folder is emptied removes it again, so no unverified file is left.
 7b. `verifyBuild` (`src/steps/verify.ts`): accepts only a well-formed record whose status is `recorded` or `matched`,
    which names the uploaded JAR's SHA, whose `bindings` bind the analysis's key for the upload (`serviceKey`, the
-   first of `readAnalysisOfUpload`'s names) to that SHA (a run whose analysis named no key is refused), and whose `files` hash-match every extracted file (by name, no subfolders, no
-   extra or missing file) and both downloaded configs. `LEFT_OUT` (the annex, the lock record and the two summaries)
-   mirrors discrete-job-functions' `BundleFiles.UNCOVERED` and is carried here, not taken from the server; a record
-   that covers one of them is refused by name. A refusal is a `BuildVerificationError` (a `UserError`), the
-   downloaded files (the bundle and both configs) are deleted, and nothing registers.
+   first of `readAnalysisOfUpload`'s names) to that SHA (a run whose analysis named no key is refused), and whose
+   `files` hash-match every extracted file (by its `/`-separated path: the walk enters folders, since the bundle ships
+   each extension JAR's Java source under `sources/<JAR name without .jar>/`; no extra or missing file, no link, no
+   empty folder) and both downloaded configs. A record file name must be a relative path with no empty, `.` or `..`
+   segment and no backslash. `LEFT_OUT` (the annex, the lock record, the two summaries, `build-statement.json` and
+   `build-statement.sig`) mirrors discrete-job-functions' `BundleFiles.UNCOVERED`, applies to top-level names only,
+   and is carried here, not taken from the server; a record that covers one of them is refused by name.
+   The signature (`checkSignature`) runs after the record's status check and before the bindings and file checks.
+   With `signing-public-key` (`Inputs.signingKey`, parsed by `parseSigningKey`: PEM or base64 SPKI DER, Ed25519
+   only, a private key refused; `require-signed-build: true` makes an empty one an input error) the bundle must carry `build-statement.json` and `build-statement.sig`; the
+   statement's `signingKey` must be the key's fingerprint (`keyFingerprint`: `sha256:` and the hex SHA-256 of its
+   SPKI DER), the signature must verify over the statement's bytes (`crypto.verify(null, ...)`), its `schema` must
+   be `oteligence.build-statement/1`, its `lockedVersionUid` must be the lock this run resolved, and its
+   `inputsDigest`, `applicationJars` (as a set), `bindings` and `files` must equal the record's, so every later check
+   holds the files to the signed record. Without the input, a bundle carrying both files is `not-checked` and any other
+   is `unsigned`; nothing is refused for it. The signature covers what the record covers and anchors the lock only
+   to the uid the server reported, so it catches tampering after the build, not a platform that builds from inputs
+   it chose. `run` sets `build-signature` to the outcome.
+   A refusal is a `BuildVerificationError` (a `UserError`), the downloaded files (the bundle and both configs) are
+   deleted, and nothing registers.
 8. `registerJarForEnv`: `PUT .../envs/{env}/services/{service}/jar` under the `service` input. It warns when the
    analysis key differs from the `serviceKey` the lock's `registeredJars` recorded for that registration; for a lock
    that recorded none, when the analysis names the JAR differently from the registration; and when a lock from
@@ -84,7 +99,14 @@ extension bundle and configs on the runner for their image build. All analysis a
   firstJobId, bindings}` (lower-case hex SHA-256; `bindings` maps each service key to the upload the build bound to it) from the tenant's `build_records` row discrete-job-functions' build wrote.
   An Action release that verifies must reach customers (the `v0` tag) only after the servers it talks to return the
   record with its `bindings`: a server with no `buildRecord` is refused with "does not record its builds", and one
-  whose record has no `bindings` with "does not record which upload it built each service from".
+  whose record has no `bindings` with "does not record which upload it built each service from". The record may also
+  carry `signature: {status, key, value}` (job-manager copies it from the build's result); the Action reads the
+  signature from the bundle, never from this field.
+- **Sources and signature in the bundle.** A job-processor whose discrete-job-functions ships `sources/` puts
+  folders and `/`-separated record names in the bundle, which an Action from before that change refuses ("which is
+  not a file", "malformed"). So this Action, and the six `maestro-deploy.yml` pins of it, must move before such a
+  job-processor deploys. The key the workflow supplies must come from the operator's records: the private-cloud
+  installer prints it once, and a job-processor that holds a key logs its public half at startup.
 
 ## Tests
 

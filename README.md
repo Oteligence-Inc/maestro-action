@@ -74,19 +74,22 @@ the app image.
 | `fail-on-warnings` | no | `false` | Fail the step if this run made peer services stale. |
 | `skip-generate-on-inactive` | no | `false` | When the subscription is inactive (402), skip generation, set `generated` to `false` and let the pipeline continue without a new extension, instead of failing the step. |
 | `skip-on-removed-service` | no | `false` | When this service is no longer in the environment's lock, skip generation, set `generated` to `false` and let the pipeline continue, instead of failing the step. Off, a removed or mistyped service fails with a message. |
+| `signing-public-key` | no | | The Ed25519 public key your Maestro platform signs builds with: its PEM, or the base64 of its X.509 SubjectPublicKeyInfo. Set, the step fails unless the build carries a statement this key signed (see *Verifying the download*). Unset, a signed build is reported as `not-checked` and an unsigned one as `unsigned`. Take it from your own records, for example a repository variable, never from the Maestro server; a private key is refused. |
+| `require-signed-build` | no | `false` | `true` fails the step when `signing-public-key` is empty. A workflow variable that is missing in a repository, fork or environment reads as empty, which would otherwise switch the signature check off. |
 
 ## Outputs
 
 | Output | Description |
 |---|---|
 | `generated` | `true` when the build ran and its bundle was extracted. `false` when generation was skipped: the subscription is inactive and `skip-generate-on-inactive` is set, or the service is not in the lock and `skip-on-removed-service` is set. When `false`, `extension-dir`, `config-path` and `collector-config-path` are empty. |
-| `extension-dir` | Local dir with the extracted build bundle: the extension JARs and configs. It holds every service's extension JAR and config, and no OTel agent JAR: download the upstream agent for the OTel version picked in the wizard. A JAR is named `{service}-{env}-extension.jar`: the service lower-cased, spaces and any character other than a-z, 0-9 or `-` turned into `-`, and one trailing `-service`, `-svc`, `-api` or `-svr` removed; the env the same way with repeated hyphens collapsed. So `fund-transfer-service` in `prod` is `fund-transfer-prod-extension.jar`. When two services reduce to the same name, the second gets `-extension-2.jar`. Empty when `generated` is `false`. |
+| `extension-dir` | Local dir with the extracted build bundle: the extension JARs and configs, and each extension JAR's generated Java source under `sources/<JAR name without .jar>/`, by package (the agent loads only the `*.jar` files directly in the folder, so the sources do not reach it). It holds every service's extension JAR and config, and no OTel agent JAR: download the upstream agent for the OTel version picked in the wizard. A JAR is named `{service}-{env}-extension.jar`: the service lower-cased, spaces and any character other than a-z, 0-9 or `-` turned into `-`, and one trailing `-service`, `-svc`, `-api` or `-svr` removed; the env the same way with repeated hyphens collapsed. So `fund-transfer-service` in `prod` is `fund-transfer-prod-extension.jar`. When two services reduce to the same name, the second gets `-extension-2.jar`. Empty when `generated` is `false`. |
 | `config-path` | This service's `javaagent.config` from the build. Empty, with a warning, when the lock selects none of its methods or its name matches more than one service. |
 | `collector-config-path` | Resolved collector config (deploy to your Collector). |
 | `locked-version` | The locked version applied (e.g. `22`). |
 | `jar-sha` | SHA-256 of the uploaded JAR. |
 | `job-id` | Maestro build job ID, for audit. |
 | `build-record` | How the build's files stand against the record of its inputs: `recorded` (the first build of these inputs) or `matched` (an earlier build of the same inputs produced the same files). Empty when `generated` is `false`. The Action refuses every other outcome. |
+| `build-signature` | `verified` (the build is signed by `signing-public-key`), `not-checked` (it is signed, but `signing-public-key` is not set) or `unsigned` (the platform holds no signing key). Empty when `generated` is `false`. With `signing-public-key` set, every outcome but `verified` fails the step. |
 
 ## What it does (the 9-step flow)
 
@@ -106,8 +109,8 @@ the app image.
    of the JAR out (one it could not read, parse, or read for its Java version), the Action emits a **`::warning`**
    per kind, such as `The analysis left part of order-service out: 1 class could not be parsed and is not analysed:
    com/acme/Broken.class.` The step still succeeds; `fail-on-warnings` does not apply to these.
-9. Verify the download against the build's record (below), then register the JAR's SHA for this `(env, service)`
-   (silent; the lock is unchanged).
+9. Verify the download against the build's record and, with `signing-public-key` set, its signature (below), then
+   register the JAR's SHA for this `(env, service)` (silent; the lock is unchanged).
 
 ## Verifying the download
 
@@ -117,9 +120,10 @@ build code and JDK), holding the SHA-256 of every bundle file a rebuild reproduc
 writes the record; it is never changed, and every later build of the same inputs is held to it.
 
 Before it registers anything, the Action checks that the record names the JAR this run uploaded and binds it to the
-service the analysis made of that JAR, and that every file it extracted and both configs it downloaded hash to the
-record. `build-annex.json`, `lock-record.json`, `summary.html` and
-`SUMMARY.txt` name the build job, the project or the lock version, so they are outside the record and not checked. The
+service the analysis made of that JAR, and that every file it extracted, the sources under `sources/` included, and
+both configs it downloaded hash to the record. `build-annex.json`, `lock-record.json`, `summary.html` and
+`SUMMARY.txt` name the build job, the project or the lock version, and `build-statement.json` and
+`build-statement.sig` sign the record, so those six are outside the record and not checked against it. The
 step fails, and removes what it downloaded, when:
 
 - the build's files differ from the record of the same inputs (the platform could not reproduce the build; run the job
@@ -129,14 +133,63 @@ step fails, and removes what it downloaded, when:
 - the record does not name the uploaded JAR, binds another JAR to this service, or binds none to it (also when the
   analysis could not be read, so the Action cannot name the service), or there is no record or the record has no
   bindings (a Maestro server older than either says so in its own message);
-- the record covers one of the four files above (a server newer than this action; update the action).
+- the record covers one of the six files above (a server newer than this action; update the action);
+- the bundle holds a link, an empty folder, or a file in a folder the record does not hold.
 
 A download that stops part way (a signed URL refused, a bundle that does not extract) also leaves no files behind.
 
 **What it shows:** the files are the bytes the build produced, unchanged in storage or in transit, and, when the
-output is `matched`, that a rebuild of the same inputs reproduced them. **What it does not show:** it trusts the Maestro
-platform that both builds the files and serves the record, so it is no protection against a compromised platform; a
-build whose Maven output differs on every CI run reads `recorded` each time, since its inputs differ.
+output is `matched`, that a rebuild of the same inputs reproduced them. **What it does not show** on its own: it
+trusts the Maestro platform that both builds the files and serves the record; a build whose Maven output differs on
+every CI run reads `recorded` each time, since its inputs differ.
+
+### The build's signature
+
+A Maestro platform whose job processor holds a signing key (`OTELIGENCE_MAESTRO_BUILD_SIGNING_KEY`) signs every
+Maestro build: the bundle carries `build-statement.json`, which names the key (`signingKey`, `sha256:` and the
+SHA-256 of its X.509 SubjectPublicKeyInfo), the record's inputs digest, the application JARs, the upload bound to each
+service, the lock version the build was made from and the SHA-256 of every file the record covers, and
+`build-statement.sig`, the raw Ed25519 signature over those exact bytes. A rebuild of one lock under one key states and
+signs the same bytes. Only the job processor holds the private key, so a server or storage that changes a file and its
+record entry together cannot also make the signature verify.
+
+With `signing-public-key` set, the step also fails, and removes what it downloaded, when:
+
+- the bundle carries no statement or no signature (the platform holds no signing key, or the download was altered);
+- the statement names another key, or the signature does not verify with this one (a statement or signature altered);
+- the statement's inputs digest, JARs, bindings or files differ from the record the remaining checks use;
+- the statement names another lock version than the one this run built, or a schema this action does not know.
+
+Without it, the Action reports the signature and checks nothing about it; `require-signed-build: true` makes an
+empty key an error instead.
+
+**What the signature shows:** the files are the bytes a job processor holding the key built from the inputs its
+statement names, so storage or a server that rewrites a file and its record afterwards is caught. **What it does not
+show:** that those inputs are the lock you made. The lock, the analysis and the uploads reach the job processor
+through the platform, and the lock version the Action compares is the one the server reports, so a compromised
+platform can still have a genuine build made from inputs of its choosing. The four files outside the record
+(`build-annex.json`, `lock-record.json`, `summary.html`, `SUMMARY.txt`) are not signed either.
+
+To check a bundle by hand, from the folder it was extracted to, with the public key in `signing-public-key.pem`
+(OpenSSL 3, which reads raw Ed25519 input with `-rawin`):
+
+```bash
+openssl pkeyutl -verify -pubin -inkey signing-public-key.pem -rawin -in build-statement.json -sigfile build-statement.sig
+jq -r '.files | to_entries[] | "\(.value)  \(.key)"' build-statement.json | sha256sum -c -
+```
+
+The first prints `Signature Verified Successfully`; the second prints `OK` for each file the statement covers (on
+macOS, `shasum -a 256 -c -` in place of `sha256sum -c -`). The two configs the Action downloads separately are in the
+bundle too, under their bundle names. Then list every file the statement does not name, in bash:
+
+```bash
+export LC_ALL=C
+comm -13 <(jq -r '.files | keys[]' build-statement.json | sort) <(find . -type f ! -name signing-public-key.pem | sed 's|^\./||' | sort)
+```
+
+It prints only `SUMMARY.txt`, `build-annex.json`, `build-statement.json`, `build-statement.sig`, `summary.html` and,
+for a build from a lock, `lock-record.json`. Any other name is a file the build did not make. `LC_ALL=C` matters:
+`comm` compares in the locale's order and reports every line when that differs from `sort`'s.
 
 After step 9 the Action calls `GET .../staleness` and emits a **`::warning`** naming any
 **peer** services *this run* made stale (so they can be re-built). This is the only
