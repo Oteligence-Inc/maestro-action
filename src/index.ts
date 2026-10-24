@@ -68,8 +68,15 @@ export async function run(): Promise<void> {
     const analysisNames = analysis.names;
     const paths = await downloadArtifacts(api, buildJobId, inputs.service, analysisNames); // [8]
     // [8b] Every downloaded file against the record of the build's inputs, before anything registers or deploys it.
-    const buildRecord = await verifyBuild({ ...paths, uploadSha: upload.sha, serviceKey: analysisNames[0] });
-    core.info(`Verified the build's files against its record (${buildRecord}).`);
+    const verified = await verifyBuild({
+      ...paths,
+      uploadSha: upload.sha,
+      serviceKey: analysisNames[0],
+      signingKey: inputs.signingKey,
+      lockedVersionUid: cfg.lockedVersionUid,
+    });
+    core.info(`Verified the build's files against its record (${verified.record}).`);
+    core.info(SIGNATURE_LINES[verified.signature]);
     await registerJarForEnv(api, inputs, cfg, upload, buildJobId, analysisNames); // [9]
 
     core.setOutput('extension-dir', paths.extensionDir);
@@ -78,7 +85,8 @@ export async function run(): Promise<void> {
     core.setOutput('locked-version', String(cfg.locked.version));
     core.setOutput('jar-sha', upload.sha);
     core.setOutput('job-id', buildJobId);
-    core.setOutput('build-record', buildRecord);
+    core.setOutput('build-record', verified.record);
+    core.setOutput('build-signature', verified.signature);
     core.setOutput('generated', 'true');
 
     // v6 staleness signal — attributed to the analysis job that re-stamped current signatures.
@@ -101,6 +109,7 @@ export async function run(): Promise<void> {
       core.setOutput('config-path', '');
       core.setOutput('collector-config-path', '');
       core.setOutput('build-record', '');
+      core.setOutput('build-signature', '');
       await reportDeployRun(api, inputs, projectUid, 'completed', 'success');
       return; // exit 0 — removed service is not a failure when opted in
     }
@@ -121,6 +130,7 @@ export async function run(): Promise<void> {
       core.setOutput('config-path', '');
       core.setOutput('collector-config-path', '');
       core.setOutput('build-record', '');
+      core.setOutput('build-signature', '');
       // Telemetry only (never fatal); records that this run reached completion in a degraded mode.
       await reportDeployRun(api, inputs, projectUid, 'completed', 'success');
       return; // exit 0 — the step succeeds; deploy is not blocked
@@ -129,6 +139,12 @@ export async function run(): Promise<void> {
     core.setFailed(formatError(err));
   }
 }
+
+const SIGNATURE_LINES = {
+  verified: "Verified the build's signature with signing-public-key.",
+  'not-checked': 'The build is signed, but signing-public-key is not set, so its signature was not checked.',
+  unsigned: 'The build is unsigned: the Maestro platform that built it holds no signing key.',
+} as const;
 
 // Only auto-run outside the test harness.
 if (require.main === module) {

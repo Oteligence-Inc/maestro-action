@@ -1,4 +1,5 @@
-import { normaliseApiUrl, parseInputs } from '../src/inputs';
+import * as crypto from 'crypto';
+import { normaliseApiUrl, parseInputs, parseSigningKey } from '../src/inputs';
 import { UserError } from '../src/util/errors';
 
 describe('normaliseApiUrl', () => {
@@ -195,5 +196,55 @@ describe('parseInputs — org-id', () => {
     expect(parseInputs().orgId).toBe('org_ci');
     delete process.env['INPUT_ORG-ID'];
     expect(parseInputs().orgId).toBe('');
+  });
+});
+
+describe('signing-public-key', () => {
+  const ORIGINAL = { ...process.env };
+  afterEach(() => {
+    process.env = { ...ORIGINAL };
+  });
+  const pair = crypto.generateKeyPairSync('ed25519');
+  const pem = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  const der = pair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+
+  it('is null when unset or blank', () => {
+    expect(parseSigningKey('')).toBeNull();
+    expect(parseSigningKey('  \n')).toBeNull();
+  });
+
+  it('reads a PEM and the base64 of the SubjectPublicKeyInfo DER as the same key', () => {
+    const fromPem = parseSigningKey(pem);
+    const fromDer = parseSigningKey(`  ${der.slice(0, 20)}\n${der.slice(20)}  `);
+    for (const key of [fromPem, fromDer]) {
+      expect(key?.export({ type: 'spki', format: 'der' }).equals(pair.publicKey.export({ type: 'spki', format: 'der' })))
+        .toBe(true);
+    }
+  });
+
+  it('refuses a private key rather than reducing it to its public half', () => {
+    const privatePem = pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    expect(() => parseSigningKey(privatePem)).toThrow(/holds a private key.*replace the signing key/);
+  });
+
+  it('refuses a key of another type, and text that is no key', () => {
+    const rsa = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    expect(() => parseSigningKey(rsa)).toThrow(/must be an Ed25519 key, not rsa/);
+    for (const junk of ['not a key!', 'c2VjcmV0', '-----BEGIN PUBLIC KEY-----\nnope\n-----END PUBLIC KEY-----']) {
+      expect(() => parseSigningKey(junk)).toThrow(/is not a public key/);
+    }
+  });
+
+  it('reaches the parsed inputs', () => {
+    process.env['INPUT_API-KEY'] = 'k';
+    process.env['INPUT_PROJECT-ID'] = 'proj_1';
+    process.env['INPUT_SERVICE'] = 'svc';
+    process.env['INPUT_ENVIRONMENT'] = 'dev';
+    process.env['INPUT_JARS'] = 'target/x.jar';
+    process.env['INPUT_API-URL'] = 'https://prod.api.oteligence.com';
+    delete process.env['INPUT_SIGNING-PUBLIC-KEY'];
+    expect(parseInputs().signingKey).toBeNull();
+    process.env['INPUT_SIGNING-PUBLIC-KEY'] = pem;
+    expect(parseInputs().signingKey?.asymmetricKeyType).toBe('ed25519');
   });
 });

@@ -1,4 +1,5 @@
 import * as core from '@actions/core';
+import * as crypto from 'crypto';
 import { Inputs } from './types';
 import { UserError } from './util/errors';
 
@@ -40,10 +41,45 @@ export function parseInputs(): Inputs {
   const skipOnRemovedService =
     (core.getInput('skip-on-removed-service') || 'false').toLowerCase() === 'true';
 
+  const signingKey = parseSigningKey(core.getInput('signing-public-key'));
+
   return {
     apiKey, project, projectId, orgId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
-    failOnWarnings, skipGenerateOnInactive, skipOnRemovedService,
+    failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey,
   };
+}
+
+/**
+ * The `signing-public-key` input: an Ed25519 public key as PEM, or as the base64 of its X.509 SubjectPublicKeyInfo
+ * DER. Null when unset. A private key is refused rather than reduced to its public half.
+ */
+export function parseSigningKey(raw: string): crypto.KeyObject | null {
+  const text = raw.trim();
+  if (!text) return null;
+  if (/PRIVATE KEY/.test(text)) {
+    throw new UserError(
+      'signing-public-key holds a private key. Supply the public key only, and replace the signing key: a private key ' +
+        'in a workflow is exposed.',
+    );
+  }
+  let key: crypto.KeyObject;
+  try {
+    if (text.includes('-----BEGIN')) {
+      key = crypto.createPublicKey(text);
+    } else {
+      const compact = text.replace(/\s+/g, '');
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(compact)) throw new Error('not base64');
+      key = crypto.createPublicKey({ key: Buffer.from(compact, 'base64'), format: 'der', type: 'spki' });
+    }
+  } catch {
+    throw new UserError(
+      'signing-public-key is not a public key: give the PEM, or the base64 of its X.509 SubjectPublicKeyInfo DER.',
+    );
+  }
+  if (key.asymmetricKeyType !== 'ed25519') {
+    throw new UserError(`signing-public-key must be an Ed25519 key, not ${key.asymmetricKeyType ?? 'an unknown type'}.`);
+  }
+  return key;
 }
 
 /**

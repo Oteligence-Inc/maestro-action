@@ -54,6 +54,13 @@ inputs:
       — a removed or mistyped service hard-fails with a clear message.
     required: false
     default: 'false'
+  signing-public-key:
+    description: >-
+      The Ed25519 public key your Maestro platform signs builds with, as PEM or as the base64 of its X.509
+      SubjectPublicKeyInfo. When set, the step fails unless the build carries a statement this key signed that names
+      this run's lock and every file it downloaded. Unset, a signed build is reported and not checked. Take it from your
+      own records, never from the Maestro server.
+    required: false
 
 outputs:
   generated:
@@ -72,6 +79,8 @@ outputs:
     description: 'Maestro build job ID — for audit / log lookup'
   build-record:
     description: "How the build's files stand against the record of its inputs: 'recorded' (the first build of these inputs) or 'matched' (a rebuild produced the recorded files); empty when 'generated' is 'false'. The action refuses any other outcome."
+  build-signature:
+    description: "'verified' (signed by signing-public-key), 'not-checked' (signed, but signing-public-key is not set) or 'unsigned' (the platform holds no signing key); empty when 'generated' is 'false'. With signing-public-key set, every outcome but 'verified' fails the step."
 
 
 runs:

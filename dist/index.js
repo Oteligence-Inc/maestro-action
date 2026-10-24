@@ -29776,8 +29776,15 @@ async function run() {
         const analysisNames = analysis.names;
         const paths = await (0, download_1.downloadArtifacts)(api, buildJobId, inputs.service, analysisNames); // [8]
         // [8b] Every downloaded file against the record of the build's inputs, before anything registers or deploys it.
-        const buildRecord = await (0, verify_1.verifyBuild)({ ...paths, uploadSha: upload.sha, serviceKey: analysisNames[0] });
-        core.info(`Verified the build's files against its record (${buildRecord}).`);
+        const verified = await (0, verify_1.verifyBuild)({
+            ...paths,
+            uploadSha: upload.sha,
+            serviceKey: analysisNames[0],
+            signingKey: inputs.signingKey,
+            lockedVersionUid: cfg.lockedVersionUid,
+        });
+        core.info(`Verified the build's files against its record (${verified.record}).`);
+        core.info(SIGNATURE_LINES[verified.signature]);
         await (0, register_1.registerJarForEnv)(api, inputs, cfg, upload, buildJobId, analysisNames); // [9]
         core.setOutput('extension-dir', paths.extensionDir);
         core.setOutput('config-path', paths.configPath);
@@ -29785,7 +29792,8 @@ async function run() {
         core.setOutput('locked-version', String(cfg.locked.version));
         core.setOutput('jar-sha', upload.sha);
         core.setOutput('job-id', buildJobId);
-        core.setOutput('build-record', buildRecord);
+        core.setOutput('build-record', verified.record);
+        core.setOutput('build-signature', verified.signature);
         core.setOutput('generated', 'true');
         // v6 staleness signal — attributed to the analysis job that re-stamped current signatures.
         await (0, staleness_1.warnStalePeers)(api, inputs, cfg, analysisJobId, inputs.failOnWarnings);
@@ -29805,6 +29813,7 @@ async function run() {
             core.setOutput('config-path', '');
             core.setOutput('collector-config-path', '');
             core.setOutput('build-record', '');
+            core.setOutput('build-signature', '');
             await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'completed', 'success');
             return; // exit 0 — removed service is not a failure when opted in
         }
@@ -29823,6 +29832,7 @@ async function run() {
             core.setOutput('config-path', '');
             core.setOutput('collector-config-path', '');
             core.setOutput('build-record', '');
+            core.setOutput('build-signature', '');
             // Telemetry only (never fatal); records that this run reached completion in a degraded mode.
             await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'completed', 'success');
             return; // exit 0 — the step succeeds; deploy is not blocked
@@ -29831,6 +29841,11 @@ async function run() {
         core.setFailed((0, errors_1.formatError)(err));
     }
 }
+const SIGNATURE_LINES = {
+    verified: "Verified the build's signature with signing-public-key.",
+    'not-checked': 'The build is signed, but signing-public-key is not set, so its signature was not checked.',
+    unsigned: 'The build is unsigned: the Maestro platform that built it holds no signing key.',
+};
 // Only auto-run outside the test harness.
 if (require.main === require.cache[eval('__filename')]) {
     void run();
@@ -29879,8 +29894,10 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.parseInputs = parseInputs;
+exports.parseSigningKey = parseSigningKey;
 exports.normaliseApiUrl = normaliseApiUrl;
 const core = __importStar(__nccwpck_require__(7484));
+const crypto = __importStar(__nccwpck_require__(6982));
 const errors_1 = __nccwpck_require__(17);
 /**
  * Parse + validate the action inputs. Masks the API key in logs and holds api-url to https on exactly the
@@ -29910,10 +29927,43 @@ function parseInputs() {
     const failOnWarnings = (core.getInput('fail-on-warnings') || 'false').toLowerCase() === 'true';
     const skipGenerateOnInactive = (core.getInput('skip-generate-on-inactive') || 'false').toLowerCase() === 'true';
     const skipOnRemovedService = (core.getInput('skip-on-removed-service') || 'false').toLowerCase() === 'true';
+    const signingKey = parseSigningKey(core.getInput('signing-public-key'));
     return {
         apiKey, project, projectId, orgId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
-        failOnWarnings, skipGenerateOnInactive, skipOnRemovedService,
+        failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey,
     };
+}
+/**
+ * The `signing-public-key` input: an Ed25519 public key as PEM, or as the base64 of its X.509 SubjectPublicKeyInfo
+ * DER. Null when unset. A private key is refused rather than reduced to its public half.
+ */
+function parseSigningKey(raw) {
+    const text = raw.trim();
+    if (!text)
+        return null;
+    if (/PRIVATE KEY/.test(text)) {
+        throw new errors_1.UserError('signing-public-key holds a private key. Supply the public key only, and replace the signing key: a private key ' +
+            'in a workflow is exposed.');
+    }
+    let key;
+    try {
+        if (text.includes('-----BEGIN')) {
+            key = crypto.createPublicKey(text);
+        }
+        else {
+            const compact = text.replace(/\s+/g, '');
+            if (!/^[A-Za-z0-9+/]+={0,2}$/.test(compact))
+                throw new Error('not base64');
+            key = crypto.createPublicKey({ key: Buffer.from(compact, 'base64'), format: 'der', type: 'spki' });
+        }
+    }
+    catch {
+        throw new errors_1.UserError('signing-public-key is not a public key: give the PEM, or the base64 of its X.509 SubjectPublicKeyInfo DER.');
+    }
+    if (key.asymmetricKeyType !== 'ed25519') {
+        throw new errors_1.UserError(`signing-public-key must be an Ed25519 key, not ${key.asymmetricKeyType ?? 'an unknown type'}.`);
+    }
+    return key;
 }
 /**
  * Strips a trailing slash; requires https, and exactly the trusted host when one is set, else an
@@ -31122,26 +31172,40 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.BuildVerificationError = exports.LEFT_OUT = void 0;
+exports.BuildVerificationError = exports.LEFT_OUT = exports.STATEMENT_SCHEMA = exports.SIGNATURE = exports.STATEMENT = void 0;
 exports.verifyBuild = verifyBuild;
+exports.keyFingerprint = keyFingerprint;
+const crypto = __importStar(__nccwpck_require__(6982));
 const fs = __importStar(__nccwpck_require__(9896));
 const path = __importStar(__nccwpck_require__(6928));
 const errors_1 = __nccwpck_require__(17);
 const sha_1 = __nccwpck_require__(634);
+/** The signed statement of a build's covered files, and the raw Ed25519 signature over it. */
+exports.STATEMENT = 'build-statement.json';
+exports.SIGNATURE = 'build-statement.sig';
+exports.STATEMENT_SCHEMA = 'oteligence.build-statement/1';
 /**
- * The bundle files a build record leaves out, because they name the build job, the project or the lock version.
- * Mirrors discrete-job-functions' `BundleFiles.UNCOVERED`; carried here rather than taken from the server, so a
- * server cannot switch a file's check off by listing it.
+ * The bundle files a build record leaves out, because they name the build job, the project or the lock version, or
+ * sign the covered files. Mirrors discrete-job-functions' `BundleFiles.UNCOVERED`; carried here rather than taken
+ * from the server, so a server cannot switch a file's check off by listing it.
  */
-exports.LEFT_OUT = new Set(['build-annex.json', 'lock-record.json', 'summary.html', 'SUMMARY.txt']);
+exports.LEFT_OUT = new Set([
+    'build-annex.json',
+    'lock-record.json',
+    'summary.html',
+    'SUMMARY.txt',
+    exports.STATEMENT,
+    exports.SIGNATURE,
+]);
 /** The build's files are not the files of its record, or the record cannot vouch for them. */
 class BuildVerificationError extends errors_1.UserError {
 }
 exports.BuildVerificationError = BuildVerificationError;
 const SHA256 = /^[0-9a-f]{64}$/;
 /**
- * Checks every downloaded file against the record of its build's inputs, before anything registers or deploys it.
- * Returns the record's status; refuses, and deletes the downloaded files, on anything it cannot vouch for.
+ * Checks every downloaded file against the record of its build's inputs, and the build's signature when the workflow
+ * supplies a key, before anything registers or deploys it. Refuses, and deletes the downloaded files, on anything it
+ * cannot vouch for.
  */
 async function verifyBuild(d) {
     try {
@@ -31177,6 +31241,7 @@ async function check(d) {
     if (record.status !== 'recorded' && record.status !== 'matched') {
         refuse(`The build's record has a status this action does not know ("${record.status}"). Update the action.`);
     }
+    const signature = checkSignature(d, record);
     if (record.applicationJars.length === 0) {
         refuse("The build's record names no application JAR, so it cannot show the build read the uploaded one.");
     }
@@ -31194,29 +31259,131 @@ async function check(d) {
         refuse(`The build bound ${d.serviceKey} to another JAR (SHA-256 ${bound}), not the one this run uploaded (SHA-256 ${d.uploadSha}).`);
     }
     const seen = new Set();
-    for (const entry of fs.readdirSync(d.extensionDir, { withFileTypes: true })) {
-        if (!entry.isFile()) {
-            refuse(`The download holds ${entry.name}, which is not a file; a build bundle holds files only.`);
-        }
-        if (exports.LEFT_OUT.has(entry.name))
+    for (const name of bundleFiles(d.extensionDir)) {
+        if (exports.LEFT_OUT.has(name))
             continue;
-        const expected = record.files[entry.name];
+        const expected = Object.prototype.hasOwnProperty.call(record.files, name) ? record.files[name] : undefined;
         if (expected === undefined) {
-            refuse(`${entry.name} is in the download but not in the record of its build.`);
+            refuse(`${name} is in the download but not in the record of its build.`);
         }
-        await expectHash(path.join(d.extensionDir, entry.name), entry.name, expected);
-        seen.add(entry.name);
+        await expectHash(path.join(d.extensionDir, ...name.split('/')), name, expected);
+        seen.add(name);
     }
     for (const name of Object.keys(record.files)) {
         if (exports.LEFT_OUT.has(name)) {
-            refuse(`The build's record covers ${name}, which this action leaves out because it names the build. Update the action.`);
+            refuse(`The build's record covers ${name}, which this action leaves out because it names or signs the build. Update the action.`);
         }
         if (!seen.has(name))
             refuse(`${name} is in the record of the build but missing from the download.`);
     }
     await expectConfig(record, d.configPath, d.configFileName, 'javaagent config');
     await expectConfig(record, d.collectorConfigPath, d.collectorConfigFileName, 'collector config');
-    return record.status;
+    return { record: record.status, signature };
+}
+/**
+ * Every file the bundle extracted to, by its `/`-separated path. Folders are walked, since the bundle ships each
+ * extension JAR's source under `sources/`; anything that is neither a file nor a folder, and a folder with nothing in
+ * it, is refused.
+ */
+function bundleFiles(root, prefix = '') {
+    const names = [];
+    const entries = fs.readdirSync(path.join(root, ...prefix.split('/').filter(Boolean)), { withFileTypes: true });
+    if (prefix && entries.length === 0) {
+        refuse(`The download holds ${prefix}, a folder with nothing in it; a build bundle holds files only.`);
+    }
+    for (const entry of entries) {
+        const name = prefix + entry.name;
+        if (entry.isDirectory()) {
+            names.push(...bundleFiles(root, `${name}/`));
+        }
+        else if (entry.isFile()) {
+            names.push(name);
+        }
+        else {
+            refuse(`The download holds ${name}, which is not a file; a build bundle holds files only.`);
+        }
+    }
+    return names;
+}
+/**
+ * With a workflow key: the bundle must carry a statement that key signed, naming this run's lock and exactly the
+ * record the remaining checks then hold the files to. Without one, the signature is reported, not checked.
+ */
+function checkSignature(d, record) {
+    const statementPath = path.join(d.extensionDir, exports.STATEMENT);
+    const signaturePath = path.join(d.extensionDir, exports.SIGNATURE);
+    const hasStatement = isFile(statementPath);
+    const hasSignature = isFile(signaturePath);
+    if (!d.signingKey) {
+        return hasStatement || hasSignature ? 'not-checked' : 'unsigned';
+    }
+    if (!hasStatement || !hasSignature) {
+        refuse('The build is not signed, but this workflow requires a signed build (signing-public-key is set). ' +
+            'The Maestro platform that built it holds no signing key; ask its operator to set one.');
+    }
+    const statementBytes = fs.readFileSync(statementPath);
+    const signatureBytes = fs.readFileSync(signaturePath);
+    let statement;
+    try {
+        const parsed = JSON.parse(statementBytes.toString('utf8'));
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+            throw new Error('not an object');
+        statement = parsed;
+    }
+    catch {
+        refuse(`The build's ${exports.STATEMENT} is not a JSON object, so its signature cannot vouch for the download.`);
+    }
+    const expectedKey = keyFingerprint(d.signingKey);
+    if (statement.signingKey !== expectedKey) {
+        refuse(`The build is signed by another key (${String(statement.signingKey)}), not the key this workflow supplies ` +
+            `in signing-public-key (${expectedKey}).`);
+    }
+    if (!crypto.verify(null, statementBytes, d.signingKey, signatureBytes)) {
+        refuse(`The build's signature does not verify with signing-public-key: ${exports.STATEMENT} or ${exports.SIGNATURE} was altered.`);
+    }
+    if (statement.schema !== exports.STATEMENT_SCHEMA) {
+        refuse(`The build's signed statement has a schema this action does not know ("${String(statement.schema)}"). Update the action.`);
+    }
+    if (d.lockedVersionUid !== undefined && statement.lockedVersionUid !== d.lockedVersionUid) {
+        refuse(`The signed build was made from lock version ${String(statement.lockedVersionUid)}, not ${d.lockedVersionUid}, ` +
+            'the lock this run built.');
+    }
+    const signed = {
+        inputsDigest: statement.inputsDigest,
+        applicationJars: Array.isArray(statement.applicationJars) ? [...statement.applicationJars].sort() : statement.applicationJars,
+        bindings: sortedObject(statement.bindings),
+        files: sortedObject(statement.files),
+    };
+    const served = {
+        inputsDigest: record.inputsDigest,
+        applicationJars: [...record.applicationJars].sort(),
+        bindings: sortedObject(record.bindings),
+        files: sortedObject(record.files),
+    };
+    for (const field of ['inputsDigest', 'applicationJars', 'bindings', 'files']) {
+        if (JSON.stringify(signed[field]) !== JSON.stringify(served[field])) {
+            refuse(`The build's record differs from its signed statement in ${field}, so the record cannot be trusted.`);
+        }
+    }
+    return 'verified';
+}
+/** `sha256:` and the hex SHA-256 of the key's X.509 SubjectPublicKeyInfo, as the build names its key. */
+function keyFingerprint(key) {
+    const spki = key.export({ type: 'spki', format: 'der' });
+    return `sha256:${crypto.createHash('sha256').update(spki).digest('hex')}`;
+}
+function sortedObject(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+        return value;
+    return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+function isFile(p) {
+    try {
+        return fs.lstatSync(p).isFile();
+    }
+    catch {
+        return false;
+    }
 }
 async function expectConfig(record, file, name, what) {
     if (!file)
@@ -31232,6 +31399,12 @@ async function expectHash(file, name, expected) {
         refuse(`The download does not match the record of its build: ${name} has SHA-256 ${actual}, recorded ${expected}.`);
     }
 }
+/** A bundle path: `/`-separated, relative, and naming no parent, current or empty segment. */
+function safeName(name) {
+    if (name.length === 0 || name.startsWith('/') || name.includes('\\') || name.includes('\0'))
+        return false;
+    return name.split('/').every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
+}
 function wellFormed(r) {
     if (!r || typeof r !== 'object')
         return false;
@@ -31243,7 +31416,7 @@ function wellFormed(r) {
         !!o.files &&
         typeof o.files === 'object' &&
         !Array.isArray(o.files) &&
-        Object.entries(o.files).every(([name, hash]) => name.length > 0 && !name.includes('/') && typeof hash === 'string' && SHA256.test(hash)) &&
+        Object.entries(o.files).every(([name, hash]) => safeName(name) && typeof hash === 'string' && SHA256.test(hash)) &&
         !!o.bindings &&
         typeof o.bindings === 'object' &&
         !Array.isArray(o.bindings) &&

@@ -12,6 +12,7 @@ jest.mock('../src/steps/register');
 jest.mock('../src/steps/staleness');
 jest.mock('../src/steps/reportDeployRun');
 import * as core from '@actions/core';
+import * as crypto from 'crypto';
 import { run } from '../src/index';
 import { reportDeployRun } from '../src/steps/reportDeployRun';
 import { pollJob } from '../src/steps/poll';
@@ -37,7 +38,7 @@ beforeEach(() => {
   (submitAnalysis as jest.Mock).mockResolvedValue('an_1');
   (submitBuild as jest.Mock).mockResolvedValue('build_1');
   (downloadArtifacts as jest.Mock).mockResolvedValue({ extensionDir: 'x', configPath: 'c', collectorConfigPath: 'k' });
-  (verifyBuild as jest.Mock).mockResolvedValue('matched');
+  (verifyBuild as jest.Mock).mockResolvedValue({ record: 'matched', signature: 'verified' });
 });
 
 it("verifies the download against the build's record before registering, and outputs the record's status", async () => {
@@ -49,6 +50,32 @@ it("verifies the download against the build's record before registering, and out
     (registerJarForEnv as jest.Mock).mock.invocationCallOrder[0],
   );
   expect(core.setOutput).toHaveBeenCalledWith('build-record', 'matched');
+  expect(core.setOutput).toHaveBeenCalledWith('build-signature', 'verified');
+});
+
+it("hands the verify step the workflow's signing key and the lock this run built", async () => {
+  const signingKey = crypto.generateKeyPairSync('ed25519').publicKey;
+  (parseInputs as jest.Mock).mockReturnValue({ ...inputs, signingKey });
+  (resolveLockedConfig as jest.Mock).mockResolvedValue({
+    projectUid: 'proj_1',
+    lockedVersionUid: 'lv_3',
+    locked: { version: 3, goals: [], selection: [], registeredJars: {} },
+  });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  await run();
+  expect(verifyBuild).toHaveBeenCalledWith(expect.objectContaining({ signingKey, lockedVersionUid: 'lv_3' }));
+});
+
+it.each([
+  ['verified', /Verified the build's signature/],
+  ['not-checked', /signing-public-key is not set, so its signature was not checked/],
+  ['unsigned', /The build is unsigned/],
+])('says what it made of a %s signature', async (signature, line) => {
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  (verifyBuild as jest.Mock).mockResolvedValue({ record: 'recorded', signature });
+  await run();
+  expect(core.info).toHaveBeenCalledWith(expect.stringMatching(line));
+  expect(core.setOutput).toHaveBeenCalledWith('build-signature', signature);
 });
 
 it('registers nothing and fails the step when the download does not match its record', async () => {

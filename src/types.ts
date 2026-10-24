@@ -1,3 +1,5 @@
+import type { KeyObject } from 'crypto';
+
 // Shared types mirroring the Maestro backend contract (see Maestro-v5-Frontend-API-Integration-Guide.html).
 // Only the fields the Action reads/sends are modelled; responses carry more.
 
@@ -25,6 +27,11 @@ export interface Inputs {
    * producing no instrumentation.
    */
   skipOnRemovedService: boolean;
+  /**
+   * The Ed25519 public key the build's signature must verify with (`signing-public-key`); null when unset, in which
+   * case a signed build is reported and not checked, and an unsigned one is accepted.
+   */
+  signingKey: KeyObject | null;
 }
 
 export interface Session {
@@ -64,6 +71,8 @@ export interface BuildRecord {
   firstJobId: string;
   /** Service key (the analysis's) to the lower-case hex SHA-256 of the upload the build bound to it. */
   bindings: Record<string, string>;
+  /** Whether the build was signed, and by which key; the Action checks the bundle's statement, not this field. */
+  signature?: { status: string; key?: string; value?: string };
 }
 
 export interface SelectionEntry {
