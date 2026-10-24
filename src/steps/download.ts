@@ -4,16 +4,25 @@ import * as os from 'os';
 import * as path from 'path';
 import AdmZip from 'adm-zip';
 import { MaestroApi, expectOk } from '../api';
-import { DownloadPaths } from '../types';
+import { BuildRecord, DownloadPaths } from '../types';
 import { UserError } from '../util/errors';
+
+interface ConfigEntry {
+  serviceName?: string;
+  signedUrl?: string | null;
+  /** The config's name in the bundle, which its record entry carries. */
+  fileName?: string | null;
+}
 
 interface DownloadBody {
   data?: {
     bundleZipUrl?: string;
     individualArtifacts?: {
-      agentConfigsByService?: { serviceName?: string; signedUrl?: string | null }[];
+      agentConfigsByService?: ConfigEntry[];
       collectorConfigUrl?: string;
+      collectorConfigFileName?: string | null;
     };
+    buildRecord?: BuildRecord | null;
   };
 }
 
@@ -37,35 +46,45 @@ export async function downloadArtifacts(
 
   const baseDir = path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'maestro', buildJobId);
   const extensionDir = path.join(baseDir, 'extension');
+  // Every file in the folder is checked against the build's record, so nothing from an earlier run may be in it.
+  fs.rmSync(baseDir, { recursive: true, force: true });
   fs.mkdirSync(extensionDir, { recursive: true });
 
-  const zipBytes = await api.getSignedBytes(data.bundleZipUrl);
-  new AdmZip(zipBytes).extractAllTo(extensionDir, /* overwrite */ true);
-  core.info(`Extracted extension bundle to ${extensionDir}`);
+  let config: ConfigEntry | undefined;
+  let configPath: string;
+  let collectorConfigPath: string;
+  try {
+    const zipBytes = await api.getSignedBytes(data.bundleZipUrl);
+    new AdmZip(zipBytes).extractAllTo(extensionDir, /* overwrite */ true);
+    core.info(`Extracted extension bundle to ${extensionDir}`);
 
-  const configPath = await writeIfPresent(
-    api,
-    serviceConfigUrl(data.individualArtifacts?.agentConfigsByService ?? [], service, analysisNames),
-    baseDir,
-    'javaagent.config',
-  );
-  const collectorConfigPath = await writeIfPresent(
-    api,
-    data.individualArtifacts?.collectorConfigUrl,
-    baseDir,
-    'collector-config.yaml',
-  );
+    config = serviceConfig(data.individualArtifacts?.agentConfigsByService ?? [], service, analysisNames);
+    configPath = await writeIfPresent(api, config?.signedUrl ?? undefined, baseDir, 'javaagent.config');
+    collectorConfigPath = await writeIfPresent(
+      api,
+      data.individualArtifacts?.collectorConfigUrl,
+      baseDir,
+      'collector-config.yaml',
+    );
+  } catch (err) {
+    // A download that stops part way leaves no files the build's record has not vouched for.
+    fs.rmSync(baseDir, { recursive: true, force: true });
+    throw err;
+  }
 
-  return { extensionDir, configPath, collectorConfigPath };
+  return {
+    extensionDir,
+    configPath,
+    collectorConfigPath,
+    record: 'buildRecord' in data ? (data.buildRecord ?? null) : undefined,
+    configFileName: config?.fileName ?? null,
+    collectorConfigFileName: data.individualArtifacts?.collectorConfigFileName ?? null,
+  };
 }
 
 /** This service's config: by the analysis's name for the upload, the registered name, then a unique letters-only
  *  match. None for an ambiguous match or a lone config of another service. */
-function serviceConfigUrl(
-  configs: { serviceName?: string; signedUrl?: string | null }[],
-  service: string,
-  analysisNames: string[],
-): string | undefined {
+function serviceConfig(configs: ConfigEntry[], service: string, analysisNames: string[]): ConfigEntry | undefined {
   const wanted = compactServiceToken(service);
   const compactMatches = configs.filter((c) => wanted !== null && compactServiceToken(c.serviceName) === wanted);
   const match =
@@ -78,7 +97,7 @@ function serviceConfigUrl(
       `No single javaagent.config for service "${service}" among: ${configs.map((c) => c.serviceName).join(', ')}.`,
     );
   }
-  return match?.signedUrl ?? undefined;
+  return match;
 }
 
 /** The build's name for the one config of a profile with no services. */

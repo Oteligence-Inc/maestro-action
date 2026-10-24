@@ -6,6 +6,7 @@ jest.mock('../src/steps/upload');
 jest.mock('../src/steps/submitJob');
 jest.mock('../src/steps/poll');
 jest.mock('../src/steps/download');
+jest.mock('../src/steps/verify', () => ({ ...jest.requireActual('../src/steps/verify'), verifyBuild: jest.fn() }));
 jest.mock('../src/steps/analysisService');
 jest.mock('../src/steps/register');
 jest.mock('../src/steps/staleness');
@@ -22,6 +23,7 @@ import { submitAnalysis, submitBuild } from '../src/steps/submitJob';
 import { downloadArtifacts } from '../src/steps/download';
 import { readAnalysisOfUpload } from '../src/steps/analysisService';
 import { registerJarForEnv } from '../src/steps/register';
+import { BuildVerificationError, verifyBuild } from '../src/steps/verify';
 
 const inputs = { service: 'fundtransfer', environment: 'dev', apiUrl: 'https://api.oteligence.com' };
 
@@ -35,6 +37,29 @@ beforeEach(() => {
   (submitAnalysis as jest.Mock).mockResolvedValue('an_1');
   (submitBuild as jest.Mock).mockResolvedValue('build_1');
   (downloadArtifacts as jest.Mock).mockResolvedValue({ extensionDir: 'x', configPath: 'c', collectorConfigPath: 'k' });
+  (verifyBuild as jest.Mock).mockResolvedValue('matched');
+});
+
+it("verifies the download against the build's record before registering, and outputs the record's status", async () => {
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  await run();
+  expect(core.setFailed).not.toHaveBeenCalled();
+  expect(verifyBuild).toHaveBeenCalledWith(expect.objectContaining({ extensionDir: 'x', uploadSha: 'abc' }));
+  expect((verifyBuild as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(
+    (registerJarForEnv as jest.Mock).mock.invocationCallOrder[0],
+  );
+  expect(core.setOutput).toHaveBeenCalledWith('build-record', 'matched');
+});
+
+it('registers nothing and fails the step when the download does not match its record', async () => {
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  (verifyBuild as jest.Mock).mockRejectedValue(
+    new BuildVerificationError('The download does not match the record of its build: x.jar'),
+  );
+  await run();
+  expect(registerJarForEnv).not.toHaveBeenCalled();
+  expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('does not match the record of its build'));
+  expect(core.setOutput).not.toHaveBeenCalledWith('generated', 'true');
 });
 
 it("hands the register step both of the analysis's names, key first", async () => {

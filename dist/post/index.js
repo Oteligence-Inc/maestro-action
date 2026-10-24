@@ -26471,8 +26471,12 @@ class ReaderKeyError extends UserError {
 exports.ReaderKeyError = ReaderKeyError;
 /** A Maestro job ended in a non-COMPLETED terminal state. */
 class JobFailed extends Error {
-    constructor(jobId, status) {
-        super(`Maestro job ${jobId} ended with status ${status}. Check the run at the Maestro dashboard.`);
+    /** @param reason the job's customer reason, which Maestro writes for its customers to read */
+    constructor(jobId, status, reason) {
+        const said = (reason ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 500);
+        super(said
+            ? `Maestro job ${jobId} ended with status ${status}: ${said}`
+            : `Maestro job ${jobId} ended with status ${status}. Check the run at the Maestro dashboard.`);
         this.name = 'JobFailed';
     }
 }

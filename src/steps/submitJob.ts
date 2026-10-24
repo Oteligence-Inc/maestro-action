@@ -3,9 +3,16 @@ import { MaestroApi, expectOk } from '../api';
 import { BuildProfile, LockedSpec, ResolvedConfig, UploadResult } from '../types';
 import { UserError } from '../util/errors';
 
+/** A job id the action may put in a path and a log line: letters, digits, '-' and '_' only. */
+const SAFE_JOB_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
 function extractJobId(body: any): string | undefined {
   const data = body?.data ?? body;
-  return data?.id ?? data?.jobId;
+  const id = data?.id ?? data?.jobId;
+  if (id !== undefined && id !== null && !(typeof id === 'string' && SAFE_JOB_ID.test(id))) {
+    throw new UserError('Maestro returned a job id this action does not accept. Check the api-url points at Maestro.');
+  }
+  return id ?? undefined;
 }
 
 /**

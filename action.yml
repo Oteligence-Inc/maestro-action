@@ -67,6 +67,9 @@ outputs:
     description: 'SHA256 of the uploaded JAR (or cache hit)'
   job-id:
     description: 'Maestro build job ID — for audit / log lookup'
+  build-record:
+    description: "How the build's files stand against the record of its inputs: 'recorded' (the first build of these inputs) or 'matched' (a rebuild produced the recorded files); empty when 'generated' is 'false'. The action refuses any other outcome."
+
 
 runs:
   using: 'node24'
