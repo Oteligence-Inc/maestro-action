@@ -11,6 +11,7 @@ import { verifyBuild } from './steps/verify';
 import { readAnalysisOfUpload } from './steps/analysisService';
 import { registerJarForEnv } from './steps/register';
 import { warnStalePeers } from './steps/staleness';
+import { reportDrift } from './steps/drift';
 import { reportDeployRun } from './steps/reportDeployRun';
 import { formatError, RemovedServiceError, SubscriptionInactiveError } from './util/errors';
 import { Inputs } from './types';
@@ -57,15 +58,18 @@ export async function run(): Promise<void> {
     const analysisJobId = await submitAnalysis(api, cfg, upload); // [6a]
     await pollJob(api, analysisJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7a]
 
-    const profile = buildProfileFromLocked(cfg.locked);
-    const buildJobId = await submitBuild(api, cfg, upload, analysisJobId, profile); // [6b]
-    await pollJob(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
-
     const analysis = await readAnalysisOfUpload(api, analysisJobId, upload.artifactUid);
     for (const notice of analysis.notices) {
       core.warning(`The analysis left part of ${inputs.service} out: ${notice}`);
     }
     const analysisNames = analysis.names;
+
+    const profile = buildProfileFromLocked(cfg.locked);
+    const build = await submitBuild(api, cfg, upload, analysisJobId, profile); // [6b]
+    const buildJobId = build.jobId;
+    // Before the build runs, so a build that fails still says how its inputs drifted from the lock.
+    reportDrift(build.drift, analysisNames);
+    await pollJob(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
     const paths = await downloadArtifacts(api, buildJobId, inputs.service, analysisNames); // [8]
     // [8b] Every downloaded file against the record of the build's inputs, before anything registers or deploys it.
     const verified = await verifyBuild({

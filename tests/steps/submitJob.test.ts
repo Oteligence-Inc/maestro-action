@@ -154,13 +154,22 @@ describe('submitBuild', () => {
       .reply(201, { data: { jobId: 'build_1' } }); // jobId variant also supported
 
     const profile = buildProfileFromLocked(locked);
-    const id = await submitBuild(client(), cfg, upload, 'job_a', profile);
-    expect(id).toBe('build_1');
+    const build = await submitBuild(client(), cfg, upload, 'job_a', profile);
+    expect(build).toEqual({ jobId: 'build_1', drift: undefined });
     expect(seen.jobType).toBe('MULTI_JAR_EXPLORER_BUILD');
     expect(seen.projectUid).toBe('proj_1'); // stamped so ci-runs (project-scoped) finds it
     expect(seen.lockedVersionUid).toBe('lv_9');
     expect(seen.requestJson.analysisJobId).toBe('job_a');
     expect(seen.requestJson.envName).toBe('prod'); // job-manager holds the build to this env's lock
     expect(seen.requestJson.profile.methodConfigurations).toBeDefined();
+  });
+
+  it("returns the build's drift as job-manager sent it", async () => {
+    const drift = { status: 'checked', lockVersion: 9, services: {} };
+    nock(BASE).post('/api/job-manager/jobs').reply(201, { data: { id: 'build_2', drift } });
+
+    const build = await submitBuild(client(), cfg, upload, 'job_a', buildProfileFromLocked(locked));
+
+    expect(build).toEqual({ jobId: 'build_2', drift });
   });
 });

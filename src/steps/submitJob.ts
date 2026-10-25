@@ -42,6 +42,12 @@ export async function submitAnalysis(api: MaestroApi, cfg: ResolvedConfig, uploa
   return jobId;
 }
 
+/** A submitted build: its job id, and its drift from the lock as job-manager worked it out (absent from an older one). */
+export interface SubmittedBuild {
+  jobId: string;
+  drift: unknown;
+}
+
 /**
  * [6b] Submit MULTI_JAR_EXPLORER_BUILD — the job that actually produces the deployable
  * extension bundle. The backend REQUIRES requestJson.profile, so we assemble it from the
@@ -53,7 +59,7 @@ export async function submitBuild(
   upload: UploadResult,
   analysisJobId: string,
   profile: BuildProfile,
-): Promise<string> {
+): Promise<SubmittedBuild> {
   const locked = cfg.locked;
   const res = await api.post('/api/job-manager/jobs', {
     projectUid: cfg.projectUid, // stamp the project so project-scoped reads (ci-runs) find this job
@@ -73,7 +79,8 @@ export async function submitBuild(
   const jobId = extractJobId(res.body);
   if (!jobId) throw new UserError('Build job submission returned no job id.');
   core.info(`Submitted build job ${jobId}.`);
-  return jobId;
+  const body = res.body as { data?: { drift?: unknown } } | undefined;
+  return { jobId, drift: body?.data?.drift };
 }
 
 /**

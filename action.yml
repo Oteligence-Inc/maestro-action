@@ -38,7 +38,7 @@ inputs:
     required: false
     default: '300'
   fail-on-warnings:
-    description: 'Fail the step if this run made peer services stale (default: false)'
+    description: 'Fail the step if this run made peer services stale (default: false). Drift from the lock never fails the step.'
     required: false
     default: 'false'
   skip-generate-on-inactive:
