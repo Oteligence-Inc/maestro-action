@@ -228,10 +228,11 @@ Drift against lock v4 in fund-transfer-service: 1 method(s) the analysis now rec
 fund-transfer-service::org.example.TransferAudit.record. Lock again to add them, or leave them out.
 ```
 
-When the analysis engine changed since the lock, the warning says a new recommendation may come from the engine
-rather than the JAR. A lock service the analysis has no counterpart for is named in a warning. Other services'
-drift is one count line, and their own runs name it. A run with no drift prints `No drift against lock vN.`; one
-built from the lock's own analysis, or one job-manager could not compare, says so as information. Drift never fails
+When the analysis engine or the goals changed since the lock, the warning says a new recommendation may come from
+them rather than the JAR. A service the lock's analysis held methods for and this build's analysis holds none for is
+named in a warning. Other services' drift is one count line, and their own runs name it. A run with no drift prints
+`No drift against lock vN.`; one built from the lock's own analysis, or one job-manager could not compare, says so
+as information, and one whose analysis was not made from this build's JARs says so in a warning. Drift never fails
 the step: `fail-on-warnings` applies to peer staleness only, and the build is still the lock's.
 
 ## Troubleshooting

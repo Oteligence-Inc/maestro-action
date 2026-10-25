@@ -29,7 +29,8 @@ function listed(g: Group): string {
 /**
  * Reports a build's drift from its lock, as job-manager worked it out when the build was submitted. Method and
  * service names, which come from the customer's bytecode, are printed only through core.warning, which escapes them.
- * Drift never fails the step, fail-on-warnings included. A job-manager that sends no drift prints nothing.
+ * Drift never fails the step, fail-on-warnings included. A job-manager that sends no drift, or a compared drift with
+ * no readable services, prints nothing. With no names of its own, every service is the run's own.
  */
 export function reportDrift(drift: unknown, ownNames: string[]): void {
   if (!drift || typeof drift !== 'object') return;
@@ -50,15 +51,18 @@ export function reportDrift(drift: unknown, ownNames: string[]): void {
   }
   if (status !== 'checked' && status !== 'unmatched') return;
 
-  const services = (d.services && typeof d.services === 'object' ? d.services : {}) as Record<string, unknown>;
+  if (!d.services || typeof d.services !== 'object' || Array.isArray(d.services)) return;
+  const services = d.services as Record<string, unknown>;
   const own = new Set(ownNames);
+  const isOwn = (service: string) => own.size === 0 || own.has(service);
   let peers = 0;
   let ownDrift = false;
   const engine = d.engineChanged === true ? ' The analysis engine changed since the lock, so a new recommendation may come from the engine rather than the JAR.' : '';
+  const goals = d.goalsChanged === true ? ' The goals changed since the lock, so a new recommendation may come from the goals rather than the JAR.' : '';
   for (const [service, raw] of Object.entries(services)) {
     const s = (raw ?? {}) as Record<string, unknown>;
     const sd: ServiceDrift = { recommendedNotInLock: group(s.recommendedNotInLock), lockedNotInJar: group(s.lockedNotInJar) };
-    if (!own.has(service)) {
+    if (!isOwn(service)) {
       peers += sd.recommendedNotInLock.count + sd.lockedNotInJar.count;
       continue;
     }
@@ -66,7 +70,7 @@ export function reportDrift(drift: unknown, ownNames: string[]): void {
       ownDrift = true;
       core.warning(`Drift against ${version} in ${service}: ${sd.recommendedNotInLock.count} method(s) the analysis now `
         + `recommends are not in the lock: ${listed(sd.recommendedNotInLock)}. Lock again to add them, or leave them out.`
-        + engine);
+        + engine + goals);
     }
     if (sd.lockedNotInJar.count > 0) {
       ownDrift = true;
@@ -77,8 +81,8 @@ export function reportDrift(drift: unknown, ownNames: string[]): void {
   const unmatched = Array.isArray(d.unmatchedServices)
     ? d.unmatchedServices.filter((s): s is string => typeof s === 'string') : [];
   if (unmatched.length > 0) {
-    core.warning(`Drift against ${version}: the analysis has no service matching ${unmatched.join(', ')}, so their `
-      + 'locked methods were not compared.');
+    core.warning(`Drift against ${version}: this build's analysis holds no methods for ${unmatched.join(', ')}, which the `
+      + "lock's analysis held, so their locked methods were not compared.");
   }
   if (peers > 0) {
     core.info(`Other services of this environment drift from ${version} by ${peers} method(s); their own runs name them.`);

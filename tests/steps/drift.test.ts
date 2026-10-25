@@ -51,7 +51,7 @@ it("gives peers' drift as one count line, without their names", () => {
 it('names lock services the analysis has none for, and never says no drift then', () => {
   reportDrift({ status: 'unmatched', lockVersion: 4, services: {}, unmatchedServices: ['billing'] }, ['mine']);
 
-  expect(warning).toHaveBeenCalledWith(expect.stringContaining('no service matching billing'));
+  expect(warning).toHaveBeenCalledWith(expect.stringContaining('holds no methods for billing, which the'));
   expect(info).not.toHaveBeenCalledWith(expect.stringContaining('No drift'));
 });
 
@@ -89,4 +89,32 @@ it('reads a malformed group as what it holds', () => {
   reportDrift(checked({ s: { recommendedNotInLock: { count: 'many', keys: ['s::a.B.k', 5] }, lockedNotInJar: null } }), ['s']);
 
   expect(warning).toHaveBeenCalledWith(expect.stringContaining('1 method(s) the analysis now recommends are not in the lock: s::a.B.k.'));
+});
+
+it('says when the goals changed since the lock, and not otherwise', () => {
+  reportDrift(checked({ s: svc(['s::a.B.n'], []) }, { goalsChanged: true }), ['s']);
+  expect(warning).toHaveBeenCalledWith(expect.stringContaining('The goals changed since the lock'));
+
+  jest.clearAllMocks();
+  reportDrift(checked({ s: svc(['s::a.B.n'], []) }, { goalsChanged: false, engineChanged: false }), ['s']);
+  expect(warning.mock.calls.flat().join('\n')).not.toMatch(/changed since the lock/);
+});
+
+it.each([
+  ['missing', undefined],
+  ['a list', [svc(['s::a.B.n'], [])]],
+  ['a string', 'services'],
+])('prints nothing for a compared drift whose services are %s, never "No drift"', (_label, services) => {
+  reportDrift({ status: 'checked', lockVersion: 4, services }, ['s']);
+
+  expect(info).not.toHaveBeenCalled();
+  expect(warning).not.toHaveBeenCalled();
+});
+
+it('treats every service as its own when the run knows no names of its own', () => {
+  reportDrift(checked({ a: svc(['a::x.Y.z'], []), b: svc([], ['b::p.Q.r']) }), []);
+
+  expect(warning).toHaveBeenCalledWith(expect.stringContaining('in a: 1 method(s)'));
+  expect(warning).toHaveBeenCalledWith(expect.stringContaining('in b: 1 locked method(s)'));
+  expect(info).not.toHaveBeenCalledWith(expect.stringContaining('Other services'));
 });
