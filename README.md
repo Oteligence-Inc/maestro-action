@@ -109,7 +109,7 @@ the app image.
    dashboard.
 8. Download + extract the bundle and configs -> step outputs. When the analysis left classes or embedded libraries
    of the JAR out (one it could not read, parse, or read for its Java version), the Action emits a **`::warning`**
-   per kind, such as `The analysis left part of order-service out: 1 class could not be parsed and is not analysed:
+   per kind, before it submits the build, such as `The analysis left part of order-service out: 1 class could not be parsed and is not analysed:
    com/acme/Broken.class.` The step still succeeds; `fail-on-warnings` does not apply to these.
 9. Verify the download against the build's record and, with `signing-public-key` set, its signature (below), then
    register the JAR's SHA for this `(env, service)` (silent; the lock is unchanged).
