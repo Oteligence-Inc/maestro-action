@@ -15,8 +15,8 @@ resolution) runs on Maestro; this Action is a thin orchestrator.
 ## Quick start
 
 1. In the Maestro wizard, **lock** the target environment (Step 5 -> Save & Lock).
-2. Create a per-environment **API key** and add it to each service repo as the
-   `MAESTRO_API_KEY` GitHub Secret.
+2. Create an **API key** on the wizard's CI/CD step and add it to each service repo as the
+   `MAESTRO_API_KEY` GitHub Secret. The key works only for that project (and for one environment of it, if it was made for one); a run that names another project or environment is refused.
 3. Add the step to your deploy workflow **after** `mvn package`:
 
 ```yaml
