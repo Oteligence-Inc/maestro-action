@@ -11,7 +11,7 @@ import { UserError } from '../util/errors';
 export async function auth(api: MaestroApi, inputs: Inputs): Promise<Session> {
   api.setToken(inputs.apiKey); // the cli/token endpoint authenticates the ak_ key as Bearer
   const query = inputs.orgId ? `?orgId=${encodeURIComponent(inputs.orgId)}` : '';
-  const res = await api.post<{ token?: string; code?: string; message?: string }>(`/api/auth/cli/token${query}`, {});
+  const res = await api.post<ExchangeResponse>(`/api/auth/cli/token${query}`, {});
   const refusal = typeof res.body?.message === 'string' ? res.body.message : '';
   if (res.body?.code === 'org_required') {
     throw new UserError(`${refusal}. Set the "org-id" input to the id of the organization to act for.`);
@@ -29,6 +29,26 @@ export async function auth(api: MaestroApi, inputs: Inputs): Promise<Session> {
   if (!token) throw new UserError('Auth succeeded but no session token was returned by Maestro.');
   api.setToken(token);
   core.setSecret(token); // the JWT is also a credential — mask it
-  core.info('Authenticated with Maestro.');
+  core.info(`Authenticated with Maestro${scopeClause(res.body)}.`);
   return { token };
+}
+
+interface ExchangeResponse {
+  token?: string;
+  code?: string;
+  message?: string;
+  scopeKind?: string;
+  scopeProjectUid?: string;
+  scopeEnvName?: string;
+}
+
+/** What the key may act on, so a later key_scope refusal reads against it. */
+function scopeClause(body: ExchangeResponse | undefined): string {
+  if (body?.scopeKind === 'environment' && body.scopeProjectUid && body.scopeEnvName) {
+    return `; this key works only for environment ${body.scopeEnvName} of project ${body.scopeProjectUid}`;
+  }
+  if (body?.scopeKind === 'project' && body.scopeProjectUid) {
+    return `; this key works only for project ${body.scopeProjectUid}`;
+  }
+  return '';
 }

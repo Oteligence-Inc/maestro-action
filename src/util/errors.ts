@@ -93,6 +93,23 @@ export class ReaderKeyError extends UserError {
   }
 }
 
+/**
+ * HTTP 403 `key_scope`: MAESTRO_API_KEY is held to one project, or one environment of it, and the run named
+ * something else. The server's message names the key's scope and what the run asked for.
+ */
+export class KeyScopeError extends UserError {
+  constructor(serverMessage?: string, traceId?: string) {
+    const said = serverMessage ? `${serverMessage.replace(/\.$/, '')}. ` : '';
+    const traceClause = traceId ? ` [trace: ${traceId}]` : '';
+    super(
+      `Maestro refused this run: ${said}MAESTRO_API_KEY works only for the project, and the environment if it ` +
+        'names one, it was made for. Set the "project" and "environment" inputs to those, or create a key for this ' +
+        "project on the wizard's CI/CD step and update the MAESTRO_API_KEY secret." + traceClause,
+    );
+    this.name = 'KeyScopeError';
+  }
+}
+
 /** A Maestro job ended in a non-COMPLETED terminal state. */
 export class JobFailed extends Error {
   /** @param reason the job's customer reason, which Maestro writes for its customers to read */

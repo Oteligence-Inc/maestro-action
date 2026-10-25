@@ -25772,6 +25772,9 @@ function expectOk(res, path) {
             if (code === 'reader_read_only') {
                 throw new errors_1.ReaderKeyError(traceId);
             }
+            if (code === 'key_scope') {
+                throw new errors_1.KeyScopeError(messageOf(res.body), traceId);
+            }
         }
         throw new errors_1.HttpError(res.statusCode, path, messageOf(res.body), traceId);
     }
@@ -26159,8 +26162,18 @@ async function auth(api, inputs) {
         throw new errors_1.UserError('Auth succeeded but no session token was returned by Maestro.');
     api.setToken(token);
     core.setSecret(token); // the JWT is also a credential — mask it
-    core.info('Authenticated with Maestro.');
+    core.info(`Authenticated with Maestro${scopeClause(res.body)}.`);
     return { token };
+}
+/** What the key may act on, so a later key_scope refusal reads against it. */
+function scopeClause(body) {
+    if (body?.scopeKind === 'environment' && body.scopeProjectUid && body.scopeEnvName) {
+        return `; this key works only for environment ${body.scopeEnvName} of project ${body.scopeProjectUid}`;
+    }
+    if (body?.scopeKind === 'project' && body.scopeProjectUid) {
+        return `; this key works only for project ${body.scopeProjectUid}`;
+    }
+    return '';
 }
 
 
@@ -26414,8 +26427,8 @@ async function resolveProjectUid(api, project, projectId) {
     if (id) {
         const match = await findTenantProject(api, id, (p) => p.uid === id);
         if (!match) {
-            throw new errors_1.UserError(`project-id "${id}" was not found for this API key's tenant. ` +
-                'Copy the exact Project ID from Maestro (project settings / URL), or use the project name instead.');
+            throw new errors_1.UserError(`project-id "${id}" is not a project this API key can reach. ` +
+                'A key works only for the project it was made for: copy that Project ID from Maestro, or use its name.');
         }
         if (name && match.projectName !== name) {
             core.warning(`Both project-id and project name were given; using project-id "${id}" (project "${match.projectName}") ` +
@@ -26428,7 +26441,8 @@ async function resolveProjectUid(api, project, projectId) {
         return name;
     const match = await findTenantProject(api, name, (p) => p.projectName === name);
     if (!match) {
-        throw new errors_1.UserError(`Project "${name}" not found for this API key's tenant. Pass the exact project name, or set "project-id".`);
+        throw new errors_1.UserError(`Project "${name}" is not a project this API key can reach. A key works only for the project it was made ` +
+            'for: pass that project\'s exact name, or set "project-id".');
     }
     return match.uid;
 }
@@ -26468,7 +26482,7 @@ async function findTenantProject(api, ref, matches) {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.JobTimeout = exports.JobFailed = exports.ReaderKeyError = exports.RemovedServiceError = exports.SubscriptionInactiveError = exports.UserError = exports.HttpError = void 0;
+exports.JobTimeout = exports.JobFailed = exports.KeyScopeError = exports.ReaderKeyError = exports.RemovedServiceError = exports.SubscriptionInactiveError = exports.UserError = exports.HttpError = void 0;
 exports.formatError = formatError;
 const util_1 = __nccwpck_require__(9023);
 // Typed errors with user-facing messages (Build Spec §8). Server stack traces and
@@ -26556,6 +26570,21 @@ class ReaderKeyError extends UserError {
     }
 }
 exports.ReaderKeyError = ReaderKeyError;
+/**
+ * HTTP 403 `key_scope`: MAESTRO_API_KEY is held to one project, or one environment of it, and the run named
+ * something else. The server's message names the key's scope and what the run asked for.
+ */
+class KeyScopeError extends UserError {
+    constructor(serverMessage, traceId) {
+        const said = serverMessage ? `${serverMessage.replace(/\.$/, '')}. ` : '';
+        const traceClause = traceId ? ` [trace: ${traceId}]` : '';
+        super(`Maestro refused this run: ${said}MAESTRO_API_KEY works only for the project, and the environment if it ` +
+            'names one, it was made for. Set the "project" and "environment" inputs to those, or create a key for this ' +
+            "project on the wizard's CI/CD step and update the MAESTRO_API_KEY secret." + traceClause);
+        this.name = 'KeyScopeError';
+    }
+}
+exports.KeyScopeError = KeyScopeError;
 /** A Maestro job ended in a non-COMPLETED terminal state. */
 class JobFailed extends Error {
     /** @param reason the job's customer reason, which Maestro writes for its customers to read */
