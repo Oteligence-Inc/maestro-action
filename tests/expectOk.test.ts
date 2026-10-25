@@ -1,5 +1,5 @@
 import { expectOk, messageOf, traceOf, ApiResponse } from '../src/api';
-import { SubscriptionInactiveError, HttpError, ReaderKeyError, UserError } from '../src/util/errors';
+import { SubscriptionInactiveError, HttpError, KeyScopeError, ReaderKeyError, UserError } from '../src/util/errors';
 
 const res = (statusCode: number, body: unknown): ApiResponse => ({ statusCode, body });
 
@@ -126,5 +126,34 @@ describe('expectOk — 403 reader_read_only from either service', () => {
       expectOk(res(403, { code: 'tenant_not_provisioned', message: 'no tenant' }), '/api/job-manager/jobs');
     expect(err).toThrow(HttpError);
     expect(err).not.toThrow(ReaderKeyError);
+  });
+});
+
+describe('expectOk: 403 key_scope from the gateway and the services', () => {
+  const SCOPE_MESSAGE = 'This API key works only for project p-1; it cannot act on project p-2.';
+
+  it('gateway and file-service flat body: KeyScopeError carrying the scope and the fix', () => {
+    const err = () =>
+      expectOk(
+        res(403, { error: 'Forbidden', message: SCOPE_MESSAGE, code: 'key_scope', traceId: 't-9' }),
+        '/api/file/artifact/upload/batch',
+      );
+    expect(err).toThrow(KeyScopeError);
+    expect(err).toThrow(UserError);
+    expect(err).toThrow(/works only for project p-1; it cannot act on project p-2\. MAESTRO_API_KEY works only/);
+    expect(err).toThrow(/"project" and "environment" inputs/);
+    expect(err).toThrow(/\[trace: t-9\]/);
+  });
+
+  it('job-manager nested body: KeyScopeError', () => {
+    expect(() =>
+      expectOk(res(403, { status: 'FORBIDDEN', message: SCOPE_MESSAGE, data: { code: 'key_scope' } }), '/api/job-manager/jobs'),
+    ).toThrow(KeyScopeError);
+  });
+
+  it('a 403 with another code is not a KeyScopeError', () => {
+    const err = () => expectOk(res(403, { code: 'cli_token_not_allowed', message: 'no' }), '/api/job-manager/jobs');
+    expect(err).toThrow(HttpError);
+    expect(err).not.toThrow(KeyScopeError);
   });
 });

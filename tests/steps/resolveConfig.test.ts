@@ -97,7 +97,7 @@ it('reads an empty 200 on locked as an empty response, not as "not locked yet"',
 
 it('throws when the project name is unknown to the tenant', async () => {
   nock(BASE).get('/api/auth/tenant-projects').query(true).reply(200, { content: [], page: { number: 0, size: 100, totalElements: 0 } });
-  await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/not found/);
+  await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/"banking-app" is not a project this API key can reach/);
 });
 
 // ── project-id (UID) resolution — wins over name, validated up front ──────────────
@@ -146,7 +146,7 @@ it('throws a clear error when project-id is not in the tenant (validated up fron
     .reply(200, { content: [{ uid: 'someone-else', projectName: 'other' }] });
   await expect(
     resolveLockedConfig(client(), { projectId: 'does-not-exist', environment: 'dev' } as Inputs),
-  ).rejects.toThrow(/project-id "does-not-exist" was not found/);
+  ).rejects.toThrow(/project-id "does-not-exist" is not a project this API key can reach/);
 });
 
 it('reads a 200 with null data on locked as "not locked yet", not as an empty response', async () => {
@@ -209,7 +209,7 @@ describe('a project past the first page of tenant projects', () => {
     const last = nock(BASE).get('/api/auth/tenant-projects').query({ page: '1', size: '100' })
       .reply(200, { ...secondPage, content: [{ uid: 'proj_b', projectName: 'beta' }] });
     nock(BASE).get('/api/auth/tenant-projects').query({ page: '0', size: '100' }).reply(200, firstPage);
-    await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/not found for this API key's tenant/);
+    await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/is not a project this API key can reach/);
     expect(last.isDone()).toBe(true);
   });
 
@@ -223,7 +223,7 @@ describe('a project past the first page of tenant projects', () => {
     nock(BASE).get('/api/auth/tenant-projects').query({ page: '0', size: '100' }).reply(200, firstPage);
     nock(BASE).get('/api/auth/tenant-projects').query({ page: '1', size: '100' })
       .reply(200, { content: [], page: { number: 1, size: 100, hasNext: true } });
-    await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/not found for this API key's tenant/);
+    await expect(resolveLockedConfig(client(), inputs)).rejects.toThrow(/is not a project this API key can reach/);
   });
 
   it('reports a refusal on a later page as an access problem', async () => {
@@ -235,7 +235,7 @@ describe('a project past the first page of tenant projects', () => {
   it('reports any other failure as the HTTP error, not as a missing project', async () => {
     nock(BASE).get('/api/auth/tenant-projects').query({ page: '0', size: '100' }).reply(404, { message: 'gone' });
     const err = await resolveLockedConfig(client(), inputs).catch((e: Error) => e);
-    expect(String(err)).not.toMatch(/not found for this API key's tenant/);
+    expect(String(err)).not.toMatch(/is not a project this API key can reach/);
     expect(String(err)).toMatch(/404/);
   });
 

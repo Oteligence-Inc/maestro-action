@@ -1,5 +1,6 @@
 import nock from 'nock';
 jest.mock('@actions/core');
+import * as core from '@actions/core';
 import { MaestroApi } from '../../src/api';
 import { auth } from '../../src/steps/auth';
 import { SubscriptionInactiveError, UserError } from '../../src/util/errors';
@@ -117,4 +118,24 @@ it('does not cite a hardcoded prod billing host when the 402 body omits billing_
   expect(message).toContain('PAST_DUE');
   expect(message).not.toContain('app.oteligence.com');
   expect(message).toMatch(/dashboard/i);
+});
+
+it("logs the key's scope from the exchange, and nothing for an organization key", async () => {
+  const info = core.info as jest.Mock;
+  info.mockClear();
+  nock(BASE).post('/api/auth/cli/token').reply(200, {
+    token: 'jwt-e', scopeKind: 'environment', scopeProjectUid: 'p-1', scopeEnvUid: 'e-1', scopeEnvName: 'staging',
+  });
+  await auth(new MaestroApi(BASE), inputs);
+  expect(info).toHaveBeenCalledWith(
+    'Authenticated with Maestro; this key works only for environment staging of project p-1.',
+  );
+
+  nock(BASE).post('/api/auth/cli/token').reply(200, { token: 'jwt-p', scopeKind: 'project', scopeProjectUid: 'p-1' });
+  await auth(new MaestroApi(BASE), inputs);
+  expect(info).toHaveBeenCalledWith('Authenticated with Maestro; this key works only for project p-1.');
+
+  nock(BASE).post('/api/auth/cli/token').reply(200, { token: 'jwt-o', scopeKind: 'organization' });
+  await auth(new MaestroApi(BASE), inputs);
+  expect(info).toHaveBeenLastCalledWith('Authenticated with Maestro.');
 });

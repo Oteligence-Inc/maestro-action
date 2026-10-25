@@ -244,8 +244,9 @@ the step: `fail-on-warnings` applies to peer staleness only, and the build is st
 | `Env "X" ... was not found` | Check that `environment` names an environment in the project. |
 | `Env "X" ... has not been locked yet` | Complete Step 5 (Save & Lock) in the wizard before running CI. |
 | `Input required and not supplied: api-url` | Add `api-url` to the step's `with:`. It has no default. |
-| `Project "X" not found` | Use the exact project name, or its `proj_` UID. |
-| `project-id "X" was not found for this API key's tenant` | Copy the exact Project ID from Maestro, or use the project name instead. |
+| `Project "X" is not a project this API key can reach` | A key works only for the project it was made for. Use that project's exact name, or its `proj_` UID. |
+| `project-id "X" is not a project this API key can reach` | A key works only for the project it was made for. Copy that Project ID from Maestro, or use its name. |
+| `Maestro refused this run: This API key works only for ...` | The run named a project or environment outside the key's scope (403 `key_scope`). Set `project` and `environment` to the ones the key was made for, or create a key for this project on the wizard's CI/CD step. The run's first lines name the key's scope. |
 | `API key does not have access to project "X"` | The tenant-projects listing refused the key (401 or 403). Use a key from the organization that owns the project. |
 | `Listing this API key's tenant projects returned more than 1000 pages` | The listing never reported a last page. Set `project-id` to skip the name lookup, and report it. |
 | `No single javaagent.config for service "X"` | The build has no config for this service: the lock selects none of its methods, or its name matches more than one service. `config-path` is empty. |

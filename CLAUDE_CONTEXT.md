@@ -12,7 +12,7 @@ extension bundle and configs on the runner for their image build. All analysis a
 | `src/index.ts` | `run()`: the step order below, the removed-service guard, the two opt-in degradations (`skip-on-removed-service`, `skip-generate-on-inactive`), and the deploy-run report at start and end. |
 | `src/post.ts`, `src/postMain.ts` | The post step, its own bundle so it can never run the pipeline. `post()` acts only while `deployRunProjectUid` is set (a run Maestro has not accepted as completed): it re-authenticates and reports the run completed with the `deployRunConclusion` the main step last tried to send, or `cancelled` when the main step was stopped before it got that far (a cancel, or a timeout, which therefore reads as cancelled). Warns when it cannot report, and never fails the step. |
 | `src/inputs.ts` | `parseInputs`: reads the inputs, requires `project` or `project-id` and `api-url` (there is no default API), and holds `api-url` to `https://` on an `*.oteligence.com` host, or, when `trusted-api-host` names a hostname, on exactly that host. |
-| `src/api.ts` | `MaestroApi` over `@actions/http-client`: bearer auth, retry on transient failures (`util/retry.ts`), signed-URL reads and writes without the auth header and over https only (`requireHttps` refuses another scheme by name, never echoing the URL), `expectOk` mapping a 402 `subscription_inactive` to `SubscriptionInactiveError`. |
+| `src/api.ts` | `MaestroApi` over `@actions/http-client`: bearer auth, retry on transient failures (`util/retry.ts`), signed-URL reads and writes without the auth header and over https only (`requireHttps` refuses another scheme by name, never echoing the URL), `expectOk` mapping a 402 `subscription_inactive` to `SubscriptionInactiveError`, a 403 `reader_read_only` to `ReaderKeyError` and a 403 `key_scope` (the run named a project or environment outside the key's scope) to `KeyScopeError`, each read flat or under `data`. |
 | `src/steps/` | One module per step, each with its own suite under `tests/steps/`. |
 | `src/util/errors.ts` | The only messages that reach the log. `formatError` never echoes a response body or stack. |
 | `dist/` | The two ncc bundles GitHub executes, `dist/index.js` and `dist/post/index.js`; committed, and `ci.yml` fails when either is stale. |
@@ -21,7 +21,9 @@ extension bundle and configs on the runner for their image build. All analysis a
 
 1. `auth`: `POST /api/auth/cli/token` with the API key (plus `orgId` from the `org-id` input when set), keeping the
    JWT. A refusal with `code` `org_required` names the `org-id` input; any other 403 with a message reports the
-   server's reason.
+   server's reason. The log line names the key's scope from the response (`scopeKind`, `scopeProjectUid`,
+   `scopeEnvName`): a project, or one environment of it. A scoped key's tenant-projects listing holds only its
+   project.
 2. `resolveLockedConfig`: `GET /api/auth/tenant-projects`, page by page until the project name or `project-id`
    matches, or a page is empty or does not say another follows (refused past 1000 pages; an empty body is an error,
    not a missing project), then

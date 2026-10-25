@@ -72,8 +72,8 @@ async function resolveProjectUid(api: MaestroApi, project: string, projectId: st
     const match = await findTenantProject(api, id, (p) => p.uid === id);
     if (!match) {
       throw new UserError(
-        `project-id "${id}" was not found for this API key's tenant. ` +
-          'Copy the exact Project ID from Maestro (project settings / URL), or use the project name instead.',
+        `project-id "${id}" is not a project this API key can reach. ` +
+          'A key works only for the project it was made for: copy that Project ID from Maestro, or use its name.',
       );
     }
     if (name && match.projectName !== name) {
@@ -90,7 +90,8 @@ async function resolveProjectUid(api: MaestroApi, project: string, projectId: st
   const match = await findTenantProject(api, name, (p) => p.projectName === name);
   if (!match) {
     throw new UserError(
-      `Project "${name}" not found for this API key's tenant. Pass the exact project name, or set "project-id".`,
+      `Project "${name}" is not a project this API key can reach. A key works only for the project it was made ` +
+        'for: pass that project\'s exact name, or set "project-id".',
     );
   }
   return match.uid;

@@ -1,6 +1,6 @@
 import { HttpClient } from '@actions/http-client';
 import { Readable } from 'stream';
-import { HttpError, ReaderKeyError, SubscriptionInactiveError, UserError } from './util/errors';
+import { HttpError, KeyScopeError, ReaderKeyError, SubscriptionInactiveError, UserError } from './util/errors';
 import { withRetry } from './util/retry';
 
 export interface ApiResponse<T = any> {
@@ -127,6 +127,9 @@ export function expectOk(res: ApiResponse, path: string): void {
       const code = res.body?.data?.code ?? res.body?.code;
       if (code === 'reader_read_only') {
         throw new ReaderKeyError(traceId);
+      }
+      if (code === 'key_scope') {
+        throw new KeyScopeError(messageOf(res.body), traceId);
       }
     }
     throw new HttpError(res.statusCode, path, messageOf(res.body), traceId);
