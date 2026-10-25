@@ -29727,6 +29727,7 @@ const verify_1 = __nccwpck_require__(3202);
 const analysisService_1 = __nccwpck_require__(7626);
 const register_1 = __nccwpck_require__(7042);
 const staleness_1 = __nccwpck_require__(4289);
+const drift_1 = __nccwpck_require__(6352);
 const reportDeployRun_1 = __nccwpck_require__(8013);
 const errors_1 = __nccwpck_require__(17);
 /**
@@ -29766,14 +29767,17 @@ async function run() {
         const upload = await (0, upload_1.uploadJar)(api, inputs, cfg); // [3-5]
         const analysisJobId = await (0, submitJob_1.submitAnalysis)(api, cfg, upload); // [6a]
         await (0, poll_1.pollJob)(api, analysisJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7a]
-        const profile = (0, submitJob_1.buildProfileFromLocked)(cfg.locked);
-        const buildJobId = await (0, submitJob_1.submitBuild)(api, cfg, upload, analysisJobId, profile); // [6b]
-        await (0, poll_1.pollJob)(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
         const analysis = await (0, analysisService_1.readAnalysisOfUpload)(api, analysisJobId, upload.artifactUid);
         for (const notice of analysis.notices) {
             core.warning(`The analysis left part of ${inputs.service} out: ${notice}`);
         }
         const analysisNames = analysis.names;
+        const profile = (0, submitJob_1.buildProfileFromLocked)(cfg.locked);
+        const build = await (0, submitJob_1.submitBuild)(api, cfg, upload, analysisJobId, profile); // [6b]
+        const buildJobId = build.jobId;
+        // Before the build runs, so a build that fails still says how its inputs drifted from the lock.
+        (0, drift_1.reportDrift)(build.drift, analysisNames);
+        await (0, poll_1.pollJob)(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
         const paths = await (0, download_1.downloadArtifacts)(api, buildJobId, inputs.service, analysisNames); // [8]
         // [8b] Every downloaded file against the record of the build's inputs, before anything registers or deploys it.
         const verified = await (0, verify_1.verifyBuild)({
@@ -30296,6 +30300,131 @@ async function writeIfPresent(api, url, dir, name) {
     const dest = path.join(dir, name);
     fs.writeFileSync(dest, bytes);
     return dest;
+}
+
+
+/***/ }),
+
+/***/ 6352:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.reportDrift = reportDrift;
+const core = __importStar(__nccwpck_require__(7484));
+/** How many method names a line prints; the count beside them is always the server's full one. */
+const SHOWN = 10;
+function group(value) {
+    const g = (value ?? {});
+    const keys = Array.isArray(g.keys) ? g.keys.filter((k) => typeof k === 'string') : [];
+    const count = typeof g.count === 'number' && Number.isInteger(g.count) && g.count >= keys.length ? g.count : keys.length;
+    return { count, keys };
+}
+function listed(g) {
+    const shown = g.keys.slice(0, SHOWN);
+    const more = g.count - shown.length;
+    return shown.join(', ') + (more > 0 ? ` and ${more} more` : '');
+}
+/**
+ * Reports a build's drift from its lock, as job-manager worked it out when the build was submitted. Method and
+ * service names, which come from the customer's bytecode, are printed only through core.warning, which escapes them.
+ * Drift never fails the step, fail-on-warnings included. A job-manager that sends no drift, or a compared drift with
+ * no readable services, prints nothing. With no names of its own, every service is the run's own.
+ */
+function reportDrift(drift, ownNames) {
+    if (!drift || typeof drift !== 'object')
+        return;
+    const d = drift;
+    const status = typeof d.status === 'string' ? d.status : undefined;
+    const version = Number.isInteger(d.lockVersion) ? `lock v${d.lockVersion}` : 'the lock';
+    if (status === 'same_analysis') {
+        core.info(`Built from ${version}'s own analysis: no drift to report.`);
+        return;
+    }
+    if (status === 'no_lock' || status === 'lock_has_no_analysis' || status === 'unreadable') {
+        core.info(`Drift against ${version} was not checked (${status.replace(/_/g, ' ')}).`);
+        return;
+    }
+    if (status === 'unbound') {
+        core.warning(`Drift against ${version} was not checked: the analysis was not made from this build's JARs.`);
+        return;
+    }
+    if (status !== 'checked' && status !== 'unmatched')
+        return;
+    if (!d.services || typeof d.services !== 'object' || Array.isArray(d.services))
+        return;
+    const services = d.services;
+    const own = new Set(ownNames);
+    const isOwn = (service) => own.size === 0 || own.has(service);
+    let peers = 0;
+    let ownDrift = false;
+    const engine = d.engineChanged === true ? ' The analysis engine changed since the lock, so a new recommendation may come from the engine rather than the JAR.' : '';
+    const goals = d.goalsChanged === true ? ' The goals changed since the lock, so a new recommendation may come from the goals rather than the JAR.' : '';
+    for (const [service, raw] of Object.entries(services)) {
+        const s = (raw ?? {});
+        const sd = { recommendedNotInLock: group(s.recommendedNotInLock), lockedNotInJar: group(s.lockedNotInJar) };
+        if (!isOwn(service)) {
+            peers += sd.recommendedNotInLock.count + sd.lockedNotInJar.count;
+            continue;
+        }
+        if (sd.recommendedNotInLock.count > 0) {
+            ownDrift = true;
+            core.warning(`Drift against ${version} in ${service}: ${sd.recommendedNotInLock.count} method(s) the analysis now `
+                + `recommends are not in the lock: ${listed(sd.recommendedNotInLock)}. Lock again to add them, or leave them out.`
+                + engine + goals);
+        }
+        if (sd.lockedNotInJar.count > 0) {
+            ownDrift = true;
+            core.warning(`Drift against ${version} in ${service}: ${sd.lockedNotInJar.count} locked method(s) are no longer `
+                + `in the JAR or can no longer be instrumented: ${listed(sd.lockedNotInJar)}.`);
+        }
+    }
+    const unmatched = Array.isArray(d.unmatchedServices)
+        ? d.unmatchedServices.filter((s) => typeof s === 'string') : [];
+    if (unmatched.length > 0) {
+        core.warning(`Drift against ${version}: this build's analysis holds no methods for ${unmatched.join(', ')}, which the `
+            + "lock's analysis held, so their locked methods were not compared.");
+    }
+    if (peers > 0) {
+        core.info(`Other services of this environment drift from ${version} by ${peers} method(s); their own runs name them.`);
+    }
+    if (!ownDrift && peers === 0 && unmatched.length === 0) {
+        core.info(`No drift against ${version}.`);
+    }
 }
 
 
@@ -30957,7 +31086,8 @@ async function submitBuild(api, cfg, upload, analysisJobId, profile) {
     if (!jobId)
         throw new errors_1.UserError('Build job submission returned no job id.');
     core.info(`Submitted build job ${jobId}.`);
-    return jobId;
+    const body = res.body;
+    return { jobId, drift: body?.data?.drift };
 }
 /**
  * Build the MULTI_JAR_EXPLORER_BUILD profile from the locked selection. Mirrors the

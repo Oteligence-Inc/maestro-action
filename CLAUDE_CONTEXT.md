@@ -44,9 +44,17 @@ extension bundle and configs on the runner for their image build. All analysis a
    `customerReason` (control characters collapsed, 500 characters at most) when job-manager gives one. A job id
    that is not letters, digits, `-` and `_` is refused at submit (`extractJobId`), since it becomes a path segment
    under `RUNNER_TEMP` and a log line.
-6. `readAnalysisOfUpload`: the analysis preview (`/jobs/{id}/preview`, then its signed JSON) gives the uploaded JAR's
-   `serviceKey` (its name, or `name@<8 hex>` when uploads share a name) and display name, and its `notices` (what
-   the analysis left out of the JAR); `run` emits one `core.warning` per notice.
+6. `readAnalysisOfUpload` (called after the analysis completes and before the build is submitted): the analysis
+   preview (`/jobs/{id}/preview`, then its signed JSON) gives the uploaded JAR's `serviceKey` (its name, or
+   `name@<8 hex>` when uploads share a name) and display name, and its `notices` (what the analysis left out of the
+   JAR); `run` emits one `core.warning` per notice.
+6b. `reportDrift` (`src/steps/drift.ts`), right after `submitBuild` returns `{jobId, drift}` and before the build is
+   polled: job-manager's drift of the build from its lock. One `core.warning` per kind of drift for the services
+   `readAnalysisOfUpload` named, or for every service when it named none (the method names only inside
+   `core.warning`, which escapes workflow commands), a note on that warning when `engineChanged` or `goalsChanged`,
+   one `core.warning` naming `unmatchedServices`, one for `unbound`, peers as one count line, and `core.info` for no
+   drift and for a drift job-manager could not compare. A missing `drift` (an older job-manager), or a compared one
+   whose `services` is not an object, prints nothing. Drift never fails the step, `fail-on-warnings` included.
 7. `downloadArtifacts`: `/jobs/{id}/download`; empties the job's folder, extracts the bundle and writes this service's
    `javaagent.config`, chosen by the analysis key, then the `service` input, then a unique letters-only match. It returns
    the response's `buildRecord` (`undefined` when the field is absent, a server older than build records; `null` when

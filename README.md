@@ -71,7 +71,7 @@ the app image.
 | `api-url` | yes | | The Maestro API this run talks to: `https://prod.api.oteligence.com` for hosted Maestro, or your private-cloud install's address. It must be `https://` in every case; a private-cloud install serves plain HTTP out of the box, so put a TLS terminator in front of it. The storage URLs it signs for uploads and downloads must be `https://` too. A host outside `*.oteligence.com` must also be named in `trusted-api-host`. |
 | `trusted-api-host` | no | | A private-cloud install's API hostname, such as `maestro.example.internal`: no scheme, port or path. The Action then accepts `api-url` on that host and refuses every other, an `*.oteligence.com` host included. Leave it unset for hosted Maestro. |
 | `timeout-seconds` | no | `300` | Max wait for each Maestro job. |
-| `fail-on-warnings` | no | `false` | Fail the step if this run made peer services stale. |
+| `fail-on-warnings` | no | `false` | Fail the step if this run made peer services stale. Drift from the lock never fails the step. |
 | `skip-generate-on-inactive` | no | `false` | When the subscription is inactive (402), skip generation, set `generated` to `false` and let the pipeline continue without a new extension, instead of failing the step. |
 | `skip-on-removed-service` | no | `false` | When this service is no longer in the environment's lock, skip generation, set `generated` to `false` and let the pipeline continue, instead of failing the step. Off, a removed or mistyped service fails with a message. |
 | `signing-public-key` | no | | The Ed25519 public key your Maestro platform signs builds with: its PEM, or the base64 of its X.509 SubjectPublicKeyInfo. Set, the step fails unless the build carries a statement this key signed (see *Verifying the download*). Unset, a signed build is reported as `not-checked` and an unsigned one as `unsigned`. Take it from your own records, for example a repository variable, never from the Maestro server; a private key is refused. |
@@ -102,12 +102,14 @@ the app image.
    the locked selection: every entry except an auto-recommended SKIP one and a
    `user_removed` one; a SKIP row the user ticked is built, as the wizard builds it).
    The build names its project and environment, so job-manager holds it to that environment's lock.
+   Before polling the build, the Action reports its **drift** from the lock (below), so a build that then fails
+   still says how its inputs drifted.
 7. Poll each job to completion. A job that fails names Maestro's reason for it in the step's error (for example
    `The build could not be recorded. Try again, or contact support if it keeps failing.`), else points at the
    dashboard.
 8. Download + extract the bundle and configs -> step outputs. When the analysis left classes or embedded libraries
    of the JAR out (one it could not read, parse, or read for its Java version), the Action emits a **`::warning`**
-   per kind, such as `The analysis left part of order-service out: 1 class could not be parsed and is not analysed:
+   per kind, before it submits the build, such as `The analysis left part of order-service out: 1 class could not be parsed and is not analysed:
    com/acme/Broken.class.` The step still succeeds; `fail-on-warnings` does not apply to these.
 9. Verify the download against the build's record and, with `signing-public-key` set, its signature (below), then
    register the JAR's SHA for this `(env, service)` (silent; the lock is unchanged).
@@ -213,6 +215,25 @@ order-service. Re-run each one's CI to refresh its instrumentation.
 ```
 
 Set `fail-on-warnings: true` to make that a hard failure instead.
+
+## Drift from the lock
+
+job-manager compares the build's analysis with the lock's own analysis when the build is submitted, and the
+Action reports the result for the service it built. A **`::warning`** names, with job-manager's full count, the
+methods the analysis now recommends that the lock does not hold, and the locked methods no longer in the JAR or no
+longer instrumentable, for example:
+
+```
+Drift against lock v4 in fund-transfer-service: 1 method(s) the analysis now recommends are not in the lock:
+fund-transfer-service::org.example.TransferAudit.record. Lock again to add them, or leave them out.
+```
+
+When the analysis engine or the goals changed since the lock, the warning says a new recommendation may come from
+them rather than the JAR. A service the lock's analysis held methods for and this build's analysis holds none for is
+named in a warning. Other services' drift is one count line, and their own runs name it. A run with no drift prints
+`No drift against lock vN.`; one built from the lock's own analysis, or one job-manager could not compare, says so
+as information, and one whose analysis was not made from this build's JARs says so in a warning. Drift never fails
+the step: `fail-on-warnings` applies to peer staleness only, and the build is still the lock's.
 
 ## Troubleshooting
 

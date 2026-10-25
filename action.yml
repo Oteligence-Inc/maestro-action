@@ -7,13 +7,13 @@ branding:
 
 inputs:
   api-key:
-    description: 'Maestro API key — use a GitHub Secret, not inline'
+    description: 'Maestro API key. Use a GitHub Secret, not inline'
     required: true
   project:
     description: 'Maestro project name (e.g. banking-app). Optional if project-id is given.'
     required: false
   project-id:
-    description: 'Maestro project UID. Wins over `project` when set — use it if the name may be wrong/forgotten. Provide project OR project-id (or both).'
+    description: 'Maestro project UID. Wins over `project` when set; use it if the name may be wrong/forgotten. Provide project OR project-id (or both).'
     required: false
   org-id:
     description: "The id of the organization to act for (org_... on hosted SaaS, a UUID on a private-cloud VM). Needed only when the API key is not scoped to a project and its owner belongs to several organizations."
@@ -38,7 +38,7 @@ inputs:
     required: false
     default: '300'
   fail-on-warnings:
-    description: 'Fail the step if this run made peer services stale (default: false)'
+    description: 'Fail the step if this run made peer services stale (default: false). Drift from the lock never fails the step.'
     required: false
     default: 'false'
   skip-generate-on-inactive:
@@ -51,7 +51,7 @@ inputs:
     description: >-
       If this service is no longer part of the env's Maestro config (removed from the project), skip
       gracefully (generated=false) and continue the pipeline instead of failing the step. Default false
-      — a removed or mistyped service hard-fails with a clear message.
+      (a removed or mistyped service hard-fails with a clear message).
     required: false
     default: 'false'
   signing-public-key:
@@ -78,11 +78,11 @@ outputs:
   collector-config-path:
     description: 'Local path to the resolved collector config (deploy to your Collector, not the app image)'
   locked-version:
-    description: 'The locked version applied (e.g. 22) — use for image labels'
+    description: 'The locked version applied (e.g. 22), for image labels'
   jar-sha:
     description: 'SHA256 of the uploaded JAR (or cache hit)'
   job-id:
-    description: 'Maestro build job ID — for audit / log lookup'
+    description: 'Maestro build job ID, for audit and log lookup'
   build-record:
     description: "How the build's files stand against the record of its inputs: 'recorded' (the first build of these inputs) or 'matched' (a rebuild produced the recorded files); empty when 'generated' is 'false'. The action refuses any other outcome."
   build-signature:

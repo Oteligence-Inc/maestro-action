@@ -29,6 +29,7 @@ import { BuildVerificationError, verifyBuild } from '../src/steps/verify';
 const inputs = { service: 'fundtransfer', environment: 'dev', apiUrl: 'https://api.oteligence.com' };
 
 beforeEach(() => {
+  (pollJob as jest.Mock).mockReset();
   (parseInputs as jest.Mock).mockReturnValue(inputs);
   (resolveLockedConfig as jest.Mock).mockResolvedValue({
     projectUid: 'proj_1',
@@ -36,9 +37,53 @@ beforeEach(() => {
   });
   (uploadJar as jest.Mock).mockResolvedValue({ artifactUid: 'art_1', sha: 'abc' });
   (submitAnalysis as jest.Mock).mockResolvedValue('an_1');
-  (submitBuild as jest.Mock).mockResolvedValue('build_1');
+  (submitBuild as jest.Mock).mockResolvedValue({ jobId: 'build_1', drift: undefined });
   (downloadArtifacts as jest.Mock).mockResolvedValue({ extensionDir: 'x', configPath: 'c', collectorConfigPath: 'k' });
   (verifyBuild as jest.Mock).mockResolvedValue({ record: 'matched', signature: 'verified' });
+});
+
+it("warns on the build's drift for its own service right after submitting, before the build is polled", async () => {
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [] });
+  (submitBuild as jest.Mock).mockResolvedValue({ jobId: 'build_1', drift: { status: 'checked', lockVersion: 3,
+    services: { fundtransfer: { recommendedNotInLock: { count: 1, keys: ['fundtransfer::a.B.added'] },
+      lockedNotInJar: { count: 0, keys: [] } } } } });
+  await run();
+  const warn = (core.warning as jest.Mock).mock;
+  const at = warn.calls.findIndex((c) => String(c[0]).includes('fundtransfer::a.B.added'));
+  expect(at).toBeGreaterThanOrEqual(0);
+  expect(warn.invocationCallOrder[at]).toBeLessThan((pollJob as jest.Mock).mock.invocationCallOrder[1]);
+  expect(core.setFailed).not.toHaveBeenCalled();
+});
+
+it('does not fail the step on drift with fail-on-warnings set', async () => {
+  (parseInputs as jest.Mock).mockReturnValue({ ...inputs, failOnWarnings: true });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [] });
+  (submitBuild as jest.Mock).mockResolvedValue({ jobId: 'build_1', drift: { status: 'checked', lockVersion: 3,
+    services: { fundtransfer: { recommendedNotInLock: { count: 0, keys: [] },
+      lockedNotInJar: { count: 1, keys: ['fundtransfer::a.B.gone'] } } } } });
+  await run();
+  expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('fundtransfer::a.B.gone'));
+  expect(core.setFailed).not.toHaveBeenCalled();
+});
+
+it('reports the drift of a build that then fails', async () => {
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [] });
+  (submitBuild as jest.Mock).mockResolvedValue({ jobId: 'build_1', drift: { status: 'checked', lockVersion: 3,
+    services: { fundtransfer: { recommendedNotInLock: { count: 1, keys: ['fundtransfer::a.B.added'] },
+      lockedNotInJar: { count: 0, keys: [] } } } } });
+  (pollJob as jest.Mock).mockImplementation(async (_api, id) => {
+    if (id === 'build_1') throw new Error('build failed');
+  });
+  await run();
+  expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('fundtransfer::a.B.added'));
+  expect(core.setFailed).toHaveBeenCalled();
+});
+
+it('carries on when job-manager sends a drift it cannot read', async () => {
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  (submitBuild as jest.Mock).mockResolvedValue({ jobId: 'build_1', drift: 'unexpected' });
+  await run();
+  expect(core.setFailed).not.toHaveBeenCalled();
 });
 
 it("verifies the download against the build's record before registering, and outputs the record's status", async () => {
