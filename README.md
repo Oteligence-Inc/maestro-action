@@ -43,7 +43,7 @@ jobs:
 
       # Assemble otel/ for the image: the upstream agent, this service's extension JAR, its config
       - env:
-          OTEL_AGENT_VERSION: '2.32.0'          # the OTel version picked in the wizard for this lock
+          OTEL_AGENT_VERSION: '2.33.1'          # the OTel version picked in the wizard for this lock
           EXT_DIR: ${{ steps.maestro.outputs.extension-dir }}
           ENV_TAG: ${{ github.ref == 'refs/heads/main' && 'prod' || (github.ref == 'refs/heads/staging' && 'staging' || 'dev') }}
         run: |
