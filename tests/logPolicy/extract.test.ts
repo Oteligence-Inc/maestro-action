@@ -3,6 +3,8 @@ import {
   SETTINGS_MAX,
   argumentSetting,
   commandLineSettings,
+  documents,
+  envValue,
   extract,
   keyPathNames,
   kindOf,
@@ -354,6 +356,10 @@ describe('bounds', () => {
     for (const p of ['.env.example', '.env.sample', '.env.template', 'deploy/prod.env.example']) expect(kindOf(p)).toBeNull();
   });
 
+  it('reads a Dockerfile whose name ends like an example env file', () => {
+    expect(kindOf('deploy/Dockerfile.env.example')).toBe('dockerfile');
+  });
+
   it('names a file past the settings bound and reads up to it', () => {
     const out = extract('big.env', 'A=1\n'.repeat(SETTINGS_MAX + 5), 'env');
     expect(out.settings).toHaveLength(SETTINGS_MAX);
@@ -367,5 +373,52 @@ describe('bounds', () => {
     const out = extract('deep.yaml', text, 'yaml');
     expect(out.problems.map((p) => p.reason)).toEqual([expect.stringContaining('nested deeper')]);
     expect(out.settings.map((s) => s.name)).toContain('debug');
+  });
+});
+
+describe('YAML documents and compose env values, as the CLI reads them', () => {
+  it('reads the documents after one that does not parse', () => {
+    const text = 'a: "oops\n---\nlogging:\n  level:\n    root: DEBUG\n';
+    const out = extract('v.yaml', text, 'yaml');
+    expect(out.settings.map((s) => `${s.name}@${s.line}`)).toContain('logging.level.root@5');
+    expect(out.problems).toEqual([{ path: 'v.yaml', line: expect.any(Number), reason: 'not valid YAML' }]);
+  });
+
+  it('keeps a directive with the document after it', () => {
+    expect(documents('%YAML 1.2\n---\na: 1\n---\nb: 2\n').map((d) => d.start)).toEqual([0, 3]);
+    const versioned = '%YAML 1.2\n# header\n---\nlogging:\n  level:\n    root: DEBUG\n';
+    expect(extract('v.yaml', versioned, 'yaml').problems).toEqual([]);
+    expect(names(versioned, 'yaml')).toContain('logging.level.root=DEBUG@6');
+    const tagged = '%TAG !e! tag:example.com,2000:\n---\nlogging:\n  level:\n    root: !e!level DEBUG\n';
+    expect(extract('v.yaml', tagged, 'yaml').problems).toEqual([]);
+  });
+
+  it('reads a YAML file whose lines end in a lone CR', () => {
+    expect(names('logging:\r  level:\r    root: DEBUG\r', 'yaml')).toContain('logging.level.root=DEBUG@3');
+  });
+
+  it('blanks a template comment or condition that spans lines and stands alone', () => {
+    const text = '{{/*\n  the chart header\n*/}}\n{{- if and .Values.a\n      .Values.b }}\nlogging:\n  level:\n    root: DEBUG\n{{- end }}\n';
+    expect(untemplated(text).split('\n')).toHaveLength(text.split('\n').length);
+    expect(extract('t.yaml', text, 'yaml').problems).toEqual([]);
+    expect(names(text, 'yaml')).toContain('logging.level.root=DEBUG@8');
+  });
+
+  it('reads a plain YAML 1.1 boolean as SnakeYAML and the Kubernetes reader do', () => {
+    const text = "OTEL_JAVAAGENT_DEBUG: yes\na: Off\nb: \"yes\"\nc: 'on'\nd: y\ne: YES\n";
+    expect(names(text, 'yaml')).toEqual(
+      expect.arrayContaining(['otel.javaagent.debug=true@1', 'a=false@2', 'b=yes@3', 'c=on@4', 'd=y@5', 'e=true@6']),
+    );
+    expect(findingsOf(lockFreeRules(), extract('v.yaml', 'OTEL_JAVAAGENT_DEBUG: yes\n', 'yaml').settings)).not.toEqual([]);
+  });
+
+  it('reads an env value as compose does: a quoted one to its quote, an unquoted one to a comment', () => {
+    expect(envValue('DEBUG # temporary')).toBe('DEBUG');
+    expect(envValue('"DEBUG" # temporary')).toBe('DEBUG');
+    expect(envValue('a#b')).toBe('a#b');
+    expect(envValue('DEBUG' + String.fromCharCode(0xa0) + '# a no-break space')).toBe('DEBUG');
+    expect(envValue("'a # b' # c")).toBe('a # b');
+    expect(envValue('"unclosed')).toBe('"unclosed');
+    expect(names('LOGGING_LEVEL_ROOT=DEBUG # temporary\n', 'env')).toEqual(['logging.level.root=DEBUG@1']);
   });
 });

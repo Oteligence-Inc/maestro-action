@@ -30229,8 +30229,10 @@ exports.extract = extract;
 exports.commandLineSettings = commandLineSettings;
 exports.argumentSetting = argumentSetting;
 exports.untemplated = untemplated;
+exports.documents = documents;
 exports.keyPathNames = keyPathNames;
 exports.property = property;
+exports.envValue = envValue;
 const yaml_1 = __nccwpck_require__(8815);
 const ciRules_1 = __nccwpck_require__(7944);
 /** Environment variables whose value is a JVM command line; `_JAVA_OPTIONS` folds to `java.options`. */
@@ -30278,7 +30280,7 @@ function extract(path, raw, kind) {
             break;
         case 'env':
             for (const { line, key, value } of keyValueLines(text, /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=(.*)$/s)) {
-                add(out, path, line, key, unquote(value));
+                add(out, path, line, key, envValue(value));
             }
             break;
         case 'properties':
@@ -30400,11 +30402,40 @@ function springJson(out, path, line, value) {
 }
 /** A Helm template's actions removed, so the YAML around them parses; a value written as a template reads as one. */
 function untemplated(text) {
-    return text
+    return blankMultiLineActions(text)
         .split('\n')
         .map((l) => (wholeLineAction(l) ? '' : l))
         .join('\n')
         .replace(/\{\{[^}]*\}\}/g, (m) => '__TEMPLATE__' + '\n'.repeat(m.split('\n').length - 1));
+}
+/**
+ * The text with each action that spans lines and stands alone on them (a `{{/* ... *\/}}` header, a long `{{- if }}`)
+ * blanked, its line count kept; one sharing its lines with YAML is left for the line pass.
+ */
+function blankMultiLineActions(text) {
+    let out = '';
+    let from = 0;
+    for (let i = text.indexOf('{{'); i >= 0; i = text.indexOf('{{', from)) {
+        const j = text.indexOf('}}', i + 2);
+        if (j < 0)
+            break;
+        const action = text.substring(i, j + 2);
+        const lineStart = text.lastIndexOf('\n', i - 1) + 1;
+        let lineEnd = text.indexOf('\n', j + 2);
+        if (lineEnd < 0)
+            lineEnd = text.length;
+        const before = text.substring(lineStart, i).trim();
+        const alone = action.includes('\n') && (before === '' || before === '-') && text.substring(j + 2, lineEnd).trim() === '';
+        if (alone) {
+            out += text.substring(from, lineStart) + '\n'.repeat(action.split('\n').length - 1);
+            from = lineEnd;
+        }
+        else {
+            out += text.substring(from, j + 2);
+            from = j + 2;
+        }
+    }
+    return out + text.substring(from);
 }
 /**
  * A line of template actions and nothing else, such as `{{- if .Values.x }}`, `- {{ include "x" . }}` or
@@ -30416,30 +30447,62 @@ function wholeLineAction(line) {
         t = t.substring(1).trimStart();
     return t.length >= 4 && t.startsWith('{{') && t.endsWith('}}') && !/:\s*\{\{/.test(line);
 }
-function yamlSettings(path, text, out) {
-    const source = text.includes('{{') ? untemplated(text) : text;
-    const lines = new yaml_1.LineCounter();
-    const docs = (0, yaml_1.parseAllDocuments)(source, { lineCounter: lines, uniqueKeys: false });
-    const list = Array.isArray(docs) ? docs : [docs];
-    const lineOf = (node) => {
-        const start = node?.range?.[0];
-        return start === undefined ? 1 : lines.linePos(start).line;
-    };
-    for (const doc of list) {
-        if (doc.errors.length > 0) {
-            const at = doc.errors[0].linePos?.[0]?.line ?? 1;
-            out.problems.push({ path, line: at, reason: 'not valid YAML' });
-            continue;
+/**
+ * A YAML stream split at its document markers, each part with the line it starts on, so a document that does not parse
+ * costs only itself. A part of directives and comments alone stays with the document after it.
+ */
+function documents(text) {
+    const out = [];
+    let cur = [];
+    let start = 0;
+    let content = false;
+    text.split('\n').forEach((l, i) => {
+        if ((l === '---' || l.startsWith('--- ') || l.startsWith('---\t')) && content) {
+            out.push({ part: cur.join('\n'), start });
+            cur = [];
+            start = i;
+            content = false;
         }
-        walkYaml(doc.contents, [], path, out, lineOf, 0);
+        cur.push(l);
+        const t = l.trim();
+        if (t !== '' && t !== '---' && !t.startsWith('#') && !t.startsWith('%'))
+            content = true;
+    });
+    if (cur.length > 0)
+        out.push({ part: cur.join('\n'), start });
+    return out;
+}
+function yamlSettings(path, text, out) {
+    const joined = lines(text).join('\n');
+    const source = joined.includes('{{') ? untemplated(joined) : joined;
+    for (const { part, start } of documents(source)) {
+        const counter = new yaml_1.LineCounter();
+        const docs = (0, yaml_1.parseAllDocuments)(part, { lineCounter: counter, uniqueKeys: false });
+        const list = Array.isArray(docs) ? docs : [docs];
+        const lineOf = (node) => {
+            const at = node?.range?.[0];
+            return start + (at === undefined ? 1 : counter.linePos(at).line);
+        };
+        for (const doc of list) {
+            if (doc.errors.length > 0) {
+                const at = doc.errors[0].linePos?.[0]?.line ?? 1;
+                out.problems.push({ path, line: start + at, reason: 'not valid YAML' });
+                continue;
+            }
+            walkYaml(doc.contents, [], path, out, lineOf, 0);
+        }
     }
 }
+/** A plain word SnakeYAML and the Kubernetes YAML reader take as a YAML 1.1 boolean, where YAML 1.2 reads a string. */
+const YAML11_BOOLEAN = /^(?:yes|Yes|YES|on|On|ON|no|No|NO|off|Off|OFF)$/;
 function scalarText(node) {
     if (!(0, yaml_1.isScalar)(node))
         return null;
     const v = node.value;
     if (v === null || v === undefined)
         return '';
+    if (typeof v === 'string' && node.type === 'PLAIN' && YAML11_BOOLEAN.test(v))
+        return /^(?:yes|on)$/i.test(v) ? 'true' : 'false';
     return typeof v === 'object' ? null : String(v);
 }
 function walkYaml(node, keys, path, out, lineOf, depth) {
@@ -30643,6 +30706,20 @@ function propertiesLines(text) {
             out.push({ line: start, key, value });
     }
     return out;
+}
+/**
+ * An env file value as compose reads it: a quoted value up to its closing quote, an unquoted one up to a comment that a
+ * space and # start.
+ */
+function envValue(raw) {
+    const t = raw.trim();
+    const q = t[0];
+    if (q === '"' || q === "'") {
+        const close = t.indexOf(q, 1);
+        return close > 0 ? t.substring(1, close) : t;
+    }
+    const comment = t.search(/\s#/);
+    return (comment >= 0 ? t.substring(0, comment) : t).trim();
 }
 function unquote(v) {
     const t = v.trim();
@@ -30969,6 +31046,7 @@ exports.fetchRules = fetchRules;
 exports.trackedFiles = trackedFiles;
 exports.sendablePath = sendablePath;
 exports.readMapping = readMapping;
+exports.globRefusal = globRefusal;
 exports.readRepo = readRepo;
 exports.filesFor = filesFor;
 exports.scan = scan;
@@ -31103,7 +31181,11 @@ function readMapping(root, tracked) {
         throw new errors_1.UserError(`${exports.MAPPING_FILE} is larger than ${exports.MAPPING_MAX_BYTES} bytes.`);
     let doc;
     try {
-        doc = (0, yaml_1.parse)(fs.readFileSync(file, 'utf8'), { logLevel: 'silent' });
+        // Parsed silently, so no line of the file reaches the log; any error, a duplicate key included, refuses it.
+        const parsed = (0, yaml_1.parseDocument)(fs.readFileSync(file, 'utf8'), { logLevel: 'silent' });
+        if (parsed.errors.length > 0)
+            throw new Error('not valid YAML');
+        doc = parsed.toJS();
     }
     catch {
         throw new errors_1.UserError(`${exports.MAPPING_FILE} is not valid YAML.`);
@@ -31115,17 +31197,46 @@ function readMapping(root, tracked) {
     return services.map((e, i) => {
         const entry = e;
         if (typeof entry?.service !== 'string' ||
+            entry.service.trim() === '' ||
             typeof entry.environment !== 'string' ||
+            entry.environment.trim() === '' ||
             !Array.isArray(entry.paths) ||
             entry.paths.length === 0 ||
-            !entry.paths.every((g) => typeof g === 'string')) {
+            !entry.paths.every((g) => typeof g === 'string' && g !== '')) {
             throw new errors_1.UserError(`${exports.MAPPING_FILE}: entry ${i + 1} needs service, environment and a list of paths.`);
         }
         if ([entry.service, entry.environment, ...entry.paths].some((t) => CONTROL.test(t))) {
             throw new errors_1.UserError(`${exports.MAPPING_FILE}: entry ${i + 1} holds a control character.`);
         }
+        const unsupported = entry.paths.map(globRefusal).find((r) => r !== null);
+        if (unsupported)
+            throw new errors_1.UserError(`${exports.MAPPING_FILE}: entry ${i + 1}: ${unsupported}.`);
         return { service: entry.service, environment: entry.environment, paths: entry.paths };
     });
+}
+/**
+ * Why a mapping path is refused, or null: the glob syntax both the Action and the CLI read the same way is `*`, `?`,
+ * `**` as a whole segment, `[...]` and `{a,b}` of literal alternatives. A negation, an extglob, an escape, a brace
+ * holding a wildcard, a range or no comma, and `**` inside a segment are refused rather than read two ways.
+ */
+function globRefusal(glob) {
+    if (glob.startsWith('!'))
+        return `a path may not start with ! (list the paths to check instead)`;
+    if (/[@!+?*]\(/.test(glob))
+        return 'a path may not use an extglob such as @(a|b)';
+    if (glob.includes('\\'))
+        return 'a path may not use a backslash escape';
+    if (glob.split('/').some((seg) => seg.includes('**') && seg !== '**'))
+        return '** must be a whole path segment';
+    for (const m of glob.matchAll(/\{([^}]*)\}/g)) {
+        const body = m[1];
+        if (!body.includes(',') || body.includes('..') || /[*?[{]/.test(body)) {
+            return 'a {...} must list literal alternatives separated by commas';
+        }
+    }
+    if (/\{[^}]*$|^[^{]*\}/.test(glob))
+        return 'a path has an unbalanced brace';
+    return null;
 }
 /** The repository's tracked files and its mapping. */
 function readRepo(root) {
@@ -31201,7 +31312,9 @@ function findingsOf(set, settings) {
             out.push(f);
         }
     }
-    return out.sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line || a.rule.localeCompare(b.rule));
+    // Code-unit order, as the CLI sorts: the first FINDINGS_MAX the two send are the same ones.
+    const order = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
+    return out.sort((a, b) => order(a.path, b.path) || a.line - b.line || order(a.rule, b.rule));
 }
 function checkResult(service, set, findings) {
     return {

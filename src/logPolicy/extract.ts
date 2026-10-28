@@ -67,7 +67,7 @@ export function extract(path: string, raw: string, kind: FileKind): Extracted {
       break;
     case 'env':
       for (const { line, key, value } of keyValueLines(text, /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=(.*)$/s)) {
-        add(out, path, line, key, unquote(value));
+        add(out, path, line, key, envValue(value));
       }
       break;
     case 'properties':
@@ -178,11 +178,38 @@ function springJson(out: Extracted, path: string, line: number, value: string): 
 
 /** A Helm template's actions removed, so the YAML around them parses; a value written as a template reads as one. */
 export function untemplated(text: string): string {
-  return text
+  return blankMultiLineActions(text)
     .split('\n')
     .map((l) => (wholeLineAction(l) ? '' : l))
     .join('\n')
     .replace(/\{\{[^}]*\}\}/g, (m) => '__TEMPLATE__' + '\n'.repeat(m.split('\n').length - 1));
+}
+
+/**
+ * The text with each action that spans lines and stands alone on them (a `{{/* ... *\/}}` header, a long `{{- if }}`)
+ * blanked, its line count kept; one sharing its lines with YAML is left for the line pass.
+ */
+function blankMultiLineActions(text: string): string {
+  let out = '';
+  let from = 0;
+  for (let i = text.indexOf('{{'); i >= 0; i = text.indexOf('{{', from)) {
+    const j = text.indexOf('}}', i + 2);
+    if (j < 0) break;
+    const action = text.substring(i, j + 2);
+    const lineStart = text.lastIndexOf('\n', i - 1) + 1;
+    let lineEnd = text.indexOf('\n', j + 2);
+    if (lineEnd < 0) lineEnd = text.length;
+    const before = text.substring(lineStart, i).trim();
+    const alone = action.includes('\n') && (before === '' || before === '-') && text.substring(j + 2, lineEnd).trim() === '';
+    if (alone) {
+      out += text.substring(from, lineStart) + '\n'.repeat(action.split('\n').length - 1);
+      from = lineEnd;
+    } else {
+      out += text.substring(from, j + 2);
+      from = j + 2;
+    }
+  }
+  return out + text.substring(from);
 }
 
 /**
@@ -195,29 +222,60 @@ function wholeLineAction(line: string): boolean {
   return t.length >= 4 && t.startsWith('{{') && t.endsWith('}}') && !/:\s*\{\{/.test(line);
 }
 
-function yamlSettings(path: string, text: string, out: Extracted): void {
-  const source = text.includes('{{') ? untemplated(text) : text;
-  const lines = new LineCounter();
-  const docs = parseAllDocuments(source, { lineCounter: lines, uniqueKeys: false });
-  const list = Array.isArray(docs) ? docs : [docs];
-  const lineOf = (node: Node | null | undefined): number => {
-    const start = node?.range?.[0];
-    return start === undefined ? 1 : lines.linePos(start).line;
-  };
-  for (const doc of list) {
-    if (doc.errors.length > 0) {
-      const at = doc.errors[0].linePos?.[0]?.line ?? 1;
-      out.problems.push({ path, line: at, reason: 'not valid YAML' });
-      continue;
+/**
+ * A YAML stream split at its document markers, each part with the line it starts on, so a document that does not parse
+ * costs only itself. A part of directives and comments alone stays with the document after it.
+ */
+export function documents(text: string): { part: string; start: number }[] {
+  const out: { part: string; start: number }[] = [];
+  let cur: string[] = [];
+  let start = 0;
+  let content = false;
+  text.split('\n').forEach((l, i) => {
+    if ((l === '---' || l.startsWith('--- ') || l.startsWith('---\t')) && content) {
+      out.push({ part: cur.join('\n'), start });
+      cur = [];
+      start = i;
+      content = false;
     }
-    walkYaml(doc.contents as Node | null, [], path, out, lineOf, 0);
+    cur.push(l);
+    const t = l.trim();
+    if (t !== '' && t !== '---' && !t.startsWith('#') && !t.startsWith('%')) content = true;
+  });
+  if (cur.length > 0) out.push({ part: cur.join('\n'), start });
+  return out;
+}
+
+function yamlSettings(path: string, text: string, out: Extracted): void {
+  const joined = lines(text).join('\n');
+  const source = joined.includes('{{') ? untemplated(joined) : joined;
+  for (const { part, start } of documents(source)) {
+    const counter = new LineCounter();
+    const docs = parseAllDocuments(part, { lineCounter: counter, uniqueKeys: false });
+    const list = Array.isArray(docs) ? docs : [docs];
+    const lineOf = (node: Node | null | undefined): number => {
+      const at = node?.range?.[0];
+      return start + (at === undefined ? 1 : counter.linePos(at).line);
+    };
+    for (const doc of list) {
+      if (doc.errors.length > 0) {
+        const at = doc.errors[0].linePos?.[0]?.line ?? 1;
+        out.problems.push({ path, line: start + at, reason: 'not valid YAML' });
+        continue;
+      }
+      walkYaml(doc.contents as Node | null, [], path, out, lineOf, 0);
+    }
   }
 }
+
+/** A plain word SnakeYAML and the Kubernetes YAML reader take as a YAML 1.1 boolean, where YAML 1.2 reads a string. */
+const YAML11_BOOLEAN = /^(?:yes|Yes|YES|on|On|ON|no|No|NO|off|Off|OFF)$/;
 
 function scalarText(node: unknown): string | null {
   if (!isScalar(node)) return null;
   const v = node.value;
   if (v === null || v === undefined) return '';
+  if (typeof v === 'string' && node.type === 'PLAIN' && YAML11_BOOLEAN.test(v)) return /^(?:yes|on)$/i.test(v) ? 'true' : 'false';
   return typeof v === 'object' ? null : String(v);
 }
 
@@ -405,6 +463,21 @@ function propertiesLines(text: string): { line: number; key: string; value: stri
     if (key !== '') out.push({ line: start, key, value });
   }
   return out;
+}
+
+/**
+ * An env file value as compose reads it: a quoted value up to its closing quote, an unquoted one up to a comment that a
+ * space and # start.
+ */
+export function envValue(raw: string): string {
+  const t = raw.trim();
+  const q = t[0];
+  if (q === '"' || q === "'") {
+    const close = t.indexOf(q, 1);
+    return close > 0 ? t.substring(1, close) : t;
+  }
+  const comment = t.search(/\s#/);
+  return (comment >= 0 ? t.substring(0, comment) : t).trim();
 }
 
 function unquote(v: string): string {

@@ -16,6 +16,7 @@ import {
   fingerprint,
   logPolicyCheck,
   printable,
+  globRefusal,
   readMapping,
   readRepo,
   runCheck,
@@ -221,6 +222,12 @@ describe('findings', () => {
     ]);
   });
 
+  it('orders findings by code unit, as the CLI does', () => {
+    const root = repo({ 'a.env': 'LOGGING_LEVEL_ROOT=TRACE\n', 'Z.env': 'LOGGING_LEVEL_ROOT=TRACE\n' });
+    const found = findingsOf(ruleSet('WARN'), scan(root, trackedFiles(root)!).settings);
+    expect(found.map((f) => f.path)).toEqual(['Z.env', 'a.env']);
+  });
+
   it('keeps two settings on one line apart', () => {
     const root = repo({ 'Dockerfile': 'ENV LOGGING_LEVEL_A=DEBUG LOGGING_LEVEL_B=TRACE\n' });
     const found = findingsOf(ruleSet('WARN'), scan(root, trackedFiles(root)!).settings);
@@ -381,6 +388,14 @@ describe('the mapping file', () => {
     ['no services', 'other: 1\n'],
     ['an entry without paths', 'services:\n  - service: orders\n    environment: prod\n'],
     ['holding a control character', 'services:\n  - service: "orders\\n::error::x"\n    environment: prod\n    paths: ["a"]\n'],
+    ['with a duplicate key', 'services:\n  - service: o\n    environment: prod\n    environment: staging\n    paths: ["k8s/**"]\n'],
+    ['with an unclosed list at its end', 'services:\n  - service: o\n    environment: prod\n    paths: ["k8s/**"\n'],
+    ['with an empty service', 'services:\n  - service: ""\n    environment: prod\n    paths: ["a"]\n'],
+    ['with a number for an environment', 'services:\n  - service: o\n    environment: 2024\n    paths: ["a"]\n'],
+    ['with a negated path', 'services:\n  - service: o\n    environment: prod\n    paths: ["k8s/**", "!k8s/dev/**"]\n'],
+    ['with a blank service', 'services:\n  - service: "  "\n    environment: prod\n    paths: ["a"]\n'],
+    ['with an empty path', 'services:\n  - service: o\n    environment: prod\n    paths: [""]\n'],
+    ['with an unbalanced brace', 'services:\n  - service: o\n    environment: prod\n    paths: ["{a,b/c.env"]\n'],
   ])('refuses one that is %s', (_what, text) => {
     expect(() => readOf(repo({ '.maestro/check.yml': text }))).toThrow(UserError);
   });
@@ -405,6 +420,27 @@ describe('the mapping file', () => {
     expect(JSON.stringify([warn.mock.calls, log.mock.calls])).not.toContain('hunter2');
     warn.mockRestore();
     log.mockRestore();
+  });
+
+  it.each([
+    ['deploy/**', null],
+    ['helm/*.yaml', null],
+    ['{a,b}/c.env', null],
+    ['v?.yaml', null],
+    ['[!x].env', null],
+    ['!k8s/dev/**', 'start with !'],
+    ['helm/{values.yaml,values-*.yaml}', 'literal alternatives'],
+    ['deploy/**.yaml', 'whole path segment'],
+    ['@(prod|staging)/a.yaml', 'extglob'],
+    ['{a}/b', 'literal alternatives'],
+    ['{1..3}/b', 'literal alternatives'],
+    ['a\\*b', 'backslash'],
+    ['{a,b/c.env', 'unbalanced'],
+    ['a,b}/c.env', 'unbalanced'],
+  ])('reads the glob %s the same way the CLI does, or refuses it', (glob, refused) => {
+    const why = globRefusal(glob);
+    if (refused === null) expect(why).toBeNull();
+    else expect(why).toContain(refused);
   });
 
   it('reads no mapping outside a git checkout', () => {

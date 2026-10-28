@@ -4,7 +4,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { minimatch } from 'minimatch';
-import { parse as parseYaml } from 'yaml';
+import { parseDocument } from 'yaml';
 import { MaestroApi, expectOk } from '../api';
 import { CASES_DIGEST, Finding, RuleSet, VERSION, evaluate, unreadable } from '../ciRules';
 import { Problem, SourcedSetting, extract, kindOf } from '../logPolicy/extract';
@@ -183,7 +183,10 @@ export function readMapping(root: string, tracked: string[]): MappingEntry[] | n
   if (stat.size > MAPPING_MAX_BYTES) throw new UserError(`${MAPPING_FILE} is larger than ${MAPPING_MAX_BYTES} bytes.`);
   let doc: unknown;
   try {
-    doc = parseYaml(fs.readFileSync(file, 'utf8'), { logLevel: 'silent' });
+    // Parsed silently, so no line of the file reaches the log; any error, a duplicate key included, refuses it.
+    const parsed = parseDocument(fs.readFileSync(file, 'utf8'), { logLevel: 'silent' });
+    if (parsed.errors.length > 0) throw new Error('not valid YAML');
+    doc = parsed.toJS();
   } catch {
     throw new UserError(`${MAPPING_FILE} is not valid YAML.`);
   }
@@ -195,18 +198,42 @@ export function readMapping(root: string, tracked: string[]): MappingEntry[] | n
     const entry = e as Partial<MappingEntry> | null;
     if (
       typeof entry?.service !== 'string' ||
+      entry.service.trim() === '' ||
       typeof entry.environment !== 'string' ||
+      entry.environment.trim() === '' ||
       !Array.isArray(entry.paths) ||
       entry.paths.length === 0 ||
-      !entry.paths.every((g) => typeof g === 'string')
+      !entry.paths.every((g) => typeof g === 'string' && g !== '')
     ) {
       throw new UserError(`${MAPPING_FILE}: entry ${i + 1} needs service, environment and a list of paths.`);
     }
     if ([entry.service, entry.environment, ...entry.paths].some((t) => CONTROL.test(t))) {
       throw new UserError(`${MAPPING_FILE}: entry ${i + 1} holds a control character.`);
     }
+    const unsupported = entry.paths.map(globRefusal).find((r) => r !== null);
+    if (unsupported) throw new UserError(`${MAPPING_FILE}: entry ${i + 1}: ${unsupported}.`);
     return { service: entry.service, environment: entry.environment, paths: entry.paths };
   });
+}
+
+/**
+ * Why a mapping path is refused, or null: the glob syntax both the Action and the CLI read the same way is `*`, `?`,
+ * `**` as a whole segment, `[...]` and `{a,b}` of literal alternatives. A negation, an extglob, an escape, a brace
+ * holding a wildcard, a range or no comma, and `**` inside a segment are refused rather than read two ways.
+ */
+export function globRefusal(glob: string): string | null {
+  if (glob.startsWith('!')) return `a path may not start with ! (list the paths to check instead)`;
+  if (/[@!+?*]\(/.test(glob)) return 'a path may not use an extglob such as @(a|b)';
+  if (glob.includes('\\')) return 'a path may not use a backslash escape';
+  if (glob.split('/').some((seg) => seg.includes('**') && seg !== '**')) return '** must be a whole path segment';
+  for (const m of glob.matchAll(/\{([^}]*)\}/g)) {
+    const body = m[1];
+    if (!body.includes(',') || body.includes('..') || /[*?[{]/.test(body)) {
+      return 'a {...} must list literal alternatives separated by commas';
+    }
+  }
+  if (/\{[^}]*$|^[^{]*\}/.test(glob)) return 'a path has an unbalanced brace';
+  return null;
 }
 
 /** The repository's tracked files and its mapping. */
@@ -279,7 +306,9 @@ export function findingsOf(set: RuleSet, settings: SourcedSetting[]): Finding[] 
       out.push(f);
     }
   }
-  return out.sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line || a.rule.localeCompare(b.rule));
+  // Code-unit order, as the CLI sorts: the first FINDINGS_MAX the two send are the same ones.
+  const order = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+  return out.sort((a, b) => order(a.path, b.path) || a.line - b.line || order(a.rule, b.rule));
 }
 
 export function checkResult(service: string, set: RuleSet, findings: Finding[]): CheckResult {

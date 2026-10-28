@@ -308,7 +308,16 @@ checks every pair it lists and fails after the last if any failed, counting ever
 maps no file to the service and environment, or holds an entry whose paths match no tracked file, is named in a
 warning, and fails the check where the mode is Fail or production's default. The file must be tracked, a regular
 file inside the repository and at most 64 KiB, and no service, environment or path in it may hold a control
-character. Without it, every deployment file is checked. A check-only run outside a git checkout fails where the
+character, and every value is a non-empty string. A path is a glob from the repository's root: `*`, `?`, `**` as a
+whole path segment, `[...]` and `{a,b}` of literal alternatives. A path that starts with `!`, an extglob such as
+`@(a|b)`, a backslash escape, `**` inside a segment, a brace holding a wildcard, a range or no comma, and an
+unbalanced brace are refused, since the CLI would read them otherwise. Without it, every deployment file is checked.
+
+The files are read as the CLI reads them: a YAML file one document at a time, so a document that does not parse is
+named and the rest are still read, with a directive kept with the document after it and a plain `yes`, `no`, `on` or `off` read as the YAML 1.1
+boolean Spring and Kubernetes take it for; a Helm template comment or
+condition that spans lines and stands alone on them removed; an env file's value as compose reads it, a quoted value
+up to its closing quote and an unquoted one up to a ` #` comment. A check-only run outside a git checkout fails where the
 mode is Fail or production's default, and is `not-run` otherwise.
 
 ## Troubleshooting
