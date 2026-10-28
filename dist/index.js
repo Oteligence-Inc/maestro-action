@@ -29696,19 +29696,28 @@ exports.unreadable = unreadable;
 /** The rule-set version this Action reads. */
 exports.VERSION = 1;
 /** The SHA-256 of the evaluation fixture suite this release was tested against; the server serves its own. */
-exports.CASES_DIGEST = 'b794fc24fb50304e2d56f25a035736cd4d31b8ebf238ab9cf911d716066a64a4';
+exports.CASES_DIGEST = "b794fc24fb50304e2d56f25a035736cd4d31b8ebf238ab9cf911d716066a64a4";
 /** Every test a version 1 rule may name; a rule naming another fails loudly. */
 exports.TESTS = [
-    'any',
-    'otel_true',
-    'otel_false',
-    'spring_set',
-    'below_floor',
-    'not_exporter',
-    'exposes_loggers',
-    'profile_below_floor',
+    "any",
+    "otel_true",
+    "otel_false",
+    "spring_set",
+    "below_floor",
+    "not_exporter",
+    "exposes_loggers",
+    "profile_below_floor",
 ];
-const LEVELS = ['ALL', 'TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL', 'OFF'];
+const LEVELS = [
+    "ALL",
+    "TRACE",
+    "DEBUG",
+    "INFO",
+    "WARN",
+    "ERROR",
+    "FATAL",
+    "OFF",
+];
 /** The shape of a folded name a finding may carry; job-manager lists no other. */
 exports.NAME = /^[a-z0-9._-]{1,200}$/;
 /** A template placeholder anywhere, or a value written as $VAR or @name@: it passes no test but any. */
@@ -29726,9 +29735,9 @@ function trimAscii(v) {
 /** A setting name folded as every interpreter folds it; an interpreter strips a -D prefix before folding. */
 function fold(name) {
     if (name === null || name === undefined)
-        return '';
-    let n = trimAscii(name).toLowerCase().replace(/_/g, '.').replace(/-/g, '.');
-    while (n.startsWith('.'))
+        return "";
+    let n = trimAscii(name).toLowerCase().replace(/_/g, ".").replace(/-/g, ".");
+    while (n.startsWith("."))
         n = n.substring(1);
     return n;
 }
@@ -29746,7 +29755,13 @@ function evaluate(set, settings) {
             if (seen.has(key))
                 continue;
             seen.add(key);
-            out.push({ rule: r.id, severity: r.severity, name, path: s.path, line: s.line });
+            out.push({
+                rule: r.id,
+                severity: r.severity,
+                name,
+                path: s.path,
+                line: s.line,
+            });
         }
     }
     return out;
@@ -29761,55 +29776,62 @@ function matches(r, name) {
     return r.suffixes.some((x) => name.endsWith(x));
 }
 function passesTest(r, raw, set) {
-    const v = raw === null || raw === undefined ? '' : trimAscii(raw);
+    const v = raw === null || raw === undefined ? "" : trimAscii(raw);
     if (!exports.TESTS.includes(r.test))
         throw new Error(`unknown test ${r.test}`);
-    if (r.test === 'any')
+    if (r.test === "any")
         return true;
     // A list test reads its elements whatever else the list holds: a placeholder element names nothing it looks for.
-    if (r.test === 'exposes_loggers')
-        return v.split(',').some((p) => trimAscii(p) === 'loggers' || trimAscii(p) === '*');
-    if (r.test === 'profile_below_floor')
-        return v.split(',').some((p) => r.values.includes(trimAscii(p)));
+    if (r.test === "exposes_loggers")
+        return v
+            .split(",")
+            .some((p) => trimAscii(p) === "loggers" || trimAscii(p) === "*");
+    if (r.test === "profile_below_floor")
+        return v.split(",").some((p) => r.values.includes(trimAscii(p)));
     if (PLACEHOLDER.test(v))
         return false;
     switch (r.test) {
-        case 'otel_true':
-            return v.toLowerCase() === 'true';
-        case 'otel_false':
-            return v !== '' && v.toLowerCase() !== 'true';
-        case 'spring_set':
-            return v !== 'false';
-        case 'below_floor':
+        case "otel_true":
+            return v.toLowerCase() === "true";
+        case "otel_false":
+            return v !== "" && v.toLowerCase() !== "true";
+        case "spring_set":
+            return v !== "false";
+        case "below_floor":
             return isLevel(v) && below(v.toUpperCase(), set.floor);
-        case 'not_exporter':
-            return v !== '' && v.toLowerCase() !== 'none' && set.exporter !== null && v.toLowerCase() !== set.exporter.toLowerCase();
+        case "not_exporter":
+            return (v !== "" &&
+                v.toLowerCase() !== "none" &&
+                set.exporter !== null &&
+                v.toLowerCase() !== set.exporter.toLowerCase());
         default:
             throw new Error(`unknown test ${r.test}`);
     }
 }
 function isLevel(v) {
     const u = v.toUpperCase();
-    return LEVELS.includes(u === 'WARNING' ? 'WARN' : u);
+    return LEVELS.includes(u === "WARNING" ? "WARN" : u);
 }
 function below(level, floor) {
-    const l = level === 'WARNING' ? 'WARN' : level;
+    const l = level === "WARNING" ? "WARN" : level;
     const i = LEVELS.indexOf(l);
     return i >= 0 && i < LEVELS.indexOf(floor);
 }
 /** The reason a served rule set cannot be read by this Action, or null when it can. */
 function unreadable(body) {
-    if (typeof body !== 'object' || body === null)
-        return 'the rule set is empty';
+    if (typeof body !== "object" || body === null)
+        return "the rule set is empty";
     const set = body;
     if (set.version !== exports.VERSION) {
         return `the platform serves rule-set version ${String(set.version)} and this Action reads version ${exports.VERSION}`;
     }
-    if (typeof set.mode !== 'string' || typeof set.floor !== 'string' || typeof set.digest !== 'string') {
-        return 'the rule set has no mode, floor or digest';
+    if (typeof set.mode !== "string" ||
+        typeof set.floor !== "string" ||
+        typeof set.digest !== "string") {
+        return "the rule set has no mode, floor or digest";
     }
     if (!Array.isArray(set.rules))
-        return 'the rule set has no rules';
+        return "the rule set has no rules";
     for (const r of set.rules) {
         if (!exports.TESTS.includes(r?.test)) {
             return `rule ${String(r?.id)} uses a test this Action does not know (${String(r?.test)})`;
