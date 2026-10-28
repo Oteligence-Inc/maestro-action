@@ -82,7 +82,7 @@ the app image.
 
 | Output | Description |
 |---|---|
-| `generated` | `true` when the build ran and its bundle was extracted. `false` when generation was skipped: the subscription is inactive and `skip-generate-on-inactive` is set, or the service is not in the lock and `skip-on-removed-service` is set. When `false`, `extension-dir`, `config-path` and `collector-config-path` are empty. |
+| `generated` | `true` when the build ran and its bundle was extracted. `false` when generation was skipped: the subscription is inactive and `skip-generate-on-inactive` is set, the service is not in the lock and `skip-on-removed-service` is set, or the run is `check-only`. When `false`, `extension-dir`, `config-path` and `collector-config-path` are empty. |
 | `extension-dir` | Local dir with the extracted build bundle: the extension JARs and configs, and each extension JAR's generated Java source under `sources/<JAR name without .jar>/`, by package (the agent loads only the `*.jar` files directly in the folder, so the sources do not reach it). It holds every service's extension JAR and config, and no OTel agent JAR: download the upstream agent for the OTel version picked in the wizard. A JAR is named `{service}-{env}-extension.jar`: the service lower-cased, spaces and any character other than a-z, 0-9 or `-` turned into `-`, and one trailing `-service`, `-svc`, `-api` or `-svr` removed; the env the same way with repeated hyphens collapsed. So `fund-transfer-service` in `prod` is `fund-transfer-prod-extension.jar`. When two services reduce to the same name, the second gets `-extension-2.jar`. Empty when `generated` is `false`. |
 | `config-path` | This service's `javaagent.config` from the build. Empty, with a warning, when the lock selects none of its methods or its name matches more than one service. |
 | `collector-config-path` | Resolved collector config (deploy to your Collector). |
@@ -96,7 +96,8 @@ the app image.
 
 ## What it does (the 9-step flow)
 
-1. Exchange the API key for a short-lived JWT (`POST /api/auth/cli/token`).
+1. Exchange the API key for a short-lived JWT (`POST /api/auth/cli/token`). A `check-only` run resolves the
+   project, runs the log policy check for each service and environment, and stops here.
 2. Resolve the project UID + the env's **locked config** and locked-version UID, then run the environment's
    **log policy check** over the repository's deployment files (below), before anything is uploaded.
 3 to 5. Upload the changed JAR (referencing the env's other services by the artifact the lock recorded for each,
@@ -361,8 +362,7 @@ Actions Runner 2.327.1 or later, on an OS and architecture Node 24 supports (not
   (job-processor) on for the staleness warning.
 - Per-service `javaagent.config` enrichment (`agentConfigContextByService`) from the
   analysis preview is **not** forwarded yet: the locked selection drives the build.
-- Deferred to v1: artifact-hash verification, OIDC auth, GitHub Check / Slack surfaces,
-  release automation.
+- Deferred to v1: OIDC auth, GitHub Check / Slack surfaces, release automation.
 
 ## Development
 
