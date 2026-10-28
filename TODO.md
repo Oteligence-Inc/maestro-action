@@ -1,6 +1,6 @@
 # TODO: maestro-action
 
-**Open:** 0 · **Next ID:** 3
+**Open:** 1 · **Next ID:** 4
 
 Open bugs only. Severities reflect verified impact, not the original audit label.
 A ticket is the facet line plus Where, Failure mode (the repro), and Fix. Essays belong in
@@ -32,3 +32,19 @@ Cross-repo items (the `v0` tag move and the pin bump in the platform's `maestro-
 in `platform-overview/TODO.md`.
 
 ---
+
+## LOW
+
+#### 3. A YAML 1.1 boolean reads as its word, not as true or false
+
+- **Needs:** ready · **Repos:** maestro-action, platform-cli
+- **Where:** `yamlSettings` in `src/logPolicy/extract.ts`; the CLI's YAML extraction in `internal/cirules`
+- **Failure mode:** both interpreters parse YAML 1.2, so `OTEL_JAVAAGENT_DEBUG: yes` or `debug: on` reads as the
+  word. SnakeYAML (Spring) and go-yaml v2 (Kubernetes, Helm) read YAML 1.1, where it is `true`, so an `otel_true`
+  rule misses it. REASONED: an unquoted boolean in a Kubernetes `env` value is refused by the API server, so the
+  reachable case is a Spring YAML file or a Helm value a template quotes.
+- **Fix:** parse deployment YAML as 1.1 (`version: '1.1'` here; map `yes`, `no`, `on`, `off`, `y` and `n` to
+  `true` or `false` in the CLI), with one shared case in each suite.
+- **Options:** (a) parse as YAML 1.1 in both interpreters: matches the readers that apply the files, costs a
+  parity test in each; (b) leave 1.2 and document it: no code, keeps the miss.
+- **Recommendation:** (a), since the deployment readers are YAML 1.1 and the cost is two small changes.

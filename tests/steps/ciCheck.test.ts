@@ -15,7 +15,10 @@ import {
   findingsOf,
   fingerprint,
   logPolicyCheck,
+  printable,
   readMapping,
+  readRepo,
+  runCheck,
   scan,
   sendablePath,
   trackedFiles,
@@ -84,11 +87,26 @@ describe('fetchRules', () => {
 
   it.each([
     ['another version', { version: 2 }, 'version 2'],
-    ['an unknown test', { rules: [rule('NEW', 'error', { test: 'regex' })] }, 'does not know (regex)'],
+    ['an unknown test', { rules: [rule('NEW', 'error', { test: 'regex' })] }, 'NEW uses a test this Action does not know'],
     ['no digest', { digest: undefined }, 'no mode, floor or digest'],
+    ['an unknown mode', { mode: 'FAIL_LOUDLY' }, 'a mode this Action does not know'],
+    ['an unknown floor', { floor: 'VERBOSE' }, 'a floor this Action does not know'],
+    ['a digest out of shape', { digest: 'abc' }, 'digest is out of shape'],
+    ['an unknown severity', { rules: [rule('NEW', 'fatal', {})] }, 'a severity this Action does not know'],
+    ['a rule id out of shape', { rules: [rule('new\n::warning::x', 'error', {})] }, 'a rule id is out of shape'],
   ])('refuses a rule set with %s, loudly', async (_what, over, message) => {
     nock(BASE).get(RULES).query(true).reply(200, { data: { ...ruleSet('WARN'), ...over } });
     await expect(fetchRules(client(), 'proj_1', 'prod', 'orders')).rejects.toThrow(message);
+  });
+
+  it('asks for the rules of the lock the build names', async () => {
+    nock(BASE).get(RULES).query({ service: 'orders', versions: '1', lockedVersionUid: 'lv_4' }).reply(200, served('FAIL'));
+    expect((await fetchRules(client(), 'proj_1', 'prod', 'orders', 'lv_4')).ruleSet.mode).toBe('FAIL');
+  });
+
+  it('names a service the locked analysis does not hold, apart from a missing environment', async () => {
+    nock(BASE).get(RULES).query(true).reply(404, { data: { code: 'ci_rules_service_unknown' } });
+    await expect(fetchRules(client(), 'proj_1', 'prod', 'orders')).rejects.toThrow('holds no service named "orders"');
   });
 
   it('names an environment that does not exist', async () => {
@@ -124,6 +142,29 @@ describe('which files are read', () => {
     const read = scan(root, trackedFiles(root)!);
     expect(read.problems).toEqual([{ path: 'big.env', line: 1, reason: expect.stringContaining('larger than') }]);
     expect(read.settings.map((s) => s.name)).toEqual(['debug']);
+  });
+
+  it('runs no fsmonitor command the repository configures', () => {
+    const root = repo({ 'a.env': 'DEBUG=true\n' });
+    const marker = path.join(root, 'RAN');
+    const hook = path.join(root, 'hook.sh');
+    fs.writeFileSync(hook, `#!/bin/sh\ntouch "${marker}"\nexit 1\n`, { mode: 0o755 });
+    execFileSync('git', ['-C', root, 'config', 'core.fsmonitor', hook]);
+    expect(trackedFiles(root)).toEqual(['a.env']);
+    expect(fs.existsSync(marker)).toBe(false);
+  });
+
+  it('names a file holding a NUL byte, and reads the rest', () => {
+    const root = repo({ 'bin.env': 'DEBUG=true\u0000\n', 'ok.env': 'DEBUG=true\n' });
+    const read = scan(root, trackedFiles(root)!);
+    expect(read.problems).toEqual([{ path: 'bin.env', line: 1, reason: 'holds a NUL byte, not read' }]);
+    expect(read.settings.map((s) => s.path)).toEqual(['ok.env']);
+  });
+
+  it('reads a file a mapping names where a check without one does not look', () => {
+    const root = repo({ 'build/helm/values.yaml': 'env:\n  LOGGING_LEVEL_ROOT: DEBUG\n' });
+    expect(scan(root, trackedFiles(root)!).read).toBe(0);
+    expect(scan(root, trackedFiles(root)!, true).read).toBe(1);
   });
 
   it('reports a workspace that is not a git checkout as no files', () => {
@@ -209,21 +250,46 @@ describe('logPolicyCheck', () => {
 
   it('is off when the environment says so, and reads nothing', async () => {
     nock(BASE).get(RULES).query(true).reply(200, served('OFF'));
-    expect(await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', '/nonexistent', null)).toBeNull();
+    expect(await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', '/nonexistent')).toBeNull();
     expect(core.setOutput).toHaveBeenCalledWith('log-policy-check', 'off');
   });
 
-  it('is not run, with a warning, outside a git checkout', async () => {
+  it('is not run, with a warning, outside a git checkout where the mode accepts a build with no check', async () => {
+    for (const mode of ['WARN', 'FAIL_ON_NEW']) {
+      nock(BASE).get(RULES).query(true).reply(200, served(mode));
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'not-git-'));
+      expect(await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', dir)).toBeNull();
+      expect(core.setOutput).toHaveBeenLastCalledWith('log-policy-findings', '0');
+      expect(core.setOutput).toHaveBeenCalledWith('log-policy-check', 'not-run');
+    }
+  });
+
+  it('fails before anything is uploaded outside a git checkout where the mode refuses a build with no check', async () => {
     nock(BASE).get(RULES).query(true).reply(200, served('FAIL'));
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'not-git-'));
-    expect(await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', dir, null)).toBeNull();
-    expect(core.setOutput).toHaveBeenCalledWith('log-policy-check', 'not-run');
+    await expect(logPolicyCheck(client(), 'proj_1', 'prod', 'orders', dir)).rejects.toThrow('check out the repository');
+    expect(core.setOutput).toHaveBeenCalledWith('log-policy-check', 'failed');
+  });
+
+  it('fails a check-only run outside a git checkout in either enforcing mode, and not in WARN', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'not-git-'));
+    const repoOf = readRepo(dir);
+    for (const [mode, outcome] of [['FAIL_ON_NEW', 'failed'], ['FAIL', 'failed'], ['WARN', 'not-run']]) {
+      nock(BASE).get(RULES).query(true).reply(200, served(mode));
+      const run = await runCheck(client(), 'proj_1', 'prod', 'orders', dir, repoOf, { checkOnly: true });
+      expect(run.outcome).toBe(outcome);
+    }
+  });
+
+  it('prints a service and environment with their control characters shown as ?', () => {
+    expect(printable('orders\n::error::x\r')).toBe('orders?::error::x?');
+    expect(printable('a' + String.fromCharCode(0x2028) + 'b')).toBe('a?b');
   });
 
   it('prints each finding by rule, name, file and line, and never a value', async () => {
     nock(BASE).get(RULES).query(true).reply(200, served('WARN'));
     const root = repo({ 'deploy/.env': `LOGGING_LEVEL_ROOT=DEBUG\nDEBUG=${secret}\nSPRING_APPLICATION_JSON={${secret}\n` });
-    const result = await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root, null);
+    const result = await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root);
     expect(result).toMatchObject({ service: 'orders', ruleSetDigest: 'a'.repeat(64), total: 2 });
     expect(core.warning).toHaveBeenCalledWith('SPRING_DEBUG: debug', expect.objectContaining({ file: 'deploy/.env', startLine: 2 }));
     expect(core.error).toHaveBeenCalledWith('LOG_LEVEL_BELOW_FLOOR: logging.level.root', {
@@ -241,7 +307,7 @@ describe('logPolicyCheck', () => {
   it('fails before anything is uploaded when the mode fails the check', async () => {
     nock(BASE).get(RULES).query(true).reply(200, served('FAIL'));
     const root = repo({ 'deploy/.env': 'LOGGING_LEVEL_ROOT=DEBUG\n' });
-    await expect(logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root, null)).rejects.toBeInstanceOf(UserError);
+    await expect(logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root)).rejects.toBeInstanceOf(UserError);
     expect(core.setOutput).toHaveBeenCalledWith('log-policy-check', 'failed');
   });
 
@@ -252,22 +318,77 @@ describe('logPolicyCheck', () => {
       'deploy/payments/prod.env': 'LOGGING_LEVEL_ROOT=DEBUG\n',
       '.maestro/check.yml': 'services:\n  - service: orders\n    environment: prod\n    paths: ["deploy/orders/**"]\n',
     });
-    const result = await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root, readMapping(root));
+    const result = await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root);
     expect(result?.total).toBe(0);
+  });
+
+  const mapped = (paths: string) => ({
+    'deploy/orders/prod.env': 'LOGGING_LEVEL_ROOT=DEBUG\n',
+    '.maestro/check.yml': `services:\n  - service: payments\n    environment: prod\n    paths: [${paths}]\n`,
+  });
+
+  it('warns where a mapping maps nothing to the service and the mode does not enforce, and fails where it does', async () => {
+    nock(BASE).get(RULES).query(true).reply(200, served('WARN'));
+    const root = repo(mapped('"deploy/**"'));
+    expect((await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root))?.total).toBe(0);
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('maps no files to orders in prod'));
+
+    nock(BASE).get(RULES).query(true).reply(200, served('FAIL_ON_NEW'));
+    await expect(logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root)).rejects.toThrow('maps no files to orders in prod');
+  });
+
+  it('fails where the mode enforces when a mapping entry for the service matches no tracked file', async () => {
+    nock(BASE).get(RULES).query(true).reply(200, served('FAIL'));
+    const root = repo(mapped('"helm/payments/**"'));
+    await expect(logPolicyCheck(client(), 'proj_1', 'prod', 'payments', root)).rejects.toThrow(
+      'entry 1 for payments in prod matches no tracked file',
+    );
+    nock(BASE).get(RULES).query(true).reply(200, served('FAIL'));
+    const ok = repo(mapped('"deploy/**"'));
+    await expect(logPolicyCheck(client(), 'proj_1', 'prod', 'payments', ok)).rejects.toThrow('error-severity finding');
   });
 });
 
+const readOf = (root: string) => readMapping(root, trackedFiles(root)!);
+
 describe('the mapping file', () => {
   it('is absent when the repository has none', () => {
-    expect(readMapping(repo({ 'a.env': '' }))).toBeNull();
+    expect(readOf(repo({ 'a.env': '' }))).toBeNull();
   });
 
   it.each([
     ['not YAML', 'services: [unclosed'],
     ['no services', 'other: 1\n'],
     ['an entry without paths', 'services:\n  - service: orders\n    environment: prod\n'],
+    ['holding a control character', 'services:\n  - service: "orders\\n::error::x"\n    environment: prod\n    paths: ["a"]\n'],
   ])('refuses one that is %s', (_what, text) => {
-    expect(() => readMapping(repo({ '.maestro/check.yml': text }))).toThrow(UserError);
+    expect(() => readOf(repo({ '.maestro/check.yml': text }))).toThrow(UserError);
+  });
+
+  const good = 'services:\n  - service: orders\n    environment: prod\n    paths: ["a/**"]\n';
+
+  it('reads a tracked one, and refuses one that is untracked, a link or too large', () => {
+    expect(readOf(repo({ '.maestro/check.yml': good }))).toEqual([{ service: 'orders', environment: 'prod', paths: ['a/**'] }]);
+    expect(() => readOf(repo({ '.maestro/check.yml': good }, ['.maestro/check.yml']))).toThrow('is not tracked');
+    const linked = repo({ 'elsewhere.yml': good });
+    fs.mkdirSync(path.join(linked, '.maestro'));
+    fs.symlinkSync(path.join(linked, 'elsewhere.yml'), path.join(linked, '.maestro/check.yml'));
+    execFileSync('git', ['-C', linked, 'add', '.maestro/check.yml']);
+    expect(() => readOf(linked)).toThrow('is not a regular file');
+    expect(() => readOf(repo({ '.maestro/check.yml': good + '#'.repeat(70 * 1024) }))).toThrow('larger than');
+  });
+
+  it('prints nothing of a mapping it cannot parse', () => {
+    const warn = jest.spyOn(process, 'emitWarning').mockImplementation(() => undefined);
+    const log = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(() => readOf(repo({ '.maestro/check.yml': 'services:\n  - !!secret hunter2\n' }))).toThrow(UserError);
+    expect(JSON.stringify([warn.mock.calls, log.mock.calls])).not.toContain('hunter2');
+    warn.mockRestore();
+    log.mockRestore();
+  });
+
+  it('reads no mapping outside a git checkout', () => {
+    expect(readRepo(fs.mkdtempSync(path.join(os.tmpdir(), 'not-git-')))).toEqual({ files: null, mapping: null });
   });
 
   it('assigns files by glob to a service and environment, and leaves the rest out', () => {

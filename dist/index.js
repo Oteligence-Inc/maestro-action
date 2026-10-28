@@ -29806,6 +29806,11 @@ function below(level, floor) {
     const i = LEVELS.indexOf(l);
     return i >= 0 && i < LEVELS.indexOf(floor);
 }
+const MODES = ['OFF', 'WARN', 'FAIL', 'FAIL_ON_NEW'];
+const FLOORS = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR'];
+const SEVERITIES = ['error', 'warning'];
+/** A rule id as the platform names one; any other is refused rather than printed. */
+const RULE_ID = /^[A-Z][A-Z0-9_]{0,63}$/;
 /** The reason a served rule set cannot be read by this Action, or null when it can. */
 function unreadable(body) {
     if (typeof body !== 'object' || body === null)
@@ -29817,12 +29822,25 @@ function unreadable(body) {
     if (typeof set.mode !== 'string' || typeof set.floor !== 'string' || typeof set.digest !== 'string') {
         return 'the rule set has no mode, floor or digest';
     }
+    if (!MODES.includes(set.mode))
+        return 'the rule set names a mode this Action does not know';
+    if (!FLOORS.includes(set.floor))
+        return 'the rule set names a floor this Action does not know';
+    if (!/^[0-9a-f]{64}$/.test(set.digest))
+        return 'the rule set digest is out of shape';
+    if (set.exporter !== null && set.exporter !== undefined && typeof set.exporter !== 'string') {
+        return 'the rule set exporter is out of shape';
+    }
     if (!Array.isArray(set.rules))
         return 'the rule set has no rules';
     for (const r of set.rules) {
+        if (typeof r?.id !== 'string' || !RULE_ID.test(r.id))
+            return 'a rule id is out of shape';
         if (!exports.TESTS.includes(r?.test)) {
-            return `rule ${String(r?.id)} uses a test this Action does not know (${String(r?.test)})`;
+            return `rule ${r.id} uses a test this Action does not know`;
         }
+        if (!SEVERITIES.includes(r.severity))
+            return `rule ${r.id} names a severity this Action does not know`;
         for (const list of [r.exact, r.prefixes, r.suffixes, r.except, r.values]) {
             if (!Array.isArray(list))
                 return `rule ${String(r.id)} is out of shape`;
@@ -29932,7 +29950,7 @@ async function run() {
         await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'in_progress', null); // deploy-run: start
         // [2c] Before the upload, so a build the environment's log policy refuses costs no analysis.
         const root = workspace();
-        const ciCheck = await (0, ciCheck_1.logPolicyCheck)(api, projectUid, inputs.environment, inputs.service, root, (0, ciCheck_1.readMapping)(root));
+        const ciCheck = await (0, ciCheck_1.logPolicyCheck)(api, projectUid, inputs.environment, inputs.service, root, cfg.lockedVersionUid);
         const upload = await (0, upload_1.uploadJar)(api, inputs, cfg); // [3-5]
         const analysisJobId = await (0, submitJob_1.submitAnalysis)(api, cfg, upload); // [6a]
         await (0, poll_1.pollJob)(api, analysisJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7a]
@@ -30204,15 +30222,27 @@ function trustedHostname(raw) {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.DEPTH_MAX = exports.SETTINGS_MAX = void 0;
 exports.kindOf = kindOf;
+exports.lines = lines;
 exports.extract = extract;
 exports.commandLineSettings = commandLineSettings;
+exports.argumentSetting = argumentSetting;
 exports.untemplated = untemplated;
 exports.keyPathNames = keyPathNames;
+exports.property = property;
 const yaml_1 = __nccwpck_require__(8815);
 const ciRules_1 = __nccwpck_require__(7944);
-/** Environment variables whose value is a JVM command line. */
-const JVM_OPTIONS = new Set(['java.tool.options', 'java.opts', 'jdk.java.options']);
+/** Environment variables whose value is a JVM command line; `_JAVA_OPTIONS` folds to `java.options`. */
+const JVM_OPTIONS = new Set(['java.tool.options', 'java.opts', 'jdk.java.options', 'java.options']);
+/** Mapping keys whose children are environment variables, read under their own names. */
+const ENV_KEYS = new Set(['environment', 'env', 'data', 'stringdata']);
+/** The most settings one file gives; past it the file is named and the rest not read. */
+exports.SETTINGS_MAX = 20000;
+/** The deepest YAML nesting read; a deeper node is named and not read. */
+exports.DEPTH_MAX = 64;
+/** Example env files, which a deployment never reads. */
+const ENV_EXAMPLES = /(^|\.)env\.(example|sample|template)$/;
 /** Sequence keys whose items are a container's command line. */
 const COMMAND_KEYS = new Set(['args', 'command', 'entrypoint', 'cmd']);
 /** The kind of deployment file a repository path is, or null for a file the check does not read. */
@@ -30224,14 +30254,21 @@ function kindOf(path) {
     if (lower === 'dockerfile' || lower === 'containerfile' || lower.endsWith('.dockerfile') || lower.startsWith('dockerfile.')) {
         return 'dockerfile';
     }
+    if (ENV_EXAMPLES.test(lower))
+        return null;
     if (lower === '.env' || lower.endsWith('.env') || lower.startsWith('.env.'))
         return 'env';
     if (lower.endsWith('.properties'))
         return 'properties';
     return null;
 }
-function extract(path, text, kind) {
+/** A file's lines as the tools that read it split them: at CRLF, a lone CR or LF, and nowhere else. */
+function lines(text) {
+    return text.split(/\r\n|\r|\n/);
+}
+function extract(path, raw, kind) {
     const out = { settings: [], problems: [], origins: 0 };
+    const text = raw.charCodeAt(0) === 0xfeff ? raw.substring(1) : raw;
     switch (kind) {
         case 'yaml':
             yamlSettings(path, text, out);
@@ -30240,7 +30277,7 @@ function extract(path, text, kind) {
             dockerfileSettings(path, text, out);
             break;
         case 'env':
-            for (const { line, key, value } of keyValueLines(text, /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=(.*)$/)) {
+            for (const { line, key, value } of keyValueLines(text, /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=(.*)$/s)) {
                 add(out, path, line, key, unquote(value));
             }
             break;
@@ -30256,6 +30293,12 @@ function extract(path, text, kind) {
  * command line or Spring's JSON.
  */
 function add(out, path, line, names, value) {
+    if (out.settings.length >= exports.SETTINGS_MAX) {
+        if (!out.problems.some((p) => p.reason.startsWith('more than'))) {
+            out.problems.push({ path, line, reason: `more than ${exports.SETTINGS_MAX} settings, the rest not read` });
+        }
+        return;
+    }
     const origin = out.origins++;
     let expanded = false;
     for (const name of Array.isArray(names) ? names : [names]) {
@@ -30292,6 +30335,29 @@ function commandLineSettings(commandLine) {
     }
     return out;
 }
+/** The setting one argument of an exec-form command passes, read whole: an element is one argument, spaces and all. */
+function argumentSetting(arg) {
+    let body = null;
+    if (arg.startsWith('-D') && arg.length > 2)
+        body = arg.substring(2);
+    else if (arg.startsWith('--') && arg.length > 2)
+        body = arg.substring(2);
+    if (body === null)
+        return null;
+    const eq = body.indexOf('=');
+    return eq < 0 ? { name: body, value: '' } : { name: body.substring(0, eq), value: body.substring(eq + 1) };
+}
+/** One element of an exec-form command: an argument when it starts with `-`, else a command line (`sh -c "..."`). */
+function commandElement(element, path, line, out) {
+    if (element.startsWith('-')) {
+        const s = argumentSetting(element);
+        if (s)
+            add(out, path, line, s.name, s.value);
+    }
+    else {
+        commandLine(element, path, line, out);
+    }
+}
 function tokens(commandLine) {
     const out = [];
     const re = /"[^"]*"|'[^']*'|[^\s"']+(?:"[^"]*"|'[^']*'|[^\s"']*)*/g;
@@ -30299,12 +30365,23 @@ function tokens(commandLine) {
         out.push(m[0]);
     return out;
 }
+/** Spring's JSON with each placeholder read as a template value, quoted where it stands bare. */
+function springJsonParsed(value) {
+    const marked = value.replace(/\$\{[^}]*\}|\{\{[^}]*\}\}/g, '__TEMPLATE__');
+    try {
+        return JSON.parse(marked);
+    }
+    catch {
+        return JSON.parse(value.replace(/"[^"]*"|\$\{[^}]*\}|\{\{[^}]*\}\}/g, (m) => (m.startsWith('"') ? m : '"__TEMPLATE__"'))
+            .replace(/"[^"]*"/g, (m) => m.replace(/\$\{[^}]*\}|\{\{[^}]*\}\}/g, '__TEMPLATE__')));
+    }
+}
 function springJson(out, path, line, value) {
-    if (value.trim() === '' || value.includes('${') || value.includes('{{'))
+    if (value.trim() === '')
         return;
     let parsed;
     try {
-        parsed = JSON.parse(value);
+        parsed = springJsonParsed(value);
     }
     catch {
         out.problems.push({ path, line, reason: 'SPRING_APPLICATION_JSON is not JSON' });
@@ -30325,9 +30402,16 @@ function springJson(out, path, line, value) {
 function untemplated(text) {
     return text
         .split('\n')
-        .map((l) => (/^\s*(?:-\s*)?\{\{.*\}\}\s*$/.test(l) && !/:\s*\{\{/.test(l) ? '' : l))
+        .map((l) => (wholeLineAction(l) ? '' : l))
         .join('\n')
-        .replace(/\{\{[^}]*\}\}/g, '__TEMPLATE__');
+        .replace(/\{\{[^}]*\}\}/g, (m) => '__TEMPLATE__' + '\n'.repeat(m.split('\n').length - 1));
+}
+/** A line that is one template action and nothing else, such as `{{- if .Values.x }}` or `- {{ include "x" . }}`. */
+function wholeLineAction(line) {
+    let t = line.trim();
+    if (t.startsWith('-') && !t.startsWith('-}}'))
+        t = t.substring(1).trimStart();
+    return t.startsWith('{{') && t.endsWith('}}') && t.indexOf('}}') === t.length - 2 && !t.includes(':');
 }
 function yamlSettings(path, text, out) {
     const source = text.includes('{{') ? untemplated(text) : text;
@@ -30344,7 +30428,7 @@ function yamlSettings(path, text, out) {
             out.problems.push({ path, line: at, reason: 'not valid YAML' });
             continue;
         }
-        walkYaml(doc.contents, [], path, out, lineOf);
+        walkYaml(doc.contents, [], path, out, lineOf, 0);
     }
 }
 function scalarText(node) {
@@ -30355,7 +30439,13 @@ function scalarText(node) {
         return '';
     return typeof v === 'object' ? null : String(v);
 }
-function walkYaml(node, keys, path, out, lineOf) {
+function walkYaml(node, keys, path, out, lineOf, depth) {
+    if (depth > exports.DEPTH_MAX) {
+        if (!out.problems.some((p) => p.reason.startsWith('nested deeper'))) {
+            out.problems.push({ path, line: lineOf(node), reason: `nested deeper than ${exports.DEPTH_MAX} levels, not read below` });
+        }
+        return;
+    }
     if ((0, yaml_1.isMap)(node)) {
         envEntry(node.items, path, out, lineOf);
         for (const pair of node.items) {
@@ -30375,7 +30465,7 @@ function walkYaml(node, keys, path, out, lineOf) {
                 for (const item of value.items) {
                     const t = scalarText(item);
                     if (t !== null)
-                        commandLine(t, path, lineOf(item), out);
+                        commandElement(t, path, lineOf(item), out);
                 }
             }
             else if ((0, yaml_1.isSeq)(value) && key.toLowerCase() === 'environment') {
@@ -30385,17 +30475,17 @@ function walkYaml(node, keys, path, out, lineOf) {
                     if (t !== null && eq > 0)
                         add(out, path, lineOf(item), t.substring(0, eq), t.substring(eq + 1));
                     else
-                        walkYaml(item, [...keys, key], path, out, lineOf);
+                        walkYaml(item, [...keys, key], path, out, lineOf, depth + 1);
                 }
             }
             else {
-                walkYaml(value, [...keys, key], path, out, lineOf);
+                walkYaml(value, [...keys, key], path, out, lineOf, depth + 1);
             }
         }
     }
     else if ((0, yaml_1.isSeq)(node)) {
         for (const item of node.items)
-            walkYaml(item, keys, path, out, lineOf);
+            walkYaml(item, keys, path, out, lineOf, depth + 1);
     }
 }
 /** A Kubernetes env entry ({name, value}) as the setting it names. */
@@ -30426,7 +30516,8 @@ function keyPathNames(keys) {
     const out = [];
     for (let i = 0; i < keys.length; i++) {
         const name = keys.slice(i).join('.');
-        if (i === 0 || (0, ciRules_1.fold)(name).split('.').filter((s) => s !== '').length >= 2)
+        const envChild = i === keys.length - 1 && i > 0 && ENV_KEYS.has(keys[i - 1].toLowerCase());
+        if (i === 0 || envChild || (0, ciRules_1.fold)(name).split('.').filter((s) => s !== '').length >= 2)
             out.push(name);
     }
     return out;
@@ -30436,14 +30527,17 @@ function commandLine(text, path, line, out) {
         add(out, path, line, s.name, s.value);
 }
 function dockerfileSettings(path, text, out) {
-    const physical = text.split('\n');
+    const physical = lines(text);
     for (let i = 0; i < physical.length; i++) {
         const start = i + 1;
-        let logical = physical[i];
-        while (/\\\s*$/.test(logical) && i + 1 < physical.length) {
-            logical = logical.replace(/\\\s*$/, ' ') + physical[++i];
+        const parts = [physical[i]];
+        while (parts[parts.length - 1].trimEnd().endsWith('\\') && i + 1 < physical.length) {
+            const last = parts[parts.length - 1].trimEnd();
+            parts[parts.length - 1] = last.substring(0, last.length - 1) + ' ';
+            parts.push(physical[++i]);
         }
-        const m = /^\s*(ENV|CMD|ENTRYPOINT)\s+(.*)$/i.exec(logical);
+        const logical = parts.join('');
+        const m = /^\s*(ENV|CMD|ENTRYPOINT)\s(.*)$/is.exec(logical);
         if (!m)
             continue;
         const instruction = m[1].toUpperCase();
@@ -30462,50 +30556,88 @@ function dockerfileSettings(path, text, out) {
                     add(out, path, start, rest.substring(0, sp), unquote(rest.substring(sp + 1).trim()));
             }
         }
-        else {
-            let line = rest;
-            if (rest.startsWith('[')) {
-                try {
-                    const parts = JSON.parse(rest);
-                    if (Array.isArray(parts))
-                        line = parts.map((p) => `'${String(p).replace(/'/g, '')}'`).join(' ');
-                }
-                catch {
-                    out.problems.push({ path, line: start, reason: `${instruction} is not a JSON array` });
-                    continue;
-                }
+        else if (rest.startsWith('[')) {
+            let elements;
+            try {
+                elements = JSON.parse(rest);
             }
-            commandLine(line, path, start, out);
+            catch {
+                elements = null;
+            }
+            if (!Array.isArray(elements)) {
+                out.problems.push({ path, line: start, reason: `${instruction} is not a JSON array` });
+                continue;
+            }
+            for (const e of elements)
+                commandElement(String(e), path, start, out);
+        }
+        else {
+            commandLine(rest, path, start, out);
         }
     }
 }
 function keyValueLines(text, re) {
     const out = [];
-    text.split('\n').forEach((l, i) => {
+    lines(text).forEach((l, i) => {
         if (/^\s*#/.test(l))
             return;
-        const m = re.exec(l.replace(/\r$/, ''));
+        const m = re.exec(l);
         if (m)
             out.push({ line: i + 1, key: m[1], value: m[2].trim() });
     });
     return out;
 }
+/** True when a properties line ends in an odd run of backslashes, which continues it on the next line. */
+function continues(line) {
+    let n = 0;
+    for (let i = line.length - 1; i >= 0 && line[i] === '\\'; i--)
+        n++;
+    return n % 2 === 1;
+}
+const PROPERTY_SPACE = new Set([' ', '\t', '\f']);
+/**
+ * One logical properties line as java.util.Properties reads it: the key ends at the first unescaped `=`, `:` or
+ * space, and one `=` or `:` after the spaces that follow it is part of the separator.
+ */
+function property(logical) {
+    let i = 0;
+    while (i < logical.length && PROPERTY_SPACE.has(logical[i]))
+        i++;
+    let key = '';
+    for (; i < logical.length; i++) {
+        const c = logical[i];
+        if (c === '\\' && i + 1 < logical.length) {
+            key += logical[++i];
+            continue;
+        }
+        if (c === '=' || c === ':' || PROPERTY_SPACE.has(c))
+            break;
+        key += c;
+    }
+    while (i < logical.length && PROPERTY_SPACE.has(logical[i]))
+        i++;
+    if (i < logical.length && (logical[i] === '=' || logical[i] === ':')) {
+        i++;
+        while (i < logical.length && PROPERTY_SPACE.has(logical[i]))
+            i++;
+    }
+    return { key, value: logical.substring(i).trim() };
+}
 function propertiesLines(text) {
     const out = [];
-    const physical = text.replace(/^﻿/, '').split('\n');
+    const physical = lines(text);
     for (let i = 0; i < physical.length; i++) {
         const start = i + 1;
-        let logical = physical[i].replace(/\r$/, '');
-        if (/^\s*[#!]/.test(logical) || logical.trim() === '')
+        if (/^[ \t\f]*[#!]/.test(physical[i]) || physical[i].trim() === '')
             continue;
-        while (/(^|[^\\])(\\\\)*\\$/.test(logical) && i + 1 < physical.length) {
-            logical = logical.slice(0, -1) + physical[++i].replace(/\r$/, '').trimStart();
+        const parts = [physical[i]];
+        while (continues(parts[parts.length - 1]) && i + 1 < physical.length) {
+            parts[parts.length - 1] = parts[parts.length - 1].slice(0, -1);
+            parts.push(physical[++i].replace(/^[ \t\f]+/, ''));
         }
-        const m = /^\s*((?:\\.|[^=:\s\\])+)\s*[=:\s]\s*(.*)$/.exec(logical);
-        if (m)
-            out.push({ line: start, key: m[1].replace(/\\(.)/g, '$1'), value: m[2].trim() });
-        else
-            out.push({ line: start, key: logical.trim(), value: '' });
+        const { key, value } = property(parts.join(''));
+        if (key !== '')
+            out.push({ line: start, key, value });
     }
     return out;
 }
@@ -30729,11 +30861,11 @@ const resolveConfig_1 = __nccwpck_require__(749);
  */
 async function checkOnly(api, inputs, root) {
     const projectUid = await (0, resolveConfig_1.resolveProjectUid)(api, inputs.project, inputs.projectId);
-    const mapping = (0, ciCheck_1.readMapping)(root);
+    const repo = (0, ciCheck_1.readRepo)(root);
     const pairs = [];
-    if (mapping) {
+    if (repo.mapping) {
         const seen = new Set();
-        for (const e of mapping) {
+        for (const e of repo.mapping) {
             const key = `${e.service}\u0000${e.environment}`;
             if (seen.has(key))
                 continue;
@@ -30748,25 +30880,34 @@ async function checkOnly(api, inputs, root) {
         pairs.push({ service: inputs.service, environment: inputs.environment });
     }
     const failed = [];
-    let checked = 0;
+    const outcomes = new Set();
     let findings = 0;
     for (const p of pairs) {
+        const who = `${(0, ciCheck_1.printable)(p.service)} in ${(0, ciCheck_1.printable)(p.environment)}`;
         try {
-            const result = await (0, ciCheck_1.logPolicyCheck)(api, projectUid, p.environment, p.service, root, mapping);
-            if (result) {
-                checked++;
-                findings += result.total;
+            const run = await (0, ciCheck_1.runCheck)(api, projectUid, p.environment, p.service, root, repo, { checkOnly: true });
+            outcomes.add(run.outcome);
+            findings += run.result?.total ?? 0;
+            if (run.outcome === 'failed') {
+                core.error(`Log policy check failed for ${who}: ${run.reason}.`);
+                failed.push(who);
             }
         }
         catch (err) {
-            if (!(err instanceof errors_1.UserError))
-                throw err;
-            core.error(err.message);
-            failed.push(`${p.service} in ${p.environment}`);
+            core.error(`Log policy check could not run for ${who}: ${(0, errors_1.formatError)(err)}`);
+            failed.push(who);
         }
     }
-    // Across every pair: each check set these for itself, and the last one would otherwise stand for all.
-    const outcome = failed.length > 0 ? 'failed' : findings > 0 ? 'warned' : checked > 0 ? 'passed' : 'off';
+    // Across every pair: a failure anywhere fails the run, and a check that could not run says so.
+    const outcome = failed.length > 0
+        ? 'failed'
+        : outcomes.has('not-run')
+            ? 'not-run'
+            : findings > 0
+                ? 'warned'
+                : outcomes.has('passed')
+                    ? 'passed'
+                    : 'off';
     core.setOutput('log-policy-check', outcome);
     core.setOutput('log-policy-findings', String(findings));
     core.setOutput('generated', 'false');
@@ -30818,12 +30959,14 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.MAPPING_FILE = exports.FILE_MAX_BYTES = exports.FINDINGS_MAX = void 0;
+exports.MAPPING_MAX_BYTES = exports.MAPPING_FILE = exports.FILE_MAX_BYTES = exports.FINDINGS_MAX = void 0;
+exports.printable = printable;
 exports.fingerprint = fingerprint;
 exports.fetchRules = fetchRules;
 exports.trackedFiles = trackedFiles;
 exports.sendablePath = sendablePath;
 exports.readMapping = readMapping;
+exports.readRepo = readRepo;
 exports.filesFor = filesFor;
 exports.scan = scan;
 exports.findingsOf = findingsOf;
@@ -30831,6 +30974,7 @@ exports.checkResult = checkResult;
 exports.verdict = verdict;
 exports.report = report;
 exports.casesDigestOfFile = casesDigestOfFile;
+exports.runCheck = runCheck;
 exports.logPolicyCheck = logPolicyCheck;
 const core = __importStar(__nccwpck_require__(7484));
 const child_process_1 = __nccwpck_require__(5317);
@@ -30850,7 +30994,14 @@ exports.FINDINGS_MAX = 500;
 exports.FILE_MAX_BYTES = 1024 * 1024;
 /** Where a repository says which of its files deploy which service to which environment. */
 exports.MAPPING_FILE = '.maestro/check.yml';
-/** Paths a deployment check never reads: tooling, build output, tests, and the packaged configuration the analysis reads. */
+/** The largest mapping file read. */
+exports.MAPPING_MAX_BYTES = 64 * 1024;
+/** Paths a check never reads, even when a mapping names them. */
+const NEVER_READ = /(^|\/)\.git\//;
+/**
+ * Paths a check without a mapping does not read: tooling, build output, tests, and the packaged configuration the
+ * analysis reads. A mapping's own globs are read wherever they point.
+ */
 const SKIPPED = [
     /(^|\/)\.git\//,
     /(^|\/)\.github\//,
@@ -30863,14 +31014,32 @@ const SKIPPED = [
     /(^|\/)src\/main\/resources\//,
     /^\.maestro\//,
 ];
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+const CONTROLS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
+/** Text for the log with its control characters shown as `?`, so a value cannot start a workflow command. */
+function printable(text) {
+    return text.replace(CONTROLS, '?');
+}
+function enforcing(mode) {
+    return mode === 'FAIL' || mode === 'FAIL_ON_NEW';
+}
 function fingerprint(f) {
     return `${f.rule}|${f.name}|${f.path}`;
 }
 /** GET .../envs/{env}/ci-rules for one service, at the one version this Action reads. */
-async function fetchRules(api, projectUid, environment, service) {
-    const res = await api.get(`${(0, resolveConfig_1.envPath)(projectUid, environment)}/ci-rules?service=${encodeURIComponent(service)}&versions=${ciRules_1.VERSION}`);
+async function fetchRules(api, projectUid, environment, service, lockedVersionUid) {
+    const lock = lockedVersionUid ? `&lockedVersionUid=${encodeURIComponent(lockedVersionUid)}` : '';
+    const res = await api.get(`${(0, resolveConfig_1.envPath)(projectUid, environment)}/ci-rules?service=${encodeURIComponent(service)}&versions=${ciRules_1.VERSION}${lock}`);
     if (res.statusCode === 404) {
-        throw new errors_1.UserError(`Env "${environment}" was not found, so its log policy rules cannot be read.`);
+        const code = res.body?.data?.code;
+        if (code === 'ci_rules_service_unknown') {
+            throw new errors_1.UserError(`The locked analysis of "${printable(environment)}" holds no service named "${printable(service)}", so its log ` +
+                'policy rules cannot be read. Use the name the environment lists it under.');
+        }
+        if (code === 'ci_rules_lock_unknown') {
+            throw new errors_1.UserError(`Env "${printable(environment)}" holds no lock by the uid this run builds; run the workflow again.`);
+        }
+        throw new errors_1.UserError(`Env "${printable(environment)}" was not found, so its log policy rules cannot be read.`);
     }
     (0, api_1.expectOk)(res, 'ci-rules');
     const data = res.body?.data;
@@ -30885,7 +31054,11 @@ async function fetchRules(api, projectUid, environment, service) {
 /** The repository's tracked files, `/`-separated and relative to its root. */
 function trackedFiles(root) {
     try {
-        const out = (0, child_process_1.execFileSync)('git', ['-C', root, 'ls-files', '-z'], { maxBuffer: 64 * 1024 * 1024 });
+        // A repository's own config can name an fsmonitor command, which git would run; this read runs none.
+        const out = (0, child_process_1.execFileSync)('git', ['-c', 'core.fsmonitor=false', '-C', root, 'ls-files', '-z'], {
+            maxBuffer: 64 * 1024 * 1024,
+            stdio: ['ignore', 'pipe', 'ignore'],
+        });
         return out.toString('utf8').split('\0').filter((p) => p !== '');
     }
     catch {
@@ -30900,7 +31073,11 @@ function sendablePath(p) {
         return false;
     return !/[\u0000-\u001f\u007f]/.test(p);
 }
-function readMapping(root) {
+/**
+ * The repository's `.maestro/check.yml`, or null when it has none. The file must be tracked, a regular file inside the
+ * root and at most {@link MAPPING_MAX_BYTES}; a service, environment or path in it may not hold a control character.
+ */
+function readMapping(root, tracked) {
     const file = path.join(root, exports.MAPPING_FILE);
     let stat;
     try {
@@ -30909,11 +31086,19 @@ function readMapping(root) {
     catch {
         return null;
     }
+    if (!tracked.includes(exports.MAPPING_FILE)) {
+        throw new errors_1.UserError(`${exports.MAPPING_FILE} is not tracked; commit it, since the check reads tracked files only.`);
+    }
     if (!stat.isFile())
         throw new errors_1.UserError(`${exports.MAPPING_FILE} is not a regular file.`);
+    if (!fs.realpathSync(file).startsWith(fs.realpathSync(root) + path.sep)) {
+        throw new errors_1.UserError(`${exports.MAPPING_FILE} is not inside the repository.`);
+    }
+    if (stat.size > exports.MAPPING_MAX_BYTES)
+        throw new errors_1.UserError(`${exports.MAPPING_FILE} is larger than ${exports.MAPPING_MAX_BYTES} bytes.`);
     let doc;
     try {
-        doc = (0, yaml_1.parse)(fs.readFileSync(file, 'utf8'));
+        doc = (0, yaml_1.parse)(fs.readFileSync(file, 'utf8'), { logLevel: 'silent' });
     }
     catch {
         throw new errors_1.UserError(`${exports.MAPPING_FILE} is not valid YAML.`);
@@ -30931,8 +31116,16 @@ function readMapping(root) {
             !entry.paths.every((g) => typeof g === 'string')) {
             throw new errors_1.UserError(`${exports.MAPPING_FILE}: entry ${i + 1} needs service, environment and a list of paths.`);
         }
+        if ([entry.service, entry.environment, ...entry.paths].some((t) => CONTROL.test(t))) {
+            throw new errors_1.UserError(`${exports.MAPPING_FILE}: entry ${i + 1} holds a control character.`);
+        }
         return { service: entry.service, environment: entry.environment, paths: entry.paths };
     });
+}
+/** The repository's tracked files and its mapping. */
+function readRepo(root) {
+    const files = trackedFiles(root);
+    return { files, mapping: files === null ? null : readMapping(root, files) };
 }
 /** The files the mapping assigns to one service and environment, or every file when there is no mapping. */
 function filesFor(files, mapping, service, environment) {
@@ -30942,13 +31135,13 @@ function filesFor(files, mapping, service, environment) {
     return files.filter((f) => globs.some((g) => (0, minimatch_1.minimatch)(f, g, { dot: true })));
 }
 /** Reads the deployment files among `files`: regular files only, inside the root, never a link. */
-function scan(root, files) {
+function scan(root, files, mapped = false) {
     const result = { settings: [], problems: [], read: 0, leftOut: 0 };
     const realRoot = fs.realpathSync(root);
     let origins = 0;
     for (const rel of files) {
         const kind = (0, extract_1.kindOf)(rel);
-        if (!kind || SKIPPED.some((re) => re.test(rel)))
+        if (!kind || NEVER_READ.test(rel) || (!mapped && SKIPPED.some((re) => re.test(rel))))
             continue;
         if (!sendablePath(rel)) {
             result.leftOut++;
@@ -30972,8 +31165,10 @@ function scan(root, files) {
             continue;
         }
         const bytes = fs.readFileSync(abs);
-        if (bytes.includes(0))
+        if (bytes.includes(0)) {
+            result.problems.push({ path: rel, line: 1, reason: 'holds a NUL byte, not read' });
             continue;
+        }
         const found = (0, extract_1.extract)(rel, bytes.toString('utf8'), kind);
         result.read++;
         for (const s of found.settings)
@@ -31081,49 +31276,84 @@ function casesDigestOfFile(file) {
     return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 /**
- * Runs the environment's log policy check over the repository's deployment files for one service. Returns the result
- * a build carries, or null when the environment's check is off or the workspace is not a git checkout. Throws when
- * the environment's mode fails the build, before anything is uploaded.
+ * Runs the environment's log policy check over the repository's deployment files for one service, and reports its
+ * findings. A failed check is returned, not thrown. With no git checkout the check cannot run: that fails where the
+ * environment refuses a build with no check (`FAIL`), and in a check-only run in either enforcing mode. A mapping that
+ * maps no file to the service and environment warns, and fails where the mode enforces.
  */
-async function logPolicyCheck(api, projectUid, environment, service, root, mapping) {
-    const served = await fetchRules(api, projectUid, environment, service);
+async function runCheck(api, projectUid, environment, service, root, repo, opts) {
+    const who = `${printable(service)} in ${printable(environment)}`;
+    const served = await fetchRules(api, projectUid, environment, service, opts.lockedVersionUid);
     const mode = served.ruleSet.mode;
     if (mode === 'OFF') {
-        core.info(`Log policy check: off for ${environment}.`);
-        core.setOutput('log-policy-check', 'off');
-        return null;
+        core.info(`Log policy check: off for ${printable(environment)}.`);
+        return { outcome: 'off', result: null, reason: null };
     }
     if (served.casesDigest && ciRules_1.CASES_DIGEST && served.casesDigest !== ciRules_1.CASES_DIGEST) {
         core.warning('This Action was tested against another copy of the log policy rules than the platform holds. Update the Maestro Action.');
     }
-    const files = trackedFiles(root);
-    if (files === null) {
-        core.warning('Log policy check not run: the workspace is not a git checkout, and the check reads tracked files only.');
-        core.setOutput('log-policy-check', 'not-run');
-        return null;
+    if (repo.files === null) {
+        const refused = mode === 'FAIL' || (opts.checkOnly && enforcing(mode));
+        const why = 'the workspace is not a git checkout, and the check reads tracked files only';
+        if (refused) {
+            return {
+                outcome: 'failed',
+                result: null,
+                reason: `${why}; the environment's mode ${mode} needs the check, so check out the repository before this step`,
+            };
+        }
+        core.warning(`Log policy check not run for ${who}: ${why}.`);
+        return { outcome: 'not-run', result: null, reason: null };
     }
-    const mine = filesFor(files, mapping, service, environment);
-    const read = scan(root, mine);
+    let mine = repo.files;
+    if (repo.mapping) {
+        const entries = repo.mapping.filter((e) => e.service === service && e.environment === environment);
+        const empty = entries.length === 0
+            ? `${exports.MAPPING_FILE} maps no files to ${who}`
+            : entries
+                .map((e, i) => (filesFor(repo.files ?? [], [e], service, environment).length === 0 ? i + 1 : 0))
+                .filter((n) => n > 0)
+                .map((n) => `${exports.MAPPING_FILE} entry ${n} for ${who} matches no tracked file`)
+                .join('; ');
+        if (empty) {
+            if (enforcing(mode))
+                return { outcome: 'failed', result: null, reason: empty };
+            core.warning(`Log policy check: ${empty}.`);
+        }
+        mine = filesFor(repo.files, entries, service, environment);
+    }
+    const read = scan(root, mine, repo.mapping !== null);
     const findings = findingsOf(served.ruleSet, read.settings);
     const result = checkResult(service, served.ruleSet, findings);
     const decided = verdict(mode, findings, result.total, served.baseline);
     report(findings, read.problems);
     const errors = findings.filter((f) => f.severity === 'error').length;
-    const scope = mapping ? ` (the files ${exports.MAPPING_FILE} maps to ${service} in ${environment})` : '';
-    const line = `Log policy check for ${service} in ${environment}: ${read.read} deployment file(s) read${scope}, ` +
+    const scope = repo.mapping ? ` (the files ${exports.MAPPING_FILE} maps to ${who})` : '';
+    const line = `Log policy check for ${who}: ${read.read} deployment file(s) read${scope}, ` +
         `${result.total} finding(s), ${errors} error(s); mode ${mode}` +
         (decided.newFindings !== null ? `, ${decided.newFindings} new since the first checked build` : '') +
         (served.baseline === null && mode === 'FAIL_ON_NEW' ? ', no baseline yet: this build records it' : '') +
         (read.leftOut > 0 ? `; ${read.leftOut} file(s) left out for their path` : '') +
         '.';
     core.info(line);
-    core.setOutput('log-policy-check', decided.outcome);
-    core.setOutput('log-policy-findings', String(result.total));
-    await summarize(`Maestro log policy: ${service} in ${environment}`, findings, line);
-    if (decided.outcome === 'failed') {
-        throw new errors_1.UserError(`Log policy check failed for ${service} in ${environment}: ${decided.reason}. Each finding above names its rule, file and line.`);
+    await summarize(`Maestro log policy: ${who}`, findings, line);
+    return { outcome: decided.outcome, result, reason: decided.reason ? `${decided.reason}. Each finding above names its rule, file and line` : null };
+}
+/**
+ * The check a build runs before its upload: returns the result the build carries, or null when none ran, and throws
+ * when the environment's mode fails the build, before anything is uploaded.
+ */
+async function logPolicyCheck(api, projectUid, environment, service, root, lockedVersionUid) {
+    const run = await runCheck(api, projectUid, environment, service, root, readRepo(root), {
+        checkOnly: false,
+        lockedVersionUid,
+    });
+    core.setOutput('log-policy-check', run.outcome);
+    core.setOutput('log-policy-findings', String(run.result?.total ?? 0));
+    if (run.outcome === 'failed') {
+        throw new errors_1.UserError(`Log policy check failed for ${printable(service)} in ${printable(environment)}: ${run.reason}.`);
     }
-    return result;
+    return run.result;
 }
 
 

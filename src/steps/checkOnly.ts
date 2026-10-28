@@ -1,8 +1,8 @@
 import * as core from '@actions/core';
 import { MaestroApi } from '../api';
 import { Inputs } from '../types';
-import { UserError } from '../util/errors';
-import { MAPPING_FILE, logPolicyCheck, readMapping } from './ciCheck';
+import { UserError, formatError } from '../util/errors';
+import { MAPPING_FILE, printable, readRepo, runCheck } from './ciCheck';
 import { resolveProjectUid } from './resolveConfig';
 
 /**
@@ -13,11 +13,11 @@ import { resolveProjectUid } from './resolveConfig';
  */
 export async function checkOnly(api: MaestroApi, inputs: Inputs, root: string): Promise<void> {
   const projectUid = await resolveProjectUid(api, inputs.project, inputs.projectId);
-  const mapping = readMapping(root);
+  const repo = readRepo(root);
   const pairs: { service: string; environment: string }[] = [];
-  if (mapping) {
+  if (repo.mapping) {
     const seen = new Set<string>();
-    for (const e of mapping) {
+    for (const e of repo.mapping) {
       const key = `${e.service}\u0000${e.environment}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -30,23 +30,34 @@ export async function checkOnly(api: MaestroApi, inputs: Inputs, root: string): 
     pairs.push({ service: inputs.service, environment: inputs.environment });
   }
   const failed: string[] = [];
-  let checked = 0;
+  const outcomes = new Set<string>();
   let findings = 0;
   for (const p of pairs) {
+    const who = `${printable(p.service)} in ${printable(p.environment)}`;
     try {
-      const result = await logPolicyCheck(api, projectUid, p.environment, p.service, root, mapping);
-      if (result) {
-        checked++;
-        findings += result.total;
+      const run = await runCheck(api, projectUid, p.environment, p.service, root, repo, { checkOnly: true });
+      outcomes.add(run.outcome);
+      findings += run.result?.total ?? 0;
+      if (run.outcome === 'failed') {
+        core.error(`Log policy check failed for ${who}: ${run.reason}.`);
+        failed.push(who);
       }
     } catch (err) {
-      if (!(err instanceof UserError)) throw err;
-      core.error(err.message);
-      failed.push(`${p.service} in ${p.environment}`);
+      core.error(`Log policy check could not run for ${who}: ${formatError(err)}`);
+      failed.push(who);
     }
   }
-  // Across every pair: each check set these for itself, and the last one would otherwise stand for all.
-  const outcome = failed.length > 0 ? 'failed' : findings > 0 ? 'warned' : checked > 0 ? 'passed' : 'off';
+  // Across every pair: a failure anywhere fails the run, and a check that could not run says so.
+  const outcome =
+    failed.length > 0
+      ? 'failed'
+      : outcomes.has('not-run')
+        ? 'not-run'
+        : findings > 0
+          ? 'warned'
+          : outcomes.has('passed')
+            ? 'passed'
+            : 'off';
   core.setOutput('log-policy-check', outcome);
   core.setOutput('log-policy-findings', String(findings));
   core.setOutput('generated', 'false');

@@ -151,6 +151,12 @@ function below(level: string, floor: string): boolean {
   return i >= 0 && i < LEVELS.indexOf(floor);
 }
 
+const MODES = ['OFF', 'WARN', 'FAIL', 'FAIL_ON_NEW'];
+const FLOORS = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR'];
+const SEVERITIES = ['error', 'warning'];
+/** A rule id as the platform names one; any other is refused rather than printed. */
+const RULE_ID = /^[A-Z][A-Z0-9_]{0,63}$/;
+
 /** The reason a served rule set cannot be read by this Action, or null when it can. */
 export function unreadable(body: unknown): string | null {
   if (typeof body !== 'object' || body === null) return 'the rule set is empty';
@@ -161,11 +167,19 @@ export function unreadable(body: unknown): string | null {
   if (typeof set.mode !== 'string' || typeof set.floor !== 'string' || typeof set.digest !== 'string') {
     return 'the rule set has no mode, floor or digest';
   }
+  if (!MODES.includes(set.mode)) return 'the rule set names a mode this Action does not know';
+  if (!FLOORS.includes(set.floor)) return 'the rule set names a floor this Action does not know';
+  if (!/^[0-9a-f]{64}$/.test(set.digest)) return 'the rule set digest is out of shape';
+  if (set.exporter !== null && set.exporter !== undefined && typeof set.exporter !== 'string') {
+    return 'the rule set exporter is out of shape';
+  }
   if (!Array.isArray(set.rules)) return 'the rule set has no rules';
   for (const r of set.rules) {
+    if (typeof r?.id !== 'string' || !RULE_ID.test(r.id)) return 'a rule id is out of shape';
     if (!(TESTS as readonly string[]).includes(r?.test)) {
-      return `rule ${String(r?.id)} uses a test this Action does not know (${String(r?.test)})`;
+      return `rule ${r.id} uses a test this Action does not know`;
     }
+    if (!SEVERITIES.includes(r.severity)) return `rule ${r.id} names a severity this Action does not know`;
     for (const list of [r.exact, r.prefixes, r.suffixes, r.except, r.values]) {
       if (!Array.isArray(list)) return `rule ${String(r.id)} is out of shape`;
     }

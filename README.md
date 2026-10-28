@@ -242,15 +242,22 @@ the step: `fail-on-warnings` applies to peer staleness only, and the build is st
 ## The log policy check
 
 Before it uploads anything, the Action reads the environment's log policy rules from Maestro
-(`GET .../envs/{env}/ci-rules?service=...&versions=1`) and checks the repository's tracked deployment files
-against them: YAML (Helm values, Kubernetes manifests, compose files), Dockerfiles, `.env` files and `.properties`
-files. It reads environment variables and their Spring and OTel property names as one name (`LOGGING_LEVEL_ROOT`
-is `logging.level.root`), a Kubernetes `env` entry, a compose `environment` list or map, `-D` and `--` arguments
-on a command line, `JAVA_TOOL_OPTIONS` / `JAVA_OPTS` / `JDK_JAVA_OPTIONS`, and the JSON in
-`SPRING_APPLICATION_JSON`. A Helm template's actions are removed before its YAML is read, and a value written as a
-template is no finding. It never reads an untracked file, a link, `.git`, `.github`, `node_modules`, `target`,
-`build`, `dist`, `vendor`, `src/test` or `src/main/resources` (the packaged configuration, which Maestro's analysis
-reads from the JAR), or a file over 1 MiB, which it names.
+(`GET .../envs/{env}/ci-rules?service=...&versions=1&lockedVersionUid=...`, the lock this run builds) and checks
+the repository's tracked deployment files against them: YAML (Helm values, Kubernetes manifests, compose files),
+Dockerfiles, `.env` files and `.properties` files, each split into lines at CRLF, CR or LF and read past a byte
+order mark. It reads environment variables and their Spring and OTel property names as one name
+(`LOGGING_LEVEL_ROOT` is `logging.level.root`), a Kubernetes `env` entry, a compose `environment` list or map and a
+ConfigMap's or Secret's `data` keys (a one-word variable such as `DEBUG` included), `-D` and `--` arguments on a
+command line and in each element of an exec-form command (`["sh", "-c", "java -D..."]` too),
+`JAVA_TOOL_OPTIONS` / `JAVA_OPTS` / `JDK_JAVA_OPTIONS` / `_JAVA_OPTIONS`, and the JSON in
+`SPRING_APPLICATION_JSON`. A `.properties` line is split into key and value as Java reads it. A Helm template's
+actions are removed before its YAML is read, keeping its line numbers, and a value written as a template, `$VAR` or
+`@name@` fails every test except `any`. It never reads an untracked file, a link, `.git`, `.github`, `node_modules`,
+`target`, `build`, `dist`, `vendor`, `src/test` or `src/main/resources` (the packaged configuration, which
+Maestro's analysis reads from the JAR), or an example env file (`.env.example`, `.env.sample`, `.env.template`); a
+mapping's own paths (below) are read wherever they point, `.git` aside. A file over 1 MiB, one holding a NUL byte,
+and one past 20000 settings or 64 levels of YAML nesting are named, and the rest of the repository is read. The
+repository's own git config cannot run an fsmonitor command during the read.
 
 The rules come from the environment's lock: a level below the lock's floor, a lowered floor, a logs exporter other
 than the lock's, debug switches (Spring's and the agent's), a logging file chosen at deploy, the loggers endpoint
@@ -270,7 +277,7 @@ The environment's CI mode decides the step:
 |---|---|---|
 | Off | not checked | accepted |
 | Warn | reported, the build proceeds | accepted |
-| Fail | the step fails before the upload | refused (`CI_CHECK_REQUIRED`) |
+| Fail | the step fails before the upload | the step fails before the upload outside a git checkout; an older Action's build is refused (`CI_CHECK_REQUIRED`) |
 | Unset, on a production environment | the first checked build records the findings as the baseline; a later build with one not in it fails | accepted |
 
 A warning-severity finding is reported in every mode and never fails the step. A check that lists fewer findings
@@ -296,7 +303,12 @@ services:
 ```
 
 With it, a build checks only the files mapped to its own service and environment, and a `check-only: true` run
-checks every pair it lists and fails after the last if any failed. Without it, every deployment file is checked.
+checks every pair it lists and fails after the last if any failed, counting every pair's findings. A mapping that
+maps no file to the service and environment, or holds an entry whose paths match no tracked file, is named in a
+warning, and fails the check where the mode is Fail or production's default. The file must be tracked, a regular
+file inside the repository and at most 64 KiB, and no service, environment or path in it may hold a control
+character. Without it, every deployment file is checked. A check-only run outside a git checkout fails where the
+mode is Fail or production's default, and is `not-run` otherwise.
 
 ## Troubleshooting
 
@@ -318,10 +330,10 @@ checks every pair it lists and fails after the last if any failed. Without it, e
 | `matched N files` | v0 expects one JAR; narrow the `jars` glob. |
 | `BUILD_LOCK_SUPERSEDED: production environment 'X' builds only from its current lock` | The environment was locked again while the run was in progress, so the build named an older version. Re-run the workflow; it reads the newest lock. |
 | `No uploaded artifact ... to reference for <service>.jar` | A JAR the environment's lock recorded is no longer stored, or its stored bytes differ from the lock's SHA-256 ("... with that SHA-256"). Upload that service again in the wizard and re-lock the environment. |
-| `Log policy check failed for X in Y` | The environment's CI mode fails a build on the findings printed above it; each names its rule, file and line. Fix the setting, or change the environment's CI mode in Maestro. |
+| `Log policy check failed for X in Y` | The environment's CI mode fails a build on the findings printed above it; each names its rule, file and line. Fix the setting, or change the environment's CI mode in Maestro. The same message names the other causes: the workspace is not a git checkout (add `actions/checkout` before the step), or `.maestro/check.yml` maps no tracked file to the service and environment. |
 | `This Action cannot read the log policy rules` | Maestro serves a rule-set version, or a test, this Action release does not read. Move the Action's pin to the latest release. |
 | `CI_CHECK_STALE` | The environment was locked again between the check and the build. Re-run the workflow. |
-| `CI_CHECK_REQUIRED` | The environment fails a build that carries no log policy check: the workspace is not a git checkout, or the Action release predates the check. Check out the repository before the step, and use the latest release. |
+| `CI_CHECK_REQUIRED` | The environment fails a build that carries no log policy check: the Action release predates the check. Use the latest release, which fails the step itself, before the upload, outside a git checkout. |
 | `Job ... still running after Ns` | Raise `timeout-seconds`, or check the job in Maestro. |
 
 ## Runner requirements

@@ -23,8 +23,16 @@ export interface Extracted {
 export type FileKind = 'yaml' | 'dockerfile' | 'env' | 'properties';
 
 
-/** Environment variables whose value is a JVM command line. */
-const JVM_OPTIONS = new Set(['java.tool.options', 'java.opts', 'jdk.java.options']);
+/** Environment variables whose value is a JVM command line; `_JAVA_OPTIONS` folds to `java.options`. */
+const JVM_OPTIONS = new Set(['java.tool.options', 'java.opts', 'jdk.java.options', 'java.options']);
+/** Mapping keys whose children are environment variables, read under their own names. */
+const ENV_KEYS = new Set(['environment', 'env', 'data', 'stringdata']);
+/** The most settings one file gives; past it the file is named and the rest not read. */
+export const SETTINGS_MAX = 20000;
+/** The deepest YAML nesting read; a deeper node is named and not read. */
+export const DEPTH_MAX = 64;
+/** Example env files, which a deployment never reads. */
+const ENV_EXAMPLES = /(^|\.)env\.(example|sample|template)$/;
 /** Sequence keys whose items are a container's command line. */
 const COMMAND_KEYS = new Set(['args', 'command', 'entrypoint', 'cmd']);
 
@@ -36,13 +44,20 @@ export function kindOf(path: string): FileKind | null {
   if (lower === 'dockerfile' || lower === 'containerfile' || lower.endsWith('.dockerfile') || lower.startsWith('dockerfile.')) {
     return 'dockerfile';
   }
+  if (ENV_EXAMPLES.test(lower)) return null;
   if (lower === '.env' || lower.endsWith('.env') || lower.startsWith('.env.')) return 'env';
   if (lower.endsWith('.properties')) return 'properties';
   return null;
 }
 
-export function extract(path: string, text: string, kind: FileKind): Extracted {
+/** A file's lines as the tools that read it split them: at CRLF, a lone CR or LF, and nowhere else. */
+export function lines(text: string): string[] {
+  return text.split(/\r\n|\r|\n/);
+}
+
+export function extract(path: string, raw: string, kind: FileKind): Extracted {
   const out: Extracted = { settings: [], problems: [], origins: 0 };
+  const text = raw.charCodeAt(0) === 0xfeff ? raw.substring(1) : raw;
   switch (kind) {
     case 'yaml':
       yamlSettings(path, text, out);
@@ -51,7 +66,7 @@ export function extract(path: string, text: string, kind: FileKind): Extracted {
       dockerfileSettings(path, text, out);
       break;
     case 'env':
-      for (const { line, key, value } of keyValueLines(text, /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=(.*)$/)) {
+      for (const { line, key, value } of keyValueLines(text, /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=(.*)$/s)) {
         add(out, path, line, key, unquote(value));
       }
       break;
@@ -67,6 +82,12 @@ export function extract(path: string, text: string, kind: FileKind): Extracted {
  * command line or Spring's JSON.
  */
 function add(out: Extracted, path: string, line: number, names: string | string[], value: string): void {
+  if (out.settings.length >= SETTINGS_MAX) {
+    if (!out.problems.some((p) => p.reason.startsWith('more than'))) {
+      out.problems.push({ path, line, reason: `more than ${SETTINGS_MAX} settings, the rest not read` });
+    }
+    return;
+  }
   const origin = out.origins++;
   let expanded = false;
   for (const name of Array.isArray(names) ? names : [names]) {
@@ -98,6 +119,26 @@ export function commandLineSettings(commandLine: string): { name: string; value:
   return out;
 }
 
+/** The setting one argument of an exec-form command passes, read whole: an element is one argument, spaces and all. */
+export function argumentSetting(arg: string): { name: string; value: string } | null {
+  let body: string | null = null;
+  if (arg.startsWith('-D') && arg.length > 2) body = arg.substring(2);
+  else if (arg.startsWith('--') && arg.length > 2) body = arg.substring(2);
+  if (body === null) return null;
+  const eq = body.indexOf('=');
+  return eq < 0 ? { name: body, value: '' } : { name: body.substring(0, eq), value: body.substring(eq + 1) };
+}
+
+/** One element of an exec-form command: an argument when it starts with `-`, else a command line (`sh -c "..."`). */
+function commandElement(element: string, path: string, line: number, out: Extracted): void {
+  if (element.startsWith('-')) {
+    const s = argumentSetting(element);
+    if (s) add(out, path, line, s.name, s.value);
+  } else {
+    commandLine(element, path, line, out);
+  }
+}
+
 function tokens(commandLine: string): string[] {
   const out: string[] = [];
   const re = /"[^"]*"|'[^']*'|[^\s"']+(?:"[^"]*"|'[^']*'|[^\s"']*)*/g;
@@ -105,11 +146,22 @@ function tokens(commandLine: string): string[] {
   return out;
 }
 
+/** Spring's JSON with each placeholder read as a template value, quoted where it stands bare. */
+function springJsonParsed(value: string): unknown {
+  const marked = value.replace(/\$\{[^}]*\}|\{\{[^}]*\}\}/g, '__TEMPLATE__');
+  try {
+    return JSON.parse(marked);
+  } catch {
+    return JSON.parse(value.replace(/"[^"]*"|\$\{[^}]*\}|\{\{[^}]*\}\}/g, (m) => (m.startsWith('"') ? m : '"__TEMPLATE__"'))
+      .replace(/"[^"]*"/g, (m) => m.replace(/\$\{[^}]*\}|\{\{[^}]*\}\}/g, '__TEMPLATE__')));
+  }
+}
+
 function springJson(out: Extracted, path: string, line: number, value: string): void {
-  if (value.trim() === '' || value.includes('${') || value.includes('{{')) return;
+  if (value.trim() === '') return;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(value);
+    parsed = springJsonParsed(value);
   } catch {
     out.problems.push({ path, line, reason: 'SPRING_APPLICATION_JSON is not JSON' });
     return;
@@ -128,9 +180,16 @@ function springJson(out: Extracted, path: string, line: number, value: string): 
 export function untemplated(text: string): string {
   return text
     .split('\n')
-    .map((l) => (/^\s*(?:-\s*)?\{\{.*\}\}\s*$/.test(l) && !/:\s*\{\{/.test(l) ? '' : l))
+    .map((l) => (wholeLineAction(l) ? '' : l))
     .join('\n')
-    .replace(/\{\{[^}]*\}\}/g, '__TEMPLATE__');
+    .replace(/\{\{[^}]*\}\}/g, (m) => '__TEMPLATE__' + '\n'.repeat(m.split('\n').length - 1));
+}
+
+/** A line that is one template action and nothing else, such as `{{- if .Values.x }}` or `- {{ include "x" . }}`. */
+function wholeLineAction(line: string): boolean {
+  let t = line.trim();
+  if (t.startsWith('-') && !t.startsWith('-}}')) t = t.substring(1).trimStart();
+  return t.startsWith('{{') && t.endsWith('}}') && t.indexOf('}}') === t.length - 2 && !t.includes(':');
 }
 
 function yamlSettings(path: string, text: string, out: Extracted): void {
@@ -148,7 +207,7 @@ function yamlSettings(path: string, text: string, out: Extracted): void {
       out.problems.push({ path, line: at, reason: 'not valid YAML' });
       continue;
     }
-    walkYaml(doc.contents as Node | null, [], path, out, lineOf);
+    walkYaml(doc.contents as Node | null, [], path, out, lineOf, 0);
   }
 }
 
@@ -159,7 +218,20 @@ function scalarText(node: unknown): string | null {
   return typeof v === 'object' ? null : String(v);
 }
 
-function walkYaml(node: Node | null, keys: string[], path: string, out: Extracted, lineOf: (n: Node | null | undefined) => number): void {
+function walkYaml(
+  node: Node | null,
+  keys: string[],
+  path: string,
+  out: Extracted,
+  lineOf: (n: Node | null | undefined) => number,
+  depth: number,
+): void {
+  if (depth > DEPTH_MAX) {
+    if (!out.problems.some((p) => p.reason.startsWith('nested deeper'))) {
+      out.problems.push({ path, line: lineOf(node), reason: `nested deeper than ${DEPTH_MAX} levels, not read below` });
+    }
+    return;
+  }
   if (isMap(node)) {
     envEntry(node.items as Pair[], path, out, lineOf);
     for (const pair of node.items as Pair[]) {
@@ -174,21 +246,21 @@ function walkYaml(node: Node | null, keys: string[], path: string, out: Extracte
       } else if (isSeq(value) && COMMAND_KEYS.has(key.toLowerCase())) {
         for (const item of value.items as Node[]) {
           const t = scalarText(item);
-          if (t !== null) commandLine(t, path, lineOf(item), out);
+          if (t !== null) commandElement(t, path, lineOf(item), out);
         }
       } else if (isSeq(value) && key.toLowerCase() === 'environment') {
         for (const item of value.items as Node[]) {
           const t = scalarText(item);
           const eq = t === null ? -1 : t.indexOf('=');
           if (t !== null && eq > 0) add(out, path, lineOf(item), t.substring(0, eq), t.substring(eq + 1));
-          else walkYaml(item, [...keys, key], path, out, lineOf);
+          else walkYaml(item, [...keys, key], path, out, lineOf, depth + 1);
         }
       } else {
-        walkYaml(value, [...keys, key], path, out, lineOf);
+        walkYaml(value, [...keys, key], path, out, lineOf, depth + 1);
       }
     }
   } else if (isSeq(node)) {
-    for (const item of node.items as Node[]) walkYaml(item, keys, path, out, lineOf);
+    for (const item of node.items as Node[]) walkYaml(item, keys, path, out, lineOf, depth + 1);
   }
 }
 
@@ -218,7 +290,8 @@ export function keyPathNames(keys: string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < keys.length; i++) {
     const name = keys.slice(i).join('.');
-    if (i === 0 || fold(name).split('.').filter((s) => s !== '').length >= 2) out.push(name);
+    const envChild = i === keys.length - 1 && i > 0 && ENV_KEYS.has(keys[i - 1].toLowerCase());
+    if (i === 0 || envChild || fold(name).split('.').filter((s) => s !== '').length >= 2) out.push(name);
   }
   return out;
 }
@@ -228,14 +301,17 @@ function commandLine(text: string, path: string, line: number, out: Extracted): 
 }
 
 function dockerfileSettings(path: string, text: string, out: Extracted): void {
-  const physical = text.split('\n');
+  const physical = lines(text);
   for (let i = 0; i < physical.length; i++) {
     const start = i + 1;
-    let logical = physical[i];
-    while (/\\\s*$/.test(logical) && i + 1 < physical.length) {
-      logical = logical.replace(/\\\s*$/, ' ') + physical[++i];
+    const parts = [physical[i]];
+    while (parts[parts.length - 1].trimEnd().endsWith('\\') && i + 1 < physical.length) {
+      const last = parts[parts.length - 1].trimEnd();
+      parts[parts.length - 1] = last.substring(0, last.length - 1) + ' ';
+      parts.push(physical[++i]);
     }
-    const m = /^\s*(ENV|CMD|ENTRYPOINT)\s+(.*)$/i.exec(logical);
+    const logical = parts.join('');
+    const m = /^\s*(ENV|CMD|ENTRYPOINT)\s(.*)$/is.exec(logical);
     if (!m) continue;
     const instruction = m[1].toUpperCase();
     const rest = m[2].trim();
@@ -249,45 +325,81 @@ function dockerfileSettings(path: string, text: string, out: Extracted): void {
         const sp = rest.search(/\s/);
         if (sp > 0) add(out, path, start, rest.substring(0, sp), unquote(rest.substring(sp + 1).trim()));
       }
-    } else {
-      let line = rest;
-      if (rest.startsWith('[')) {
-        try {
-          const parts = JSON.parse(rest);
-          if (Array.isArray(parts)) line = parts.map((p) => `'${String(p).replace(/'/g, '')}'`).join(' ');
-        } catch {
-          out.problems.push({ path, line: start, reason: `${instruction} is not a JSON array` });
-          continue;
-        }
+    } else if (rest.startsWith('[')) {
+      let elements: unknown;
+      try {
+        elements = JSON.parse(rest);
+      } catch {
+        elements = null;
       }
-      commandLine(line, path, start, out);
+      if (!Array.isArray(elements)) {
+        out.problems.push({ path, line: start, reason: `${instruction} is not a JSON array` });
+        continue;
+      }
+      for (const e of elements) commandElement(String(e), path, start, out);
+    } else {
+      commandLine(rest, path, start, out);
     }
   }
 }
 
 function keyValueLines(text: string, re: RegExp): { line: number; key: string; value: string }[] {
   const out: { line: number; key: string; value: string }[] = [];
-  text.split('\n').forEach((l, i) => {
+  lines(text).forEach((l, i) => {
     if (/^\s*#/.test(l)) return;
-    const m = re.exec(l.replace(/\r$/, ''));
+    const m = re.exec(l);
     if (m) out.push({ line: i + 1, key: m[1], value: m[2].trim() });
   });
   return out;
 }
 
+/** True when a properties line ends in an odd run of backslashes, which continues it on the next line. */
+function continues(line: string): boolean {
+  let n = 0;
+  for (let i = line.length - 1; i >= 0 && line[i] === '\\'; i--) n++;
+  return n % 2 === 1;
+}
+
+const PROPERTY_SPACE = new Set([' ', '\t', '\f']);
+
+/**
+ * One logical properties line as java.util.Properties reads it: the key ends at the first unescaped `=`, `:` or
+ * space, and one `=` or `:` after the spaces that follow it is part of the separator.
+ */
+export function property(logical: string): { key: string; value: string } {
+  let i = 0;
+  while (i < logical.length && PROPERTY_SPACE.has(logical[i])) i++;
+  let key = '';
+  for (; i < logical.length; i++) {
+    const c = logical[i];
+    if (c === '\\' && i + 1 < logical.length) {
+      key += logical[++i];
+      continue;
+    }
+    if (c === '=' || c === ':' || PROPERTY_SPACE.has(c)) break;
+    key += c;
+  }
+  while (i < logical.length && PROPERTY_SPACE.has(logical[i])) i++;
+  if (i < logical.length && (logical[i] === '=' || logical[i] === ':')) {
+    i++;
+    while (i < logical.length && PROPERTY_SPACE.has(logical[i])) i++;
+  }
+  return { key, value: logical.substring(i).trim() };
+}
+
 function propertiesLines(text: string): { line: number; key: string; value: string }[] {
   const out: { line: number; key: string; value: string }[] = [];
-  const physical = text.replace(/^﻿/, '').split('\n');
+  const physical = lines(text);
   for (let i = 0; i < physical.length; i++) {
     const start = i + 1;
-    let logical = physical[i].replace(/\r$/, '');
-    if (/^\s*[#!]/.test(logical) || logical.trim() === '') continue;
-    while (/(^|[^\\])(\\\\)*\\$/.test(logical) && i + 1 < physical.length) {
-      logical = logical.slice(0, -1) + physical[++i].replace(/\r$/, '').trimStart();
+    if (/^[ \t\f]*[#!]/.test(physical[i]) || physical[i].trim() === '') continue;
+    const parts = [physical[i]];
+    while (continues(parts[parts.length - 1]) && i + 1 < physical.length) {
+      parts[parts.length - 1] = parts[parts.length - 1].slice(0, -1);
+      parts.push(physical[++i].replace(/^[ \t\f]+/, ''));
     }
-    const m = /^\s*((?:\\.|[^=:\s\\])+)\s*[=:\s]\s*(.*)$/.exec(logical);
-    if (m) out.push({ line: start, key: m[1].replace(/\\(.)/g, '$1'), value: m[2].trim() });
-    else out.push({ line: start, key: logical.trim(), value: '' });
+    const { key, value } = property(parts.join(''));
+    if (key !== '') out.push({ line: start, key, value });
   }
   return out;
 }

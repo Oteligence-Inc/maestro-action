@@ -18,7 +18,15 @@ export const FILE_MAX_BYTES = 1024 * 1024;
 /** Where a repository says which of its files deploy which service to which environment. */
 export const MAPPING_FILE = '.maestro/check.yml';
 
-/** Paths a deployment check never reads: tooling, build output, tests, and the packaged configuration the analysis reads. */
+/** The largest mapping file read. */
+export const MAPPING_MAX_BYTES = 64 * 1024;
+
+/** Paths a check never reads, even when a mapping names them. */
+const NEVER_READ = /(^|\/)\.git\//;
+/**
+ * Paths a check without a mapping does not read: tooling, build output, tests, and the packaged configuration the
+ * analysis reads. A mapping's own globs are read wherever they point.
+ */
 const SKIPPED = [
   /(^|\/)\.git\//,
   /(^|\/)\.github\//,
@@ -53,6 +61,31 @@ export interface Verdict {
   reason: string | null;
 }
 
+/** One service's check as run: its outcome, the result a build carries (null when none ran), and why it failed. */
+export interface CheckRun {
+  outcome: 'passed' | 'warned' | 'failed' | 'off' | 'not-run';
+  result: CheckResult | null;
+  reason: string | null;
+}
+
+/** The repository as a check reads it: its tracked files (null outside a git checkout) and its mapping. */
+export interface Repo {
+  files: string[] | null;
+  mapping: MappingEntry[] | null;
+}
+
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+const CONTROLS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
+
+/** Text for the log with its control characters shown as `?`, so a value cannot start a workflow command. */
+export function printable(text: string): string {
+  return text.replace(CONTROLS, '?');
+}
+
+function enforcing(mode: string): boolean {
+  return mode === 'FAIL' || mode === 'FAIL_ON_NEW';
+}
+
 export interface Scan {
   settings: SourcedSetting[];
   problems: Problem[];
@@ -71,12 +104,29 @@ export function fingerprint(f: { rule: string; name: string; path: string }): st
 }
 
 /** GET .../envs/{env}/ci-rules for one service, at the one version this Action reads. */
-export async function fetchRules(api: MaestroApi, projectUid: string, environment: string, service: string): Promise<ServedRules> {
+export async function fetchRules(
+  api: MaestroApi,
+  projectUid: string,
+  environment: string,
+  service: string,
+  lockedVersionUid?: string,
+): Promise<ServedRules> {
+  const lock = lockedVersionUid ? `&lockedVersionUid=${encodeURIComponent(lockedVersionUid)}` : '';
   const res = await api.get<{ data?: Record<string, unknown> }>(
-    `${envPath(projectUid, environment)}/ci-rules?service=${encodeURIComponent(service)}&versions=${VERSION}`,
+    `${envPath(projectUid, environment)}/ci-rules?service=${encodeURIComponent(service)}&versions=${VERSION}${lock}`,
   );
   if (res.statusCode === 404) {
-    throw new UserError(`Env "${environment}" was not found, so its log policy rules cannot be read.`);
+    const code = (res.body as { data?: { code?: unknown } } | undefined)?.data?.code;
+    if (code === 'ci_rules_service_unknown') {
+      throw new UserError(
+        `The locked analysis of "${printable(environment)}" holds no service named "${printable(service)}", so its log ` +
+          'policy rules cannot be read. Use the name the environment lists it under.',
+      );
+    }
+    if (code === 'ci_rules_lock_unknown') {
+      throw new UserError(`Env "${printable(environment)}" holds no lock by the uid this run builds; run the workflow again.`);
+    }
+    throw new UserError(`Env "${printable(environment)}" was not found, so its log policy rules cannot be read.`);
   }
   expectOk(res, 'ci-rules');
   const data = res.body?.data;
@@ -91,7 +141,11 @@ export async function fetchRules(api: MaestroApi, projectUid: string, environmen
 /** The repository's tracked files, `/`-separated and relative to its root. */
 export function trackedFiles(root: string): string[] | null {
   try {
-    const out = execFileSync('git', ['-C', root, 'ls-files', '-z'], { maxBuffer: 64 * 1024 * 1024 });
+    // A repository's own config can name an fsmonitor command, which git would run; this read runs none.
+    const out = execFileSync('git', ['-c', 'core.fsmonitor=false', '-C', root, 'ls-files', '-z'], {
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
     return out.toString('utf8').split('\0').filter((p) => p !== '');
   } catch {
     return null;
@@ -105,7 +159,11 @@ export function sendablePath(p: string): boolean {
   return !/[\u0000-\u001f\u007f]/.test(p);
 }
 
-export function readMapping(root: string): MappingEntry[] | null {
+/**
+ * The repository's `.maestro/check.yml`, or null when it has none. The file must be tracked, a regular file inside the
+ * root and at most {@link MAPPING_MAX_BYTES}; a service, environment or path in it may not hold a control character.
+ */
+export function readMapping(root: string, tracked: string[]): MappingEntry[] | null {
   const file = path.join(root, MAPPING_FILE);
   let stat: fs.Stats;
   try {
@@ -113,10 +171,17 @@ export function readMapping(root: string): MappingEntry[] | null {
   } catch {
     return null;
   }
+  if (!tracked.includes(MAPPING_FILE)) {
+    throw new UserError(`${MAPPING_FILE} is not tracked; commit it, since the check reads tracked files only.`);
+  }
   if (!stat.isFile()) throw new UserError(`${MAPPING_FILE} is not a regular file.`);
+  if (!fs.realpathSync(file).startsWith(fs.realpathSync(root) + path.sep)) {
+    throw new UserError(`${MAPPING_FILE} is not inside the repository.`);
+  }
+  if (stat.size > MAPPING_MAX_BYTES) throw new UserError(`${MAPPING_FILE} is larger than ${MAPPING_MAX_BYTES} bytes.`);
   let doc: unknown;
   try {
-    doc = parseYaml(fs.readFileSync(file, 'utf8'));
+    doc = parseYaml(fs.readFileSync(file, 'utf8'), { logLevel: 'silent' });
   } catch {
     throw new UserError(`${MAPPING_FILE} is not valid YAML.`);
   }
@@ -135,8 +200,17 @@ export function readMapping(root: string): MappingEntry[] | null {
     ) {
       throw new UserError(`${MAPPING_FILE}: entry ${i + 1} needs service, environment and a list of paths.`);
     }
+    if ([entry.service, entry.environment, ...entry.paths].some((t) => CONTROL.test(t))) {
+      throw new UserError(`${MAPPING_FILE}: entry ${i + 1} holds a control character.`);
+    }
     return { service: entry.service, environment: entry.environment, paths: entry.paths };
   });
+}
+
+/** The repository's tracked files and its mapping. */
+export function readRepo(root: string): Repo {
+  const files = trackedFiles(root);
+  return { files, mapping: files === null ? null : readMapping(root, files) };
 }
 
 /** The files the mapping assigns to one service and environment, or every file when there is no mapping. */
@@ -147,13 +221,13 @@ export function filesFor(files: string[], mapping: MappingEntry[] | null, servic
 }
 
 /** Reads the deployment files among `files`: regular files only, inside the root, never a link. */
-export function scan(root: string, files: string[]): Scan {
+export function scan(root: string, files: string[], mapped = false): Scan {
   const result: Scan = { settings: [], problems: [], read: 0, leftOut: 0 };
   const realRoot = fs.realpathSync(root);
   let origins = 0;
   for (const rel of files) {
     const kind = kindOf(rel);
-    if (!kind || SKIPPED.some((re) => re.test(rel))) continue;
+    if (!kind || NEVER_READ.test(rel) || (!mapped && SKIPPED.some((re) => re.test(rel)))) continue;
     if (!sendablePath(rel)) {
       result.leftOut++;
       continue;
@@ -173,7 +247,10 @@ export function scan(root: string, files: string[]): Scan {
       continue;
     }
     const bytes = fs.readFileSync(abs);
-    if (bytes.includes(0)) continue;
+    if (bytes.includes(0)) {
+      result.problems.push({ path: rel, line: 1, reason: 'holds a NUL byte, not read' });
+      continue;
+    }
     const found = extract(rel, bytes.toString('utf8'), kind);
     result.read++;
     for (const s of found.settings) result.settings.push({ ...s, origin: origins + s.origin });
@@ -281,9 +358,83 @@ export function casesDigestOfFile(file: string): string {
 }
 
 /**
- * Runs the environment's log policy check over the repository's deployment files for one service. Returns the result
- * a build carries, or null when the environment's check is off or the workspace is not a git checkout. Throws when
- * the environment's mode fails the build, before anything is uploaded.
+ * Runs the environment's log policy check over the repository's deployment files for one service, and reports its
+ * findings. A failed check is returned, not thrown. With no git checkout the check cannot run: that fails where the
+ * environment refuses a build with no check (`FAIL`), and in a check-only run in either enforcing mode. A mapping that
+ * maps no file to the service and environment warns, and fails where the mode enforces.
+ */
+export async function runCheck(
+  api: MaestroApi,
+  projectUid: string,
+  environment: string,
+  service: string,
+  root: string,
+  repo: Repo,
+  opts: { checkOnly: boolean; lockedVersionUid?: string },
+): Promise<CheckRun> {
+  const who = `${printable(service)} in ${printable(environment)}`;
+  const served = await fetchRules(api, projectUid, environment, service, opts.lockedVersionUid);
+  const mode = served.ruleSet.mode;
+  if (mode === 'OFF') {
+    core.info(`Log policy check: off for ${printable(environment)}.`);
+    return { outcome: 'off', result: null, reason: null };
+  }
+  if (served.casesDigest && CASES_DIGEST && served.casesDigest !== CASES_DIGEST) {
+    core.warning(
+      'This Action was tested against another copy of the log policy rules than the platform holds. Update the Maestro Action.',
+    );
+  }
+  if (repo.files === null) {
+    const refused = mode === 'FAIL' || (opts.checkOnly && enforcing(mode));
+    const why = 'the workspace is not a git checkout, and the check reads tracked files only';
+    if (refused) {
+      return {
+        outcome: 'failed',
+        result: null,
+        reason: `${why}; the environment's mode ${mode} needs the check, so check out the repository before this step`,
+      };
+    }
+    core.warning(`Log policy check not run for ${who}: ${why}.`);
+    return { outcome: 'not-run', result: null, reason: null };
+  }
+  let mine = repo.files;
+  if (repo.mapping) {
+    const entries = repo.mapping.filter((e) => e.service === service && e.environment === environment);
+    const empty = entries.length === 0
+      ? `${MAPPING_FILE} maps no files to ${who}`
+      : entries
+          .map((e, i) => (filesFor(repo.files ?? [], [e], service, environment).length === 0 ? i + 1 : 0))
+          .filter((n) => n > 0)
+          .map((n) => `${MAPPING_FILE} entry ${n} for ${who} matches no tracked file`)
+          .join('; ');
+    if (empty) {
+      if (enforcing(mode)) return { outcome: 'failed', result: null, reason: empty };
+      core.warning(`Log policy check: ${empty}.`);
+    }
+    mine = filesFor(repo.files, entries, service, environment);
+  }
+  const read = scan(root, mine, repo.mapping !== null);
+  const findings = findingsOf(served.ruleSet, read.settings);
+  const result = checkResult(service, served.ruleSet, findings);
+  const decided = verdict(mode, findings, result.total, served.baseline);
+  report(findings, read.problems);
+  const errors = findings.filter((f) => f.severity === 'error').length;
+  const scope = repo.mapping ? ` (the files ${MAPPING_FILE} maps to ${who})` : '';
+  const line =
+    `Log policy check for ${who}: ${read.read} deployment file(s) read${scope}, ` +
+    `${result.total} finding(s), ${errors} error(s); mode ${mode}` +
+    (decided.newFindings !== null ? `, ${decided.newFindings} new since the first checked build` : '') +
+    (served.baseline === null && mode === 'FAIL_ON_NEW' ? ', no baseline yet: this build records it' : '') +
+    (read.leftOut > 0 ? `; ${read.leftOut} file(s) left out for their path` : '') +
+    '.';
+  core.info(line);
+  await summarize(`Maestro log policy: ${who}`, findings, line);
+  return { outcome: decided.outcome, result, reason: decided.reason ? `${decided.reason}. Each finding above names its rule, file and line` : null };
+}
+
+/**
+ * The check a build runs before its upload: returns the result the build carries, or null when none ran, and throws
+ * when the environment's mode fails the build, before anything is uploaded.
  */
 export async function logPolicyCheck(
   api: MaestroApi,
@@ -291,47 +442,16 @@ export async function logPolicyCheck(
   environment: string,
   service: string,
   root: string,
-  mapping: MappingEntry[] | null,
+  lockedVersionUid?: string,
 ): Promise<CheckResult | null> {
-  const served = await fetchRules(api, projectUid, environment, service);
-  const mode = served.ruleSet.mode;
-  if (mode === 'OFF') {
-    core.info(`Log policy check: off for ${environment}.`);
-    core.setOutput('log-policy-check', 'off');
-    return null;
+  const run = await runCheck(api, projectUid, environment, service, root, readRepo(root), {
+    checkOnly: false,
+    lockedVersionUid,
+  });
+  core.setOutput('log-policy-check', run.outcome);
+  core.setOutput('log-policy-findings', String(run.result?.total ?? 0));
+  if (run.outcome === 'failed') {
+    throw new UserError(`Log policy check failed for ${printable(service)} in ${printable(environment)}: ${run.reason}.`);
   }
-  if (served.casesDigest && CASES_DIGEST && served.casesDigest !== CASES_DIGEST) {
-    core.warning(
-      'This Action was tested against another copy of the log policy rules than the platform holds. Update the Maestro Action.',
-    );
-  }
-  const files = trackedFiles(root);
-  if (files === null) {
-    core.warning('Log policy check not run: the workspace is not a git checkout, and the check reads tracked files only.');
-    core.setOutput('log-policy-check', 'not-run');
-    return null;
-  }
-  const mine = filesFor(files, mapping, service, environment);
-  const read = scan(root, mine);
-  const findings = findingsOf(served.ruleSet, read.settings);
-  const result = checkResult(service, served.ruleSet, findings);
-  const decided = verdict(mode, findings, result.total, served.baseline);
-  report(findings, read.problems);
-  const errors = findings.filter((f) => f.severity === 'error').length;
-  const scope = mapping ? ` (the files ${MAPPING_FILE} maps to ${service} in ${environment})` : '';
-  const line =
-    `Log policy check for ${service} in ${environment}: ${read.read} deployment file(s) read${scope}, ` +
-    `${result.total} finding(s), ${errors} error(s); mode ${mode}` +
-    (decided.newFindings !== null ? `, ${decided.newFindings} new since the first checked build` : '') +
-    (served.baseline === null && mode === 'FAIL_ON_NEW' ? ', no baseline yet: this build records it' : '') +
-    (read.leftOut > 0 ? `; ${read.leftOut} file(s) left out for their path` : '') +
-    '.';
-  core.info(line);
-  core.setOutput('log-policy-check', decided.outcome);
-  core.setOutput('log-policy-findings', String(result.total));
-  await summarize(`Maestro log policy: ${service} in ${environment}`, findings, line);
-  if (decided.outcome === 'failed') {
-    throw new UserError(`Log policy check failed for ${service} in ${environment}: ${decided.reason}. Each finding above names its rule, file and line.`);
-  }
-  return result;
+  return run.result;
 }

@@ -1,4 +1,14 @@
-import { commandLineSettings, extract, keyPathNames, kindOf, untemplated } from '../../src/logPolicy/extract';
+import {
+  DEPTH_MAX,
+  SETTINGS_MAX,
+  argumentSetting,
+  commandLineSettings,
+  extract,
+  keyPathNames,
+  kindOf,
+  property,
+  untemplated,
+} from '../../src/logPolicy/extract';
 import { NAME, RuleSet } from '../../src/ciRules';
 import { findingsOf } from '../../src/steps/ciCheck';
 import cases from '../fixtures/ci-rules/evaluation-cases.json';
@@ -212,5 +222,149 @@ describe('.properties files', () => {
       'logging.level.b=WARN@5',
       'logging.config=/etc/log.xml@6',
     ]);
+  });
+});
+
+describe('lines, as the tools that read the files split them', () => {
+  const LS = String.fromCharCode(0x2028);
+
+  it('splits at CRLF, a lone CR and LF', () => {
+    expect(names('A=1\r\nLOGGING_LEVEL_ROOT=DEBUG\rDEBUG=true\nB=2', 'env')).toEqual([
+      'a=1@1',
+      'logging.level.root=DEBUG@2',
+      'debug=true@3',
+      'b=2@4',
+    ]);
+    expect(names('a=1\rlogging.level.root=DEBUG\r\n', 'properties')).toEqual(['a=1@1', 'logging.level.root=DEBUG@2']);
+    expect(names('FROM x\rENV DEBUG=true\r\n', 'dockerfile')).toEqual(['debug=true@2']);
+  });
+
+  it('keeps a line separator inside a value, rather than losing the line', () => {
+    expect(names(`LOGGING_LEVEL_ROOT=DEBUG${LS}x\n`, 'env')).toEqual([`logging.level.root=DEBUG${LS}x@1`]);
+    expect(names(`ENV LOGGING_LEVEL_ROOT=DEBUG${LS}x\n`, 'dockerfile').length).toBe(1);
+  });
+
+  it('reads a file that starts with a byte order mark', () => {
+    const bom = String.fromCharCode(0xfeff);
+    expect(names(`${bom}DEBUG=true\n`, 'env')).toEqual(['debug=true@1']);
+    expect(names(`${bom}ENV DEBUG=true\n`, 'dockerfile')).toEqual(['debug=true@1']);
+    expect(names(`${bom}logging.level.root=DEBUG\n`, 'properties')).toEqual(['logging.level.root=DEBUG@1']);
+  });
+});
+
+describe('a properties line, as java.util.Properties reads it', () => {
+  it.each([
+    ['logging.level.root=DEBUG', 'logging.level.root', 'DEBUG'],
+    ['logging.level.root : DEBUG', 'logging.level.root', 'DEBUG'],
+    ['logging.level.root DEBUG', 'logging.level.root', 'DEBUG'],
+    ['logging.level.root   =   DEBUG', 'logging.level.root', 'DEBUG'],
+    ['a\\:b=c', 'a:b', 'c'],
+    ['a\\ b=c', 'a b', 'c'],
+    ['debug', 'debug', ''],
+    ['password hunter2 more', 'password', 'hunter2 more'],
+    ['k==v', 'k', '=v'],
+  ])('reads %s as key %s', (line, key, value) => {
+    expect(property(line)).toEqual({ key, value });
+  });
+
+  it('never takes a whole line as a key, so a value never reaches a name', () => {
+    expect(names('spring.datasource.password hunter2\n', 'properties')).toEqual(['spring.datasource.password=hunter2@1']);
+    const ls = String.fromCharCode(0x2028);
+    const out = extract('a.properties', `otel.exporter.otlp.headers=Authorization=Bearer hunter2${ls}x\n`, 'properties');
+    expect(out.settings.map((x) => x.name)).toEqual(['otel.exporter.otlp.headers']);
+  });
+
+  it('continues a line on an odd run of backslashes only', () => {
+    expect(names('a=x\\\\\nlogging.level.root=DEBUG\n', 'properties')).toEqual(['a=x\\\\@1', 'logging.level.root=DEBUG@2']);
+    expect(names('a=x\\\nlogging.level.root=DEBUG\n', 'properties')).toEqual(['a=xlogging.level.root=DEBUG@1']);
+  });
+});
+
+describe('exec-form commands', () => {
+  it("reads a shell command line inside a CMD's elements", () => {
+    expect(names('CMD ["sh", "-c", "java -Dlogging.level.root=DEBUG -jar app.jar"]\n', 'dockerfile')).toEqual([
+      'logging.level.root=DEBUG@1',
+    ]);
+  });
+
+  it('reads an element that is one argument whole, spaces and all', () => {
+    expect(names('ENTRYPOINT ["java", "-Dspring.profiles.active=a b", "-jar", "x.jar"]\n', 'dockerfile')).toEqual([
+      'spring.profiles.active=a b@1',
+    ]);
+    expect(argumentSetting('--debug')).toEqual({ name: 'debug', value: '' });
+    expect(argumentSetting('java')).toBeNull();
+  });
+
+  it("reads a container's command list the same way", () => {
+    expect(names('command: ["sh", "-c", "java -Dlogging.level.root=DEBUG -jar app.jar"]\n', 'yaml')).toContain(
+      'logging.level.root=DEBUG@1',
+    );
+  });
+});
+
+describe('environment maps', () => {
+  it.each(['environment', 'env', 'data', 'stringData'])('reads a one-word variable under %s', (key) => {
+    expect(names(`x:\n  ${key}:\n    DEBUG: "true"\n`, 'yaml')).toContain('debug=true@3');
+  });
+
+  it("still does not read a lone debug key under another tool's key", () => {
+    expect(names('tool:\n  debug: true\n', 'yaml')).not.toContain('debug=true@2');
+    expect(keyPathNames(['services', 'api', 'environment', 'DEBUG'])).toContain('DEBUG');
+  });
+});
+
+describe('Helm templates', () => {
+  it('keeps line numbers past an action that spans lines', () => {
+    const text = 'a: {{ include "x"\n  . }}\nlogging:\n  level:\n    root: DEBUG\n';
+    expect(untemplated(text).split('\n')).toHaveLength(text.split('\n').length);
+    expect(names(text, 'yaml')).toContain('logging.level.root=DEBUG@5');
+  });
+
+  it('removes a whole-line action, and keeps a key whose value is one', () => {
+    expect(untemplated('{{- if .Values.x }}\n- {{ include "y" . }}\nk: {{ .Values.k }}\n')).toBe('\n\nk: __TEMPLATE__\n');
+  });
+
+  it('reads a long run of spaces before a line separator in linear time', () => {
+    const ls = String.fromCharCode(0x2028);
+    const started = Date.now();
+    extract('a.properties', 'a' + ' '.repeat(2000) + 'b' + ls + 'c\n', 'properties');
+    extract('Dockerfile', 'ENV' + ' '.repeat(30000) + 'b' + ls + 'c\n', 'dockerfile');
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+});
+
+describe('JVM options and Spring JSON', () => {
+  it('reads _JAVA_OPTIONS as a JVM command line', () => {
+    expect(names('_JAVA_OPTIONS=-Dlogging.level.root=DEBUG\n', 'env')).toContain('logging.level.root=DEBUG@1');
+  });
+
+  it('reads the rest of SPRING_APPLICATION_JSON around a placeholder', () => {
+    expect(names('SPRING_APPLICATION_JSON={"logging.level.root":"DEBUG","x":"${X}"}\n', 'env')).toContain(
+      'logging.level.root=DEBUG@1',
+    );
+    expect(names('SPRING_APPLICATION_JSON={"n":${N},"logging.level.root":"DEBUG"}\n', 'env')).toContain(
+      'logging.level.root=DEBUG@1',
+    );
+  });
+});
+
+describe('bounds', () => {
+  it('does not read an example env file', () => {
+    for (const p of ['.env.example', '.env.sample', '.env.template', 'deploy/prod.env.example']) expect(kindOf(p)).toBeNull();
+  });
+
+  it('names a file past the settings bound and reads up to it', () => {
+    const out = extract('big.env', 'A=1\n'.repeat(SETTINGS_MAX + 5), 'env');
+    expect(out.settings).toHaveLength(SETTINGS_MAX);
+    expect(out.problems).toEqual([{ path: 'big.env', line: SETTINGS_MAX + 1, reason: expect.stringContaining('more than') }]);
+  });
+
+  it('names YAML nested past the depth bound, and reads what is above it', () => {
+    let text = 'debug: "true"\n';
+    for (let i = 0; i < DEPTH_MAX + 5; i++) text += `${'  '.repeat(i)}k${i}:\n`;
+    text += `${'  '.repeat(DEPTH_MAX + 5)}v: 1\n`;
+    const out = extract('deep.yaml', text, 'yaml');
+    expect(out.problems.map((p) => p.reason)).toEqual([expect.stringContaining('nested deeper')]);
+    expect(out.settings.map((s) => s.name)).toContain('debug');
   });
 });

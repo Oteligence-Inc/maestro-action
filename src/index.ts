@@ -13,7 +13,7 @@ import { registerJarForEnv } from './steps/register';
 import { warnStalePeers } from './steps/staleness';
 import { reportDrift } from './steps/drift';
 import { reportDeployRun } from './steps/reportDeployRun';
-import { logPolicyCheck, readMapping } from './steps/ciCheck';
+import { logPolicyCheck } from './steps/ciCheck';
 import { checkOnly } from './steps/checkOnly';
 import { formatError, RemovedServiceError, SubscriptionInactiveError } from './util/errors';
 import { Inputs } from './types';
@@ -61,7 +61,7 @@ export async function run(): Promise<void> {
 
     // [2c] Before the upload, so a build the environment's log policy refuses costs no analysis.
     const root = workspace();
-    const ciCheck = await logPolicyCheck(api, projectUid, inputs.environment, inputs.service, root, readMapping(root));
+    const ciCheck = await logPolicyCheck(api, projectUid, inputs.environment, inputs.service, root, cfg.lockedVersionUid);
 
     const upload = await uploadJar(api, inputs, cfg); // [3-5]
 
