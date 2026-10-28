@@ -65,9 +65,9 @@ the app image.
 | `project` | one of `project` / `project-id` | none | Project name (e.g. `banking-app`) or `proj_` UID. |
 | `project-id` | one of `project` / `project-id` | none | Project UID. Wins over `project` when both are set; a name that disagrees is warned about and ignored. |
 | `org-id` | no | none | The id of the organization to act for (`org_...` on hosted SaaS, a UUID on a private-cloud VM). Needed only when the API key is not scoped to a project and its owner belongs to several organizations; the token exchange refuses such a key without it. |
-| `service` | yes | none | The name the environment registers this service under: the analysis's name for the JAR (its `spring.application.name`, else the JAR's file name without its version), or, for one of two JARs that share that name, the file-derived name the wizard registered it under. A run whose input the environment's latest lock does not register fails and lists the names it does. A run warns when the analysis keys the JAR differently from the key the lock recorded for the registration (the build may then carry none of its locked methods), or, under a lock that recorded none, when the analysis names it differently. |
-| `environment` | yes | none | Target env: `dev` / `staging` / `prod` / custom. |
-| `jars` | yes | none | Glob to the JAR (e.g. `target/*.jar`). v0 expects exactly one match. |
+| `service` | yes, except for `check-only` with a `.maestro/check.yml` | none | The name the environment registers this service under: the analysis's name for the JAR (its `spring.application.name`, else the JAR's file name without its version), or, for one of two JARs that share that name, the file-derived name the wizard registered it under. A run whose input the environment's latest lock does not register fails and lists the names it does. A run warns when the analysis keys the JAR differently from the key the lock recorded for the registration (the build may then carry none of its locked methods), or, under a lock that recorded none, when the analysis names it differently. |
+| `environment` | yes, except for `check-only` with a `.maestro/check.yml` | none | Target env: `dev` / `staging` / `prod` / custom. |
+| `jars` | yes, except for `check-only` | none | Glob to the JAR (e.g. `target/*.jar`). v0 expects exactly one match. |
 | `api-url` | yes | | The Maestro API this run talks to: `https://prod.api.oteligence.com` for hosted Maestro, or your private-cloud install's address. It must be `https://` in every case; a private-cloud install serves plain HTTP out of the box, so put a TLS terminator in front of it. The storage URLs it signs for uploads and downloads must be `https://` too. A host outside `*.oteligence.com` must also be named in `trusted-api-host`. |
 | `trusted-api-host` | no | | A private-cloud install's API hostname, such as `maestro.example.internal`: no scheme, port or path. The Action then accepts `api-url` on that host and refuses every other, an `*.oteligence.com` host included. Leave it unset for hosted Maestro. |
 | `timeout-seconds` | no | `300` | Max wait for each Maestro job. |
@@ -75,13 +75,14 @@ the app image.
 | `skip-generate-on-inactive` | no | `false` | When the subscription is inactive (402), skip generation, set `generated` to `false` and let the pipeline continue without a new extension, instead of failing the step. |
 | `skip-on-removed-service` | no | `false` | When this service is no longer in the environment's lock, skip generation, set `generated` to `false` and let the pipeline continue, instead of failing the step. Off, a removed or mistyped service fails with a message. |
 | `signing-public-key` | no | | The Ed25519 public key your Maestro platform signs builds with: its PEM, or the base64 of its X.509 SubjectPublicKeyInfo. Set, the step fails unless the build carries a statement this key signed (see *Verifying the download*). Unset, a signed build is reported as `not-checked` and an unsigned one as `unsigned`. Take it from your own records, for example a repository variable, never from the Maestro server; a private key is refused. |
+| `check-only` | no | `false` | `true` runs only the log policy check (below) over the repository's tracked deployment files and stops: nothing is uploaded, analysed or built, and `generated` is `false`. With a `.maestro/check.yml`, every service and environment it lists is checked against the files it maps to them. |
 | `require-signed-build` | no | `false` | `true` fails the step when `signing-public-key` is empty. A workflow variable that is missing in a repository, fork or environment reads as empty, which would otherwise switch the signature check off. |
 
 ## Outputs
 
 | Output | Description |
 |---|---|
-| `generated` | `true` when the build ran and its bundle was extracted. `false` when generation was skipped: the subscription is inactive and `skip-generate-on-inactive` is set, or the service is not in the lock and `skip-on-removed-service` is set. When `false`, `extension-dir`, `config-path` and `collector-config-path` are empty. |
+| `generated` | `true` when the build ran and its bundle was extracted. `false` when generation was skipped: the subscription is inactive and `skip-generate-on-inactive` is set, the service is not in the lock and `skip-on-removed-service` is set, or the run is `check-only`. When `false`, `extension-dir`, `config-path` and `collector-config-path` are empty. |
 | `extension-dir` | Local dir with the extracted build bundle: the extension JARs and configs, and each extension JAR's generated Java source under `sources/<JAR name without .jar>/`, by package (the agent loads only the `*.jar` files directly in the folder, so the sources do not reach it). It holds every service's extension JAR and config, and no OTel agent JAR: download the upstream agent for the OTel version picked in the wizard. A JAR is named `{service}-{env}-extension.jar`: the service lower-cased, spaces and any character other than a-z, 0-9 or `-` turned into `-`, and one trailing `-service`, `-svc`, `-api` or `-svr` removed; the env the same way with repeated hyphens collapsed. So `fund-transfer-service` in `prod` is `fund-transfer-prod-extension.jar`. When two services reduce to the same name, the second gets `-extension-2.jar`. Empty when `generated` is `false`. |
 | `config-path` | This service's `javaagent.config` from the build. Empty, with a warning, when the lock selects none of its methods or its name matches more than one service. |
 | `collector-config-path` | Resolved collector config (deploy to your Collector). |
@@ -89,12 +90,16 @@ the app image.
 | `jar-sha` | SHA-256 of the uploaded JAR. |
 | `job-id` | Maestro build job ID, for audit. |
 | `build-record` | How the build's files stand against the record of its inputs: `recorded` (the first build of these inputs) or `matched` (an earlier build of the same inputs produced the same files). Empty when `generated` is `false`. The Action refuses every other outcome. |
+| `log-policy-check` | The log policy check's outcome: `passed`, `warned` (findings the environment's mode allows), `failed`, `off` (the environment's check is off) or `not-run` (the workspace is not a git checkout). |
+| `log-policy-findings` | How many findings the log policy check reported. |
 | `build-signature` | `verified` (the build is signed by `signing-public-key`), `not-checked` (it is signed, but `signing-public-key` is not set) or `unsigned` (the platform holds no signing key). Empty when `generated` is `false`. With `signing-public-key` set, every outcome but `verified` fails the step. |
 
 ## What it does (the 9-step flow)
 
-1. Exchange the API key for a short-lived JWT (`POST /api/auth/cli/token`).
-2. Resolve the project UID + the env's **locked config** and locked-version UID.
+1. Exchange the API key for a short-lived JWT (`POST /api/auth/cli/token`). A `check-only` run resolves the
+   project, runs the log policy check for each service and environment, and stops here.
+2. Resolve the project UID + the env's **locked config** and locked-version UID, then run the environment's
+   **log policy check** over the repository's deployment files (below), before anything is uploaded.
 3 to 5. Upload the changed JAR (referencing the env's other services by the artifact the lock recorded for each,
    or by SHA for a lock entry that recorded none) and confirm.
 6. Submit `MULTI_JAR_ANALYSIS` (re-applies locked rules; refreshes the cross-service
@@ -235,6 +240,90 @@ named in a warning. Other services' drift is one count line, and their own runs 
 as information, and one whose analysis was not made from this build's JARs says so in a warning. Drift never fails
 the step: `fail-on-warnings` applies to peer staleness only, and the build is still the lock's.
 
+## The log policy check
+
+Before it uploads anything, the Action reads the environment's log policy rules from Maestro
+(`GET .../envs/{env}/ci-rules?service=...&versions=1&lockedVersionUid=...`, the lock this run builds) and checks
+the repository's tracked deployment files against them: YAML (Helm values, Kubernetes manifests, compose files),
+Dockerfiles, `.env` files and `.properties` files, each split into lines at CRLF, CR or LF and read past a byte
+order mark. It reads environment variables and their Spring and OTel property names as one name
+(`LOGGING_LEVEL_ROOT` is `logging.level.root`), a Kubernetes `env` entry, a compose `environment` list or map and a
+ConfigMap's or Secret's `data` keys (a one-word variable such as `DEBUG` included), `-D` and `--` arguments on a
+command line and in each element of an exec-form command (`["sh", "-c", "java -D..."]` too),
+`JAVA_TOOL_OPTIONS` / `JAVA_OPTS` / `JDK_JAVA_OPTIONS` / `_JAVA_OPTIONS`, and the JSON in
+`SPRING_APPLICATION_JSON`. A `.properties` line is split into key and value as Java reads it. A Helm template's
+actions are removed before its YAML is read, keeping its line numbers, and a value written as a template, `$VAR` or
+`@name@` fails every test except `any`. It never reads an untracked file, a link, `.git`, `.github`, `.o11y` (the CLI's project link), `node_modules`,
+`target`, `build`, `dist`, `vendor`, `.maestro` (the mapping, below, is read as the mapping), `src/test` or
+`src/main/resources` (the packaged configuration, which Maestro's analysis reads from the JAR), or an example env file (`.env.example`, `.env.sample`, `.env.template`); a
+mapping's own paths (below) are read wherever they point, `.git` aside. A file over 1 MiB, one holding a NUL byte,
+and one past 20000 settings or 64 levels of YAML nesting are named, and the rest of the repository is read. The
+repository's own git config cannot run an fsmonitor command during the read.
+
+The rules come from the environment's lock: a level below the lock's floor, a lowered floor, a logs exporter other
+than the lock's, debug switches (Spring's and the agent's), a logging file chosen at deploy, the loggers endpoint
+exposed, a logs endpoint or a declarative config file set, SQL sanitization off or query parameters captured,
+settings the overrides refuse, and, from the analysis of the locked JAR, a variable its packaged logging reads a
+level from and a profile whose packaged level is below the floor. The bundle's own start command and identity
+settings are never findings.
+
+Each finding is printed as its rule, the setting's name, and the file and line, as an annotation on that line
+(an `error` for an error-severity rule, else a `warning`), with a table in the job summary. **The Action never
+prints a value it read**; a file it cannot parse is named by path and line only. The build carries the result
+(the service, the rule set's digest, the total and the first 500 findings), and Maestro records it on the build.
+
+The environment's CI mode decides the step:
+
+| Mode | An error-severity finding | No check (an older Action, or not a git checkout) |
+|---|---|---|
+| Off | not checked | accepted |
+| Warn | reported, the build proceeds | accepted |
+| Fail | the step fails before the upload | the step fails before the upload outside a git checkout; an older Action's build is refused (`CI_CHECK_REQUIRED`) |
+| Unset, on a production environment | the first checked build records the findings as the baseline; a later build with one not in it fails | accepted |
+
+A warning-severity finding is reported in every mode and never fails the step. A check that lists fewer findings
+than it counts (more than 500) fails where the mode enforces.
+
+A finding is the same one when its rule, setting name and file are, so a moved line is not new. Maestro checks the
+result's digest against the rules it serves for the build's lock when the build is submitted, and refuses one made
+against other rules (`CI_CHECK_STALE`: another environment's rules, or a rule the set no longer holds) where the mode
+enforces, and records it otherwise; run the workflow again. The Action asks for the rules of the lock it builds, so a
+lock made between the check and the build does not make it stale. The rule set has a version, and an Action that
+does not read the one Maestro serves fails loudly rather than check against rules it misreads.
+
+**A repository of deployment files.** A `.maestro/check.yml` says which files deploy which service to which
+environment:
+
+```yaml
+services:
+  - service: orders
+    environment: prod
+    paths: ["deploy/orders/**", "helm/orders/values-prod.yaml"]
+  - service: orders
+    environment: staging
+    paths: ["deploy/orders/**", "helm/orders/values-staging.yaml"]
+```
+
+With it, a build checks only the files mapped to its own service and environment, and a `check-only: true` run
+checks every pair it lists and fails after the last if any failed, counting every pair's findings. A mapping that
+maps no file to the service and environment, or holds an entry whose paths match no tracked file, is named in a
+warning, and fails the check where the mode is Fail or production's default. The file must be tracked, a regular
+file inside the repository and at most 64 KiB, and no service, environment or path in it may hold a control
+character, and every value is a non-empty string. A path is a glob from the repository's root: `*`, `?`, `**` as a
+whole path segment, `[...]` of characters and ranges, and `{a,b}` of literal alternatives. A path that starts with
+`!`, an extglob such as `@(a|b)` or any parenthesis, `${`, a backslash escape, `**` inside a segment, a brace holding a
+wildcard, a range or no comma, braces that make more than 64 patterns, an unbalanced brace, and a class that holds or
+spans `/`, is a POSIX class or is empty are refused, since the CLI would read them otherwise. The mapping is one YAML
+document, with no key given twice. Without it, every deployment file is checked.
+
+The files are read as the CLI reads them: a YAML file one document at a time, so a document that does not parse is
+named at its first line and the rest are still read, with a directive kept with the document after it, a `%YAML`
+version directive ignored (every file is read under one schema) and a plain `yes`, `no`, `on` or `off` read as the YAML 1.1
+boolean Spring and Kubernetes take it for; a Helm template comment or
+condition that spans lines and stands alone on them removed; an env file's value as compose reads it, a quoted value
+up to its closing quote and an unquoted one up to a ` #` comment. A check-only run outside a git checkout fails where the
+mode is Fail or production's default, and is `not-run` otherwise.
+
 ## Troubleshooting
 
 | Message | Cause / fix |
@@ -255,6 +344,10 @@ the step: `fail-on-warnings` applies to peer staleness only, and the build is st
 | `matched N files` | v0 expects one JAR; narrow the `jars` glob. |
 | `BUILD_LOCK_SUPERSEDED: production environment 'X' builds only from its current lock` | The environment was locked again while the run was in progress, so the build named an older version. Re-run the workflow; it reads the newest lock. |
 | `No uploaded artifact ... to reference for <service>.jar` | A JAR the environment's lock recorded is no longer stored, or its stored bytes differ from the lock's SHA-256 ("... with that SHA-256"). Upload that service again in the wizard and re-lock the environment. |
+| `Log policy check failed for X in Y` | The environment's CI mode fails a build on the findings printed above it; each names its rule, file and line. Fix the setting, or change the environment's CI mode in Maestro. The same message names the other causes: the workspace is not a git checkout (add `actions/checkout` before the step), or `.maestro/check.yml` maps no tracked file to the service and environment. |
+| `This Action cannot read the log policy rules` | Maestro serves a rule-set version, or a test, this Action release does not read. Move the Action's pin to the latest release. |
+| `CI_CHECK_STALE` | The check ran against rules that are not the ones served for the build's lock now, for example another environment's, or a finding names a rule the set does not hold. Run the workflow again. |
+| `CI_CHECK_REQUIRED` | The environment fails a build that carries no log policy check: the Action release predates the check. Use the latest release, which fails the step itself, before the upload, outside a git checkout. |
 | `Job ... still running after Ns` | Raise `timeout-seconds`, or check the job in Maestro. |
 
 ## Runner requirements
@@ -269,8 +362,7 @@ Actions Runner 2.327.1 or later, on an OS and architecture Node 24 supports (not
   (job-processor) on for the staleness warning.
 - Per-service `javaagent.config` enrichment (`agentConfigContextByService`) from the
   analysis preview is **not** forwarded yet: the locked selection drives the build.
-- Deferred to v1: artifact-hash verification, OIDC auth, GitHub Check / Slack surfaces,
-  release automation.
+- Deferred to v1: OIDC auth, GitHub Check / Slack surfaces, release automation.
 
 ## Development
 

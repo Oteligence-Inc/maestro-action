@@ -19,14 +19,14 @@ inputs:
     description: "The id of the organization to act for (org_... on hosted SaaS, a UUID on a private-cloud VM). Needed only when the API key is not scoped to a project and its owner belongs to several organizations."
     required: false
   service:
-    description: "The name the environment registers this service under, normally the analysis's name for the JAR: its spring.application.name, else the JAR file name without its version (e.g. fund-transfer-service)"
-    required: true
+    description: "The name the environment registers this service under, normally the analysis's name for the JAR: its spring.application.name, else the JAR file name without its version (e.g. fund-transfer-service). Required except for a check-only run whose repository has a .maestro/check.yml"
+    required: false
   environment:
-    description: 'Target env: dev / staging / prod / <custom>'
-    required: true
+    description: 'Target env: dev / staging / prod / <custom>. Required except for a check-only run whose repository has a .maestro/check.yml'
+    required: false
   jars:
-    description: 'Glob path to the service JAR (e.g. target/*.jar). v0 expects exactly one match.'
-    required: true
+    description: 'Glob path to the service JAR (e.g. target/*.jar). v0 expects exactly one match. Not read by a check-only run'
+    required: false
   api-url:
     description: "The Maestro API this run talks to: https://prod.api.oteligence.com for hosted Maestro, your platform's own address for a private-cloud install. Must be https://"
     required: true
@@ -61,6 +61,13 @@ inputs:
       this run's lock and every file the build's record covers. Unset, a signed build is reported and not checked. Take
       it from your own records, never from the Maestro server.
     required: false
+  check-only:
+    description: >-
+      'true' runs only the log policy check over the repository's tracked deployment files (Helm values, manifests,
+      compose files, Dockerfiles, .env and .properties files) and stops: nothing is uploaded or built. With a
+      .maestro/check.yml, each service and environment it lists is checked against its own files. Default 'false'.
+    required: false
+    default: 'false'
   require-signed-build:
     description: >-
       'true' fails the step when signing-public-key is empty, so a workflow variable that is missing in a repository or
@@ -85,6 +92,10 @@ outputs:
     description: 'Maestro build job ID, for audit and log lookup'
   build-record:
     description: "How the build's files stand against the record of its inputs: 'recorded' (the first build of these inputs) or 'matched' (a rebuild produced the recorded files); empty when 'generated' is 'false'. The action refuses any other outcome."
+  log-policy-check:
+    description: "The log policy check's outcome: 'passed', 'warned' (findings the environment's mode allows), 'failed', 'off' (the environment's check is off) or 'not-run' (the workspace is not a git checkout)"
+  log-policy-findings:
+    description: 'How many findings the log policy check reported'
   build-signature:
     description: "'verified' (signed by signing-public-key), 'not-checked' (signed, but signing-public-key is not set) or 'unsigned' (the platform holds no signing key); empty when 'generated' is 'false'. With signing-public-key set, every outcome but 'verified' fails the step."
 

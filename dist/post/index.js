@@ -25908,9 +25908,10 @@ function parseInputs() {
         throw new errors_1.UserError('Provide either "project" (name) or "project-id" (UID).');
     }
     const orgId = core.getInput('org-id').trim();
-    const service = core.getInput('service', { required: true });
-    const environment = core.getInput('environment', { required: true });
-    const jarsGlob = core.getInput('jars', { required: true });
+    const checkOnly = (core.getInput('check-only') || 'false').toLowerCase() === 'true';
+    const service = core.getInput('service', { required: !checkOnly });
+    const environment = core.getInput('environment', { required: !checkOnly });
+    const jarsGlob = core.getInput('jars', { required: !checkOnly });
     const apiUrl = normaliseApiUrl(core.getInput('api-url', { required: true }), core.getInput('trusted-api-host'));
     const timeoutRaw = core.getInput('timeout-seconds') || '300';
     const timeoutSeconds = Number.parseInt(timeoutRaw, 10);
@@ -25928,7 +25929,7 @@ function parseInputs() {
     }
     return {
         apiKey, project, projectId, orgId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
-        failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey,
+        failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey, checkOnly,
     };
 }
 /**
@@ -26365,6 +26366,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.envBase = envBase;
 exports.envPath = envPath;
 exports.resolveLockedConfig = resolveLockedConfig;
+exports.resolveProjectUid = resolveProjectUid;
 const core = __importStar(__nccwpck_require__(7484));
 const api_1 = __nccwpck_require__(6879);
 const errors_1 = __nccwpck_require__(17);

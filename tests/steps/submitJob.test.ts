@@ -164,6 +164,25 @@ describe('submitBuild', () => {
     expect(seen.requestJson.profile.methodConfigurations).toBeDefined();
   });
 
+  it("carries the log policy check's result, and nothing when there was no check", async () => {
+    const bodies: any[] = [];
+    nock(BASE)
+      .post('/api/job-manager/jobs', (body) => {
+        bodies.push(body);
+        return true;
+      })
+      .times(2)
+      .reply(201, { data: { jobId: 'build_1' } });
+    const ciCheck = { service: 'orders', ruleSetDigest: 'd'.repeat(64), total: 1,
+      findings: [{ rule: 'LOG_LEVEL_BELOW_FLOOR', name: 'logging.level.root', path: 'v.yaml', line: 2 }] };
+
+    await submitBuild(client(), cfg, upload, 'job_a', buildProfileFromLocked(locked), ciCheck);
+    await submitBuild(client(), cfg, upload, 'job_a', buildProfileFromLocked(locked), null);
+
+    expect(bodies[0].requestJson.ciCheck).toEqual(ciCheck);
+    expect('ciCheck' in bodies[1].requestJson).toBe(false);
+  });
+
   it("returns the build's drift as job-manager sent it", async () => {
     const drift = { status: 'checked', lockVersion: 9, services: {} };
     nock(BASE).post('/api/job-manager/jobs').reply(201, { data: { id: 'build_2', drift } });

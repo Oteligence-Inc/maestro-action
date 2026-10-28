@@ -64,7 +64,7 @@ export async function resolveLockedConfig(api: MaestroApi, inputs: Inputs): Prom
  * confusing downstream 404. When only a name is given, resolve it by exact match (with a legacy
  * {@code proj_} passthrough kept for back-compat). At least one of the two is guaranteed by parseInputs.
  */
-async function resolveProjectUid(api: MaestroApi, project: string, projectId: string): Promise<string> {
+export async function resolveProjectUid(api: MaestroApi, project: string, projectId: string): Promise<string> {
   const id = (projectId || '').trim();
   const name = (project || '').trim();
 

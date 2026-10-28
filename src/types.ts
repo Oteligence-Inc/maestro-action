@@ -32,6 +32,11 @@ export interface Inputs {
    * case a signed build is reported and not checked, and an unsigned one is accepted.
    */
   signingKey: KeyObject | null;
+  /**
+   * `check-only`: run the log policy check over the repository's deployment files and stop, uploading and building
+   * nothing; the `jars` input is then not needed.
+   */
+  checkOnly: boolean;
 }
 
 export interface Session {
