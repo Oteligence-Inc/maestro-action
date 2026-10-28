@@ -11,12 +11,14 @@ jest.mock('../src/steps/analysisService');
 jest.mock('../src/steps/register');
 jest.mock('../src/steps/staleness');
 jest.mock('../src/steps/reportDeployRun');
+jest.mock('../src/steps/ciCheck');
+jest.mock('../src/steps/checkOnly');
 import * as core from '@actions/core';
 import * as crypto from 'crypto';
 import { run } from '../src/index';
 import { reportDeployRun } from '../src/steps/reportDeployRun';
 import { pollJob } from '../src/steps/poll';
-import { SubscriptionInactiveError } from '../src/util/errors';
+import { SubscriptionInactiveError, UserError } from '../src/util/errors';
 import { parseInputs } from '../src/inputs';
 import { resolveLockedConfig } from '../src/steps/resolveConfig';
 import { uploadJar } from '../src/steps/upload';
@@ -25,6 +27,8 @@ import { downloadArtifacts } from '../src/steps/download';
 import { readAnalysisOfUpload } from '../src/steps/analysisService';
 import { registerJarForEnv } from '../src/steps/register';
 import { BuildVerificationError, verifyBuild } from '../src/steps/verify';
+import { logPolicyCheck, readMapping } from '../src/steps/ciCheck';
+import { checkOnly } from '../src/steps/checkOnly';
 
 const inputs = { service: 'fundtransfer', environment: 'dev', apiUrl: 'https://api.oteligence.com' };
 
@@ -40,6 +44,42 @@ beforeEach(() => {
   (submitBuild as jest.Mock).mockResolvedValue({ jobId: 'build_1', drift: undefined });
   (downloadArtifacts as jest.Mock).mockResolvedValue({ extensionDir: 'x', configPath: 'c', collectorConfigPath: 'k' });
   (verifyBuild as jest.Mock).mockResolvedValue({ record: 'matched', signature: 'verified' });
+  (logPolicyCheck as jest.Mock).mockReset().mockResolvedValue(null);
+  (readMapping as jest.Mock).mockReturnValue(null);
+});
+
+describe('the log policy check', () => {
+  const result = { service: 'fundtransfer', ruleSetDigest: 'd'.repeat(64), total: 0, findings: [] };
+
+  it('runs before the upload, and the build carries its result', async () => {
+    (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [] });
+    (logPolicyCheck as jest.Mock).mockResolvedValue(result);
+    await run();
+    expect((logPolicyCheck as jest.Mock).mock.calls[0].slice(0, 4)).toEqual([expect.anything(), 'proj_1', 'dev', 'fundtransfer']);
+    expect((logPolicyCheck as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(
+      (uploadJar as jest.Mock).mock.invocationCallOrder[0],
+    );
+    expect((submitBuild as jest.Mock).mock.calls[0][5]).toBe(result);
+    expect(core.setFailed).not.toHaveBeenCalled();
+  });
+
+  it('stops the run before the upload when the check fails it, and reports the deploy run failed', async () => {
+    (logPolicyCheck as jest.Mock).mockRejectedValue(new UserError('Log policy check failed for fundtransfer in dev'));
+    await run();
+    expect(uploadJar).not.toHaveBeenCalled();
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('Log policy check failed'));
+    expect(reportDeployRun).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 'proj_1', 'completed', 'failure');
+  });
+
+  it('runs only the check in check-only mode: no lock read, upload, build or deploy run', async () => {
+    (parseInputs as jest.Mock).mockReturnValue({ ...inputs, checkOnly: true });
+    await run();
+    expect(checkOnly).toHaveBeenCalled();
+    expect(resolveLockedConfig).not.toHaveBeenCalled();
+    expect(uploadJar).not.toHaveBeenCalled();
+    expect(reportDeployRun).not.toHaveBeenCalled();
+    expect(core.setFailed).not.toHaveBeenCalled();
+  });
 });
 
 it("warns on the build's drift for its own service right after submitting, before the build is polled", async () => {

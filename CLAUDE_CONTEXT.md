@@ -14,6 +14,9 @@ extension bundle and configs on the runner for their image build. All analysis a
 | `src/inputs.ts` | `parseInputs`: reads the inputs, requires `project` or `project-id` and `api-url` (there is no default API), and holds `api-url` to `https://` on an `*.oteligence.com` host, or, when `trusted-api-host` names a hostname, on exactly that host. |
 | `src/api.ts` | `MaestroApi` over `@actions/http-client`: bearer auth, retry on transient failures (`util/retry.ts`), signed-URL reads and writes without the auth header and over https only (`requireHttps` refuses another scheme by name, never echoing the URL), `expectOk` mapping a 402 `subscription_inactive` to `SubscriptionInactiveError`, a 403 `reader_read_only` to `ReaderKeyError` and a 403 `key_scope` (the run named a project or environment outside the key's scope) to `KeyScopeError`, each read flat or under `data`. |
 | `src/steps/` | One module per step, each with its own suite under `tests/steps/`. |
+| `src/ciRules.ts` | The log policy rule set's types and its evaluation: a copy of discrete-job-functions' djf-core `CiRules.evaluate` (`fold`, `matches`, `passesTest`), `unreadable` (the version and test check that makes an unknown rule set fail loudly), and `CASES_DIGEST`, the SHA-256 of the fixture suite copy in `tests/fixtures/ci-rules/` this release was tested against. |
+| `src/logPolicy/extract.ts` | The settings a deployment file holds, with path and line: YAML (Kubernetes `env` entries, compose `environment`, nested keys read as their whole path and each tail of two or more segments, Helm templates with their actions removed), Dockerfile `ENV`, `CMD` and `ENTRYPOINT`, `.env` and `.properties` files, command lines (`-Dk=v`, `--k`) and `SPRING_APPLICATION_JSON`. The names one key is read as share an `origin`, so a setting gives one finding per rule. A file it cannot parse is a `Problem` by path and line, never its text. |
+| `src/steps/ciCheck.ts`, `src/steps/checkOnly.ts` | The log policy check (`logPolicyCheck`): the rule set from `GET .../envs/{env}/ci-rules?service=&versions=1`, the tracked files (`git ls-files`) less links, oversized files and `SKIPPED` paths, the `.maestro/check.yml` mapping, findings, the verdict as job-manager decides it, the annotations and job summary, and the `CheckResult` the build carries. `checkOnly` runs it for each mapped pair and uploads nothing. |
 | `src/util/errors.ts` | The only messages that reach the log. `formatError` never echoes a response body or stack. |
 | `dist/` | The two ncc bundles GitHub executes, `dist/index.js` and `dist/post/index.js`; committed, and `ci.yml` fails when either is stale. |
 
@@ -30,6 +33,10 @@ extension bundle and configs on the runner for their image build. All analysis a
    `GET /api/job-manager/projects/{uid}/envs/{env}/locked`, whose `uid` is the `lockedVersionUid` (read with the selection, so a lock taken between two reads cannot pair one version's selection with the next one's uid; `.../versions`, newest first, only when job-manager returns no `uid`).
    A 404 on `locked` means the environment does not exist; a 200 with `data: null` means it was never locked; an empty
    or unparseable 200 is reported as an empty response.
+2b. `logPolicyCheck`, after the in-progress deploy-run report and before the upload: `off` returns null; outside a git
+   checkout it warns and returns null (the build then carries no check, which an environment in `fail` mode refuses);
+   a mode that fails the findings throws a `UserError`, so nothing is uploaded. The result goes on the build submit
+   as `requestJson.ciCheck`.
 3. The removed-service guard: once the lock's `registeredJars` is non-empty, a `service` input it does not contain is
    refused before any upload, listing the registered names.
 4. `uploadJar`: one glob match; `POST /api/file/artifact/upload/batch` with this JAR plus the other registered
@@ -118,6 +125,18 @@ extension bundle and configs on the runner for their image build. All analysis a
   not a file", "malformed"). So this Action, and the six `maestro-deploy.yml` pins of it, must move before such a
   job-processor deploys. The key the workflow supplies must come from the operator's records: the private-cloud
   installer prints it once, and a job-processor that holds a key logs its public half at startup.
+
+- **Log policy check.** job-manager's `GET .../envs/{env}/ci-rules` serves `version`, `mode` (`OFF`, `WARN`,
+  `FAIL`, `FAIL_ON_NEW`), `floor`, `exporter`, `lockFree`, `rules`, `digest`, `casesDigest`, `lockVersion` and
+  `baseline` (the fingerprints `rule|name|path` of the service's first checked build, or null). The build's
+  `requestJson.ciCheck` is `{service, ruleSetDigest, total, findings: [{rule, name, path, line}]}` with at most 500
+  findings; job-manager refuses a digest that is not the one it serves now (409 `ci_check_stale`), a check in the wrong
+  shape (400 `ci_check_unreadable`), and decides the build by the mode and each rule's severity (409
+  `ci_check_required` / `ci_check_failed`); `verdict` in `src/steps/ciCheck.ts` makes the same decision before the
+  upload. A finding's name must fold to `NAME` (`[a-z0-9._-]{1,200}`) and its path be repository-relative, so the
+  extractor never sends another. The digest is opaque: the Action echoes it and never computes it. `casesDigest` is advisory: a mismatch
+  warns, since this Action is pinned by commit SHA and must keep working when Maestro's copy of the fixture suite moves.
+  The gateway admits the route for an API key in `CliRoutePolicy`.
 
 ## Tests
 

@@ -20,9 +20,10 @@ export function parseInputs(): Inputs {
     throw new UserError('Provide either "project" (name) or "project-id" (UID).');
   }
   const orgId = core.getInput('org-id').trim();
-  const service = core.getInput('service', { required: true });
-  const environment = core.getInput('environment', { required: true });
-  const jarsGlob = core.getInput('jars', { required: true });
+  const checkOnly = (core.getInput('check-only') || 'false').toLowerCase() === 'true';
+  const service = core.getInput('service', { required: !checkOnly });
+  const environment = core.getInput('environment', { required: !checkOnly });
+  const jarsGlob = core.getInput('jars', { required: !checkOnly });
 
   const apiUrl = normaliseApiUrl(
     core.getInput('api-url', { required: true }),
@@ -52,7 +53,7 @@ export function parseInputs(): Inputs {
 
   return {
     apiKey, project, projectId, orgId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
-    failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey,
+    failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey, checkOnly,
   };
 }
 

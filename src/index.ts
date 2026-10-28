@@ -13,6 +13,8 @@ import { registerJarForEnv } from './steps/register';
 import { warnStalePeers } from './steps/staleness';
 import { reportDrift } from './steps/drift';
 import { reportDeployRun } from './steps/reportDeployRun';
+import { logPolicyCheck, readMapping } from './steps/ciCheck';
+import { checkOnly } from './steps/checkOnly';
 import { formatError, RemovedServiceError, SubscriptionInactiveError } from './util/errors';
 import { Inputs } from './types';
 
@@ -39,6 +41,10 @@ export async function run(): Promise<void> {
 
   try {
     await auth(api, inputs); // [1]
+    if (inputs.checkOnly) {
+      await checkOnly(api, inputs, workspace());
+      return;
+    }
     const cfg = await resolveLockedConfig(api, inputs); // [2]
     projectUid = cfg.projectUid;
 
@@ -53,6 +59,10 @@ export async function run(): Promise<void> {
 
     await reportDeployRun(api, inputs, projectUid, 'in_progress', null); // deploy-run: start
 
+    // [2c] Before the upload, so a build the environment's log policy refuses costs no analysis.
+    const root = workspace();
+    const ciCheck = await logPolicyCheck(api, projectUid, inputs.environment, inputs.service, root, readMapping(root));
+
     const upload = await uploadJar(api, inputs, cfg); // [3-5]
 
     const analysisJobId = await submitAnalysis(api, cfg, upload); // [6a]
@@ -65,7 +75,7 @@ export async function run(): Promise<void> {
     const analysisNames = analysis.names;
 
     const profile = buildProfileFromLocked(cfg.locked);
-    const build = await submitBuild(api, cfg, upload, analysisJobId, profile); // [6b]
+    const build = await submitBuild(api, cfg, upload, analysisJobId, profile, ciCheck); // [6b]
     const buildJobId = build.jobId;
     // Before the build runs, so a build that fails still says how its inputs drifted from the lock.
     reportDrift(build.drift, analysisNames);
@@ -142,6 +152,11 @@ export async function run(): Promise<void> {
     await reportDeployRun(api, inputs, projectUid, 'completed', 'failure'); // deploy-run: failed (best-effort)
     core.setFailed(formatError(err));
   }
+}
+
+/** The repository the workflow checked out. */
+function workspace(): string {
+  return process.env.GITHUB_WORKSPACE || process.cwd();
 }
 
 const SIGNATURE_LINES = {

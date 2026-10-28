@@ -2,6 +2,7 @@ import * as core from '@actions/core';
 import { MaestroApi, expectOk } from '../api';
 import { BuildProfile, LockedSpec, ResolvedConfig, UploadResult } from '../types';
 import { UserError } from '../util/errors';
+import { CheckResult } from './ciCheck';
 
 /** A job id the action may put in a path and a log line: letters, digits, '-' and '_' only. */
 const SAFE_JOB_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -59,6 +60,7 @@ export async function submitBuild(
   upload: UploadResult,
   analysisJobId: string,
   profile: BuildProfile,
+  ciCheck: CheckResult | null = null,
 ): Promise<SubmittedBuild> {
   const locked = cfg.locked;
   const res = await api.post('/api/job-manager/jobs', {
@@ -73,6 +75,8 @@ export async function submitBuild(
       analysisJobId,
       envName: cfg.envName,
       profile,
+      // job-manager re-checks its digest against the rules it serves now and decides the build by the env's mode.
+      ...(ciCheck ? { ciCheck } : {}),
     },
   });
   expectOk(res, 'POST /jobs (build)');
