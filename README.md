@@ -253,8 +253,8 @@ command line and in each element of an exec-form command (`["sh", "-c", "java -D
 `SPRING_APPLICATION_JSON`. A `.properties` line is split into key and value as Java reads it. A Helm template's
 actions are removed before its YAML is read, keeping its line numbers, and a value written as a template, `$VAR` or
 `@name@` fails every test except `any`. It never reads an untracked file, a link, `.git`, `.github`, `.o11y` (the CLI's project link), `node_modules`,
-`target`, `build`, `dist`, `vendor`, `src/test` or `src/main/resources` (the packaged configuration, which
-Maestro's analysis reads from the JAR), or an example env file (`.env.example`, `.env.sample`, `.env.template`); a
+`target`, `build`, `dist`, `vendor`, `.maestro` (the mapping, below, is read as the mapping), `src/test` or
+`src/main/resources` (the packaged configuration, which Maestro's analysis reads from the JAR), or an example env file (`.env.example`, `.env.sample`, `.env.template`); a
 mapping's own paths (below) are read wherever they point, `.git` aside. A file over 1 MiB, one holding a NUL byte,
 and one past 20000 settings or 64 levels of YAML nesting are named, and the rest of the repository is read. The
 repository's own git config cannot run an fsmonitor command during the read.

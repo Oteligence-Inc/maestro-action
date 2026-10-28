@@ -34,9 +34,10 @@ extension bundle and configs on the runner for their image build. All analysis a
    A 404 on `locked` means the environment does not exist; a 200 with `data: null` means it was never locked; an empty
    or unparseable 200 is reported as an empty response.
 2b. `logPolicyCheck`, after the in-progress deploy-run report and before the upload: `off` returns null; outside a git
-   checkout it warns and returns null (the build then carries no check, which an environment in `fail` mode refuses);
-   a mode that fails the findings throws a `UserError`, so nothing is uploaded. The result goes on the build submit
-   as `requestJson.ciCheck`.
+   checkout it warns and returns null (the build then carries no check), except in `FAIL` mode, where it throws
+   because job-manager would refuse a build with no check; a mode that fails the findings throws a `UserError`, so
+   nothing is uploaded. The result goes on the build submit as `requestJson.ciCheck`. With `check-only` set,
+   `run()` calls `checkOnly` right after `auth` (step 1) and returns, so steps 2 to 7 never run.
 3. The removed-service guard: once the lock's `registeredJars` is non-empty, a `service` input it does not contain is
    refused before any upload, listing the registered names.
 4. `uploadJar`: one glob match; `POST /api/file/artifact/upload/batch` with this JAR plus the other registered
