@@ -31005,6 +31005,7 @@ const NEVER_READ = /(^|\/)\.git\//;
 const SKIPPED = [
     /(^|\/)\.git\//,
     /(^|\/)\.github\//,
+    /(^|\/)\.o11y\//,
     /(^|\/)node_modules\//,
     /(^|\/)target\//,
     /(^|\/)build\//,
@@ -31059,7 +31060,8 @@ function trackedFiles(root) {
             maxBuffer: 64 * 1024 * 1024,
             stdio: ['ignore', 'pipe', 'ignore'],
         });
-        return out.toString('utf8').split('\0').filter((p) => p !== '');
+        // A path in a merge conflict is listed once per stage.
+        return [...new Set(out.toString('utf8').split('\0').filter((p) => p !== ''))];
     }
     catch {
         return null;

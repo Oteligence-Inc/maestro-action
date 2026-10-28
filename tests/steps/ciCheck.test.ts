@@ -125,6 +125,7 @@ describe('which files are read', () => {
         'src/main/resources/application.yml': 'logging:\n  level:\n    root: DEBUG\n',
         'src/test/resources/application.yml': 'logging:\n  level:\n    root: DEBUG\n',
         'node_modules/x/values.yaml': 'env:\n  LOGGING_LEVEL_ROOT: DEBUG\n',
+        '.o11y/maestro.env': 'LOGGING_LEVEL_ROOT=DEBUG\n',
       },
       ['deploy/untracked.yaml'],
     );
@@ -142,6 +143,25 @@ describe('which files are read', () => {
     const read = scan(root, trackedFiles(root)!);
     expect(read.problems).toEqual([{ path: 'big.env', line: 1, reason: expect.stringContaining('larger than') }]);
     expect(read.settings.map((s) => s.name)).toEqual(['debug']);
+  });
+
+  it('lists a path once while it is in a merge conflict', () => {
+    const root = repo({ 'a.env': 'DEBUG=1\n' });
+    const git = (...args: string[]) => execFileSync('git', ['-C', root, '-c', 'user.email=t@t', '-c', 'user.name=t', ...args]);
+    git('commit', '-qm', 'base');
+    git('checkout', '-qb', 'other');
+    fs.writeFileSync(path.join(root, 'a.env'), 'DEBUG=2\n');
+    git('commit', '-qam', 'other');
+    git('checkout', '-q', '-');
+    fs.writeFileSync(path.join(root, 'a.env'), 'DEBUG=3\n');
+    git('commit', '-qam', 'mine');
+    try {
+      git('merge', '-q', 'other');
+    } catch {
+      // the conflict is the fixture
+    }
+    expect(execFileSync('git', ['-C', root, 'ls-files', '-z']).toString().split('\0').filter(Boolean)).toHaveLength(3);
+    expect(trackedFiles(root)).toEqual(['a.env']);
   });
 
   it('runs no fsmonitor command the repository configures', () => {
