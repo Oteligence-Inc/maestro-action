@@ -284,9 +284,10 @@ A warning-severity finding is reported in every mode and never fails the step. A
 than it counts (more than 500) fails where the mode enforces.
 
 A finding is the same one when its rule, setting name and file are, so a moved line is not new. Maestro checks the
-result's digest against the rules it serves when the build is submitted, and refuses one made against other rules
-(`CI_CHECK_STALE`: a new lock in between) where the mode enforces, and records it otherwise; run the workflow
-again. The rule set has a version, and an Action that
+result's digest against the rules it serves for the build's lock when the build is submitted, and refuses one made
+against other rules (`CI_CHECK_STALE`: another environment's rules, or a rule the set no longer holds) where the mode
+enforces, and records it otherwise; run the workflow again. The Action asks for the rules of the lock it builds, so a
+lock made between the check and the build does not make it stale. The rule set has a version, and an Action that
 does not read the one Maestro serves fails loudly rather than check against rules it misreads.
 
 **A repository of deployment files.** A `.maestro/check.yml` says which files deploy which service to which
@@ -332,7 +333,7 @@ mode is Fail or production's default, and is `not-run` otherwise.
 | `No uploaded artifact ... to reference for <service>.jar` | A JAR the environment's lock recorded is no longer stored, or its stored bytes differ from the lock's SHA-256 ("... with that SHA-256"). Upload that service again in the wizard and re-lock the environment. |
 | `Log policy check failed for X in Y` | The environment's CI mode fails a build on the findings printed above it; each names its rule, file and line. Fix the setting, or change the environment's CI mode in Maestro. The same message names the other causes: the workspace is not a git checkout (add `actions/checkout` before the step), or `.maestro/check.yml` maps no tracked file to the service and environment. |
 | `This Action cannot read the log policy rules` | Maestro serves a rule-set version, or a test, this Action release does not read. Move the Action's pin to the latest release. |
-| `CI_CHECK_STALE` | The environment was locked again between the check and the build. Re-run the workflow. |
+| `CI_CHECK_STALE` | The check ran against rules that are not the ones served for the build's lock now, for example another environment's, or a finding names a rule the set does not hold. Run the workflow again. |
 | `CI_CHECK_REQUIRED` | The environment fails a build that carries no log policy check: the Action release predates the check. Use the latest release, which fails the step itself, before the upload, outside a git checkout. |
 | `Job ... still running after Ns` | Raise `timeout-seconds`, or check the job in Maestro. |
 

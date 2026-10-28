@@ -127,9 +127,14 @@ extension bundle and configs on the runner for their image build. All analysis a
   job-processor deploys. The key the workflow supplies must come from the operator's records: the private-cloud
   installer prints it once, and a job-processor that holds a key logs its public half at startup.
 
-- **Log policy check.** job-manager's `GET .../envs/{env}/ci-rules` serves `version`, `mode` (`OFF`, `WARN`,
-  `FAIL`, `FAIL_ON_NEW`), `floor`, `exporter`, `lockFree`, `rules`, `digest`, `casesDigest`, `lockVersion` and
-  `baseline` (the fingerprints `rule|name|path` of the service's first checked build, or null). The build's
+- **Log policy check.** job-manager's `GET .../envs/{env}/ci-rules?service=&versions=1&lockedVersionUid=` (the
+  Action sends the lock it builds) serves `version`, `mode` (`OFF`, `WARN`, `FAIL`, `FAIL_ON_NEW`), `floor`,
+  `exporter`, `lockFree`, `rules`, `digest`, `casesDigest`, `lockVersion`, `baseline` (the fingerprints
+  `rule|name|path` of the service's first checked build, or null) and `packaged` (`matched`, `not_recorded`, `absent`,
+  `unread`, `not_read`). It answers 400 `ci_rules_service_required`, 404 `ci_rules_service_unknown` (the locked
+  analysis holds no such service) or `ci_rules_lock_unknown`, 409 `ci_rules_version_unsupported`, and 503
+  `ci_rules_unavailable` when the locked analysis cannot be read and the mode enforces; `fetchRules` words the two
+  404s. The build's
   `requestJson.ciCheck` is `{service, ruleSetDigest, total, findings: [{rule, name, path, line}]}` with at most 500
   findings, each name shaped by `findingName`; job-manager refuses a digest that is not the one it serves now (409 `ci_check_stale`), a check in the wrong
   shape (400 `ci_check_unreadable`) or a service its locked analysis does not hold (409 `ci_check_service_unknown`) where the mode enforces, and decides the build by the mode and each rule's severity (409
