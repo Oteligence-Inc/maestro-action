@@ -6,7 +6,7 @@
 export const VERSION = 1;
 
 /** The SHA-256 of the evaluation fixture suite this release was tested against; the server serves its own. */
-export const CASES_DIGEST = 'b794fc24fb50304e2d56f25a035736cd4d31b8ebf238ab9cf911d716066a64a4';
+export const CASES_DIGEST = 'b2b18f1ba97efadc13c76c13eda51fb550aef35be24be5eeab53a865a31804ae';
 
 /** Every test a version 1 rule may name; a rule naming another fails loudly. */
 export const TESTS = [
@@ -60,8 +60,16 @@ export interface Finding {
 
 const LEVELS = ['ALL', 'TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL', 'OFF'];
 
-/** The shape of a folded name a finding may carry; job-manager lists no other. */
+/** The shape of a folded name a finding carries; job-manager lists no other. */
 export const NAME = /^[a-z0-9._-]{1,200}$/;
+
+/**
+ * A folded name as a finding carries it: a character outside NAME reads as _, which folding never leaves, and a name
+ * past 200 characters is cut. A setting on such a name is still judged.
+ */
+export function findingName(folded: string): string {
+  return folded.replace(/[^a-z0-9._-]/g, '_').substring(0, 200);
+}
 
 /** A template placeholder anywhere, or a value written as $VAR or @name@: it passes no test but any. */
 const PLACEHOLDER = /^(?:[\s\S]*(?:\$\{|\$\(|#\{|\{\{|__TEMPLATE__)[\s\S]*|\$[A-Za-z_][\s\S]*|@[A-Za-z0-9_.-]+@)$/;
@@ -88,13 +96,14 @@ export function evaluate(set: RuleSet, settings: Setting[]): Finding[] {
   const seen = new Set<string>();
   for (const s of settings) {
     const name = fold(s.name);
-    if (!NAME.test(name)) continue;
+    if (!name) continue;
+    const shown = findingName(name);
     for (const r of set.rules) {
       if (!matches(r, name) || !passesTest(r, s.value, set)) continue;
-      const key = `${r.id}|${name}|${s.path}|${s.line}`;
+      const key = `${r.id}|${shown}|${s.path}|${s.line}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ rule: r.id, severity: r.severity, name, path: s.path, line: s.line });
+      out.push({ rule: r.id, severity: r.severity, name: shown, path: s.path, line: s.line });
     }
   }
   return out;

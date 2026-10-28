@@ -2009,7 +2009,7 @@
       "line" : 30
     } ]
   }, {
-    "name" : "a level written as a placeholder is no finding",
+    "name" : "a level written as a variable is not a level",
     "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
     "lock" : {
       "floor" : "INFO"
@@ -2514,7 +2514,7 @@
       "line" : 7
     } ]
   }, {
-    "name" : "every template syntax is a placeholder; a list test reads the elements that are not",
+    "name" : "every template syntax is a placeholder; a list test reads the elements of a list holding one",
     "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
     "lock" : {
       "floor" : "INFO"
@@ -2534,6 +2534,11 @@
       "value" : "@spring.trace@",
       "path" : "application-deploy.env",
       "line" : 1
+    }, {
+      "name" : "DEBUG",
+      "value" : "__TEMPLATE__",
+      "path" : "deploy.tpl.env",
+      "line" : 3
     }, {
       "name" : "MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE",
       "value" : "health,loggers,${EXTRA:}",
@@ -2585,7 +2590,7 @@
       "line" : 6
     } ]
   }, {
-    "name" : "a name a finding cannot carry gives no finding",
+    "name" : "a name outside the finding shape is still judged, under a name a finding can carry",
     "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
     "lock" : {
       "floor" : "INFO"
@@ -2600,13 +2605,30 @@
       "value" : "DEBUG",
       "path" : "application.env",
       "line" : 4
+    }, {
+      "name" : "LOGGING_LEVEL_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      "value" : "DEBUG",
+      "path" : "application.env",
+      "line" : 5
     } ],
     "findings" : [ {
+      "rule" : "LOG_LEVEL_BELOW_FLOOR",
+      "severity" : "error",
+      "name" : "logging.level.com.acme.outer_inner",
+      "path" : "application.env",
+      "line" : 3
+    }, {
       "rule" : "LOG_LEVEL_BELOW_FLOOR",
       "severity" : "error",
       "name" : "logging.level.com.acme.outer",
       "path" : "application.env",
       "line" : 4
+    }, {
+      "rule" : "LOG_LEVEL_BELOW_FLOOR",
+      "severity" : "error",
+      "name" : "logging.level.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "path" : "application.env",
+      "line" : 5
     } ]
   }, {
     "name" : "a packaged variable with a dash is matched in Spring's environment form too",

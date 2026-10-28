@@ -1,4 +1,10 @@
 import { commandLineSettings, extract, keyPathNames, kindOf, untemplated } from '../../src/logPolicy/extract';
+import { NAME, RuleSet } from '../../src/ciRules';
+import { findingsOf } from '../../src/steps/ciCheck';
+import cases from '../fixtures/ci-rules/evaluation-cases.json';
+
+const lockFreeRules = (): RuleSet =>
+  Object.values((cases as unknown as { ruleSets: Record<string, RuleSet> }).ruleSets).find((s) => s.lockFree) as RuleSet;
 
 const names = (text: string, kind: Parameters<typeof extract>[2], path = 'deploy/x') =>
   extract(path, text, kind).settings.map((s) => `${s.name}=${s.value}@${s.line}`);
@@ -176,8 +182,12 @@ describe('YAML', () => {
     expect(origins.size).toBe(1);
   });
 
-  it('never sends a name the platform would not accept', () => {
-    expect(names('"app.kubernetes.io/name": x\n"logging level": DEBUG\n', 'yaml')).toEqual([]);
+  it('keeps a name outside the finding shape, so a finding on it is still made, under a name the platform accepts', () => {
+    const text = '"logging.level.com.acme.Outer$Inner": DEBUG\n';
+    expect(names(text, 'yaml')).toEqual(['logging.level.com.acme.outer$inner=DEBUG@1']);
+    const found = findingsOf(lockFreeRules(), extract('deploy/x', text, 'yaml').settings);
+    expect(found.map((f) => f.name)).toEqual(['logging.level.com.acme.outer_inner']);
+    expect(found.every((f) => NAME.test(f.name))).toBe(true);
   });
 });
 

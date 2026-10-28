@@ -1,6 +1,6 @@
 import { LineCounter, isMap, isPair, isScalar, isSeq, parseAllDocuments } from 'yaml';
 import type { Node, Pair } from 'yaml';
-import { NAME, Setting, fold } from '../ciRules';
+import { Setting, fold } from '../ciRules';
 
 /** A file the check could not read in full: its path and line, never its content. */
 export interface Problem {
@@ -71,7 +71,7 @@ function add(out: Extracted, path: string, line: number, names: string | string[
   let expanded = false;
   for (const name of Array.isArray(names) ? names : [names]) {
     const folded = fold(name);
-    if (NAME.test(folded)) out.settings.push({ name: folded, value, path, line, origin });
+    if (folded) out.settings.push({ name: folded, value, path, line, origin });
     if (expanded) continue;
     if (JVM_OPTIONS.has(folded)) {
       expanded = true;
