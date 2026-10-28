@@ -29696,7 +29696,7 @@ exports.unreadable = unreadable;
 /** The rule-set version this Action reads. */
 exports.VERSION = 1;
 /** The SHA-256 of the evaluation fixture suite this release was tested against; the server serves its own. */
-exports.CASES_DIGEST = '9c0845b43f3c3fecf2dc78b75bbc189b358da5aedbbe78b3048acfef912e5ea7';
+exports.CASES_DIGEST = 'b794fc24fb50304e2d56f25a035736cd4d31b8ebf238ab9cf911d716066a64a4';
 /** Every test a version 1 rule may name; a rule naming another fails loudly. */
 exports.TESTS = [
     'any',
@@ -29711,7 +29711,8 @@ exports.TESTS = [
 const LEVELS = ['ALL', 'TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL', 'OFF'];
 /** The shape of a folded name a finding may carry; job-manager lists no other. */
 exports.NAME = /^[a-z0-9._-]{1,200}$/;
-const PLACEHOLDER = /^(?:[\s\S]*(?:\$\{|\{\{|__TEMPLATE__)[\s\S]*|\$[A-Za-z_][\s\S]*)$/;
+/** A template placeholder anywhere, or a value written as $VAR or @name@: it passes no test but any. */
+const PLACEHOLDER = /^(?:[\s\S]*(?:\$\{|\$\(|#\{|\{\{|__TEMPLATE__)[\s\S]*|\$[A-Za-z_][\s\S]*|@[A-Za-z0-9_.-]+@)$/;
 /** Java's String.trim: spaces and control characters at either end, and nothing else. */
 function trimAscii(v) {
     let start = 0;
@@ -29736,6 +29737,8 @@ function evaluate(set, settings) {
     const seen = new Set();
     for (const s of settings) {
         const name = fold(s.name);
+        if (!exports.NAME.test(name))
+            continue;
         for (const r of set.rules) {
             if (!matches(r, name) || !passesTest(r, s.value, set))
                 continue;
@@ -29763,6 +29766,11 @@ function passesTest(r, raw, set) {
         throw new Error(`unknown test ${r.test}`);
     if (r.test === 'any')
         return true;
+    // A list test reads its elements whatever else the list holds: a placeholder element names nothing it looks for.
+    if (r.test === 'exposes_loggers')
+        return v.split(',').some((p) => trimAscii(p) === 'loggers' || trimAscii(p) === '*');
+    if (r.test === 'profile_below_floor')
+        return v.split(',').some((p) => r.values.includes(trimAscii(p)));
     if (PLACEHOLDER.test(v))
         return false;
     switch (r.test) {
@@ -29776,10 +29784,6 @@ function passesTest(r, raw, set) {
             return isLevel(v) && below(v.toUpperCase(), set.floor);
         case 'not_exporter':
             return v !== '' && v.toLowerCase() !== 'none' && set.exporter !== null && v.toLowerCase() !== set.exporter.toLowerCase();
-        case 'exposes_loggers':
-            return v.split(',').some((part) => trimAscii(part) === 'loggers' || trimAscii(part) === '*');
-        case 'profile_below_floor':
-            return v.split(',').some((part) => r.values.includes(trimAscii(part)));
         default:
             throw new Error(`unknown test ${r.test}`);
     }
