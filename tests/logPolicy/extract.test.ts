@@ -322,6 +322,7 @@ describe('Helm templates', () => {
 
   it('removes a whole-line action, and keeps a key whose value is one', () => {
     expect(untemplated('{{- if .Values.x }}\n- {{ include "y" . }}\nk: {{ .Values.k }}\n')).toBe('\n\nk: __TEMPLATE__\n');
+    expect(untemplated('{{- end }} {{- end }}\n{{ include "x" (dict "k" "a:b") }}\n')).toBe('\n\n');
   });
 
   it('reads a long run of spaces before a line separator in linear time', () => {

@@ -30406,12 +30406,15 @@ function untemplated(text) {
         .join('\n')
         .replace(/\{\{[^}]*\}\}/g, (m) => '__TEMPLATE__' + '\n'.repeat(m.split('\n').length - 1));
 }
-/** A line that is one template action and nothing else, such as `{{- if .Values.x }}` or `- {{ include "x" . }}`. */
+/**
+ * A line of template actions and nothing else, such as `{{- if .Values.x }}`, `- {{ include "x" . }}` or
+ * `{{- end }} {{- end }}`, unless it holds a key whose value is an action.
+ */
 function wholeLineAction(line) {
     let t = line.trim();
-    if (t.startsWith('-') && !t.startsWith('-}}'))
+    if (t.startsWith('-'))
         t = t.substring(1).trimStart();
-    return t.startsWith('{{') && t.endsWith('}}') && t.indexOf('}}') === t.length - 2 && !t.includes(':');
+    return t.length >= 4 && t.startsWith('{{') && t.endsWith('}}') && !/:\s*\{\{/.test(line);
 }
 function yamlSettings(path, text, out) {
     const source = text.includes('{{') ? untemplated(text) : text;
