@@ -30229,7 +30229,9 @@ exports.extract = extract;
 exports.commandLineSettings = commandLineSettings;
 exports.argumentSetting = argumentSetting;
 exports.untemplated = untemplated;
+exports.replaceTemplates = replaceTemplates;
 exports.documents = documents;
+exports.withoutYamlVersion = withoutYamlVersion;
 exports.keyPathNames = keyPathNames;
 exports.property = property;
 exports.envValue = envValue;
@@ -30369,13 +30371,13 @@ function tokens(commandLine) {
 }
 /** Spring's JSON with each placeholder read as a template value, quoted where it stands bare. */
 function springJsonParsed(value) {
-    const marked = value.replace(/\$\{[^}]*\}|\{\{[^}]*\}\}/g, '__TEMPLATE__');
+    const marked = replaceTemplates(value, { dollar: true }, () => '__TEMPLATE__');
     try {
         return JSON.parse(marked);
     }
     catch {
-        return JSON.parse(value.replace(/"[^"]*"|\$\{[^}]*\}|\{\{[^}]*\}\}/g, (m) => (m.startsWith('"') ? m : '"__TEMPLATE__"'))
-            .replace(/"[^"]*"/g, (m) => m.replace(/\$\{[^}]*\}|\{\{[^}]*\}\}/g, '__TEMPLATE__')));
+        return JSON.parse(replaceTemplates(value, { dollar: true, strings: true }, () => '"__TEMPLATE__"')
+            .replace(/"[^"]*"/g, (m) => replaceTemplates(m, { dollar: true }, () => '__TEMPLATE__')));
     }
 }
 function springJson(out, path, line, value) {
@@ -30402,11 +30404,52 @@ function springJson(out, path, line, value) {
 }
 /** A Helm template's actions removed, so the YAML around them parses; a value written as a template reads as one. */
 function untemplated(text) {
-    return blankMultiLineActions(text)
+    const lined = blankMultiLineActions(text)
         .split('\n')
         .map((l) => (wholeLineAction(l) ? '' : l))
-        .join('\n')
-        .replace(/\{\{[^}]*\}\}/g, (m) => '__TEMPLATE__' + '\n'.repeat(m.split('\n').length - 1));
+        .join('\n');
+    return replaceTemplates(lined, {}, (m) => '__TEMPLATE__' + '\n'.repeat(m.split('\n').length - 1));
+}
+/**
+ * `text` with each `{{...}}` (and, with `dollar`, each `${...}`) replaced by `sub`, read as the regular expression
+ * `"[^"]*"|\$\{[^}]*\}|\{\{[^}]*\}\}` reads it (the string alternative only with `strings`, and a string kept as it
+ * is), in one pass: the next `}` and `"` are each found once, so a file of unclosed braces costs linear time.
+ */
+function replaceTemplates(text, opts, sub) {
+    let close = -2;
+    let quote = -2;
+    const next = (cached, ch, from) => (cached !== -1 && cached < from ? text.indexOf(ch, from) : cached);
+    let out = '';
+    let last = 0;
+    for (let p = 0; p < text.length;) {
+        const c = text[p];
+        if (opts.strings && c === '"') {
+            quote = next(quote, '"', p + 1);
+            if (quote >= 0) {
+                p = quote + 1;
+                continue;
+            }
+        }
+        let end = -1;
+        if (opts.dollar && c === '$' && text[p + 1] === '{') {
+            close = next(close, '}', p + 2);
+            if (close >= 0)
+                end = close + 1;
+        }
+        if (end < 0 && c === '{' && text[p + 1] === '{') {
+            close = next(close, '}', p + 2);
+            if (close >= 0 && text[close + 1] === '}')
+                end = close + 2;
+        }
+        if (end >= 0) {
+            out += text.substring(last, p) + sub(text.substring(p, end));
+            last = p = end;
+        }
+        else {
+            p++;
+        }
+    }
+    return out + text.substring(last);
 }
 /**
  * The text with each action that spans lines and stands alone on them (a `{{/* ... *\/}}` header, a long `{{- if }}`)
@@ -30420,12 +30463,18 @@ function blankMultiLineActions(text) {
         if (j < 0)
             break;
         const action = text.substring(i, j + 2);
-        const lineStart = text.lastIndexOf('\n', i - 1) + 1;
-        let lineEnd = text.indexOf('\n', j + 2);
-        if (lineEnd < 0)
-            lineEnd = text.length;
-        const before = text.substring(lineStart, i).trim();
-        const alone = action.includes('\n') && (before === '' || before === '-') && text.substring(j + 2, lineEnd).trim() === '';
+        // The line bounds are found only for an action that spans lines, so the scan stays linear.
+        let alone = false;
+        let lineStart = 0;
+        let lineEnd = 0;
+        if (action.includes('\n')) {
+            lineStart = text.lastIndexOf('\n', i - 1) + 1;
+            lineEnd = text.indexOf('\n', j + 2);
+            if (lineEnd < 0)
+                lineEnd = text.length;
+            const before = text.substring(lineStart, i).trim();
+            alone = (before === '' || before === '-') && text.substring(j + 2, lineEnd).trim() === '';
+        }
         if (alone) {
             out += text.substring(from, lineStart) + '\n'.repeat(action.split('\n').length - 1);
             from = lineEnd;
@@ -30477,7 +30526,7 @@ function yamlSettings(path, text, out) {
     const source = joined.includes('{{') ? untemplated(joined) : joined;
     for (const { part, start } of documents(source)) {
         const counter = new yaml_1.LineCounter();
-        const docs = (0, yaml_1.parseAllDocuments)(part, { lineCounter: counter, uniqueKeys: false });
+        const docs = (0, yaml_1.parseAllDocuments)(withoutYamlVersion(part), { lineCounter: counter, uniqueKeys: false });
         const list = Array.isArray(docs) ? docs : [docs];
         const lineOf = (node) => {
             const at = node?.range?.[0];
@@ -30485,24 +30534,43 @@ function yamlSettings(path, text, out) {
         };
         for (const doc of list) {
             if (doc.errors.length > 0) {
-                const at = doc.errors[0].linePos?.[0]?.line ?? 1;
-                out.problems.push({ path, line: start + at, reason: 'not valid YAML' });
+                // Named at the document's first line, as the CLI names it: the two parsers place an error on different lines.
+                out.problems.push({ path, line: start + 1, reason: 'not valid YAML' });
                 continue;
             }
             walkYaml(doc.contents, [], path, out, lineOf, 0);
         }
     }
 }
+/**
+ * `text` with each `%YAML` directive line blanked: both interpreters then read every file under one schema, YAML 1.2
+ * with the 1.1 boolean words, whatever version a file declares and wherever the line stands.
+ */
+function withoutYamlVersion(text) {
+    return text.replace(/^%YAML[ \t][^\n]*$/gm, '');
+}
 /** A plain word SnakeYAML and the Kubernetes YAML reader take as a YAML 1.1 boolean, where YAML 1.2 reads a string. */
 const YAML11_BOOLEAN = /^(?:yes|Yes|YES|on|On|ON|no|No|NO|off|Off|OFF)$/;
+function boolText(source) {
+    const t = source.toLowerCase();
+    if (t === 'yes' || t === 'on')
+        return 'true';
+    if (t === 'no' || t === 'off')
+        return 'false';
+    return t;
+}
 function scalarText(node) {
     if (!(0, yaml_1.isScalar)(node))
         return null;
     const v = node.value;
     if (v === null || v === undefined)
         return '';
-    if (typeof v === 'string' && node.type === 'PLAIN' && YAML11_BOOLEAN.test(v))
+    const untagged = node.tag === undefined || node.tag === '!';
+    if (typeof v === 'string' && node.type === 'PLAIN' && untagged && YAML11_BOOLEAN.test(v))
         return /^(?:yes|on)$/i.test(v) ? 'true' : 'false';
+    // An explicit !!bool is read from its text, as the CLI reads it: the words of YAML 1.1 as booleans, any other as written.
+    if (node.tag === 'tag:yaml.org,2002:bool' && typeof node.source === 'string')
+        return boolText(node.source);
     return typeof v === 'object' ? null : String(v);
 }
 function walkYaml(node, keys, path, out, lineOf, depth) {
@@ -31039,7 +31107,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.MAPPING_MAX_BYTES = exports.MAPPING_FILE = exports.FILE_MAX_BYTES = exports.FINDINGS_MAX = void 0;
+exports.GLOB_PATTERNS_MAX = exports.MAPPING_MAX_BYTES = exports.MAPPING_FILE = exports.FILE_MAX_BYTES = exports.FINDINGS_MAX = void 0;
 exports.printable = printable;
 exports.fingerprint = fingerprint;
 exports.fetchRules = fetchRules;
@@ -31115,8 +31183,9 @@ async function fetchRules(api, projectUid, environment, service, lockedVersionUi
     if (res.statusCode === 404) {
         const code = res.body?.data?.code;
         if (code === 'ci_rules_service_unknown') {
-            throw new errors_1.UserError(`The locked analysis of "${printable(environment)}" holds no service named "${printable(service)}", so its log ` +
-                'policy rules cannot be read. Use the name the environment lists it under.');
+            throw new errors_1.UserError(`The locked analysis of "${printable(environment)}" holds no single service named "${printable(service)}" ` +
+                '(none, or two sharing it), so its log policy rules cannot be read. Use the service key or the name the ' +
+                'environment lists it under.');
         }
         if (code === 'ci_rules_lock_unknown') {
             throw new errors_1.UserError(`Env "${printable(environment)}" holds no lock by the uid this run builds; run the workflow again.`);
@@ -31182,10 +31251,12 @@ function readMapping(root, tracked) {
     let doc;
     try {
         // Parsed silently, so no line of the file reaches the log; any error, a duplicate key included, refuses it.
-        const parsed = (0, yaml_1.parseDocument)(fs.readFileSync(file, 'utf8'), { logLevel: 'silent' });
-        if (parsed.errors.length > 0)
+        // One document, as the CLI reads it, under the same schema whatever version it declares.
+        const parsed = (0, yaml_1.parseAllDocuments)((0, extract_1.withoutYamlVersion)(fs.readFileSync(file, 'utf8')), { logLevel: 'silent' });
+        const docs = Array.isArray(parsed) ? parsed : [parsed];
+        if (docs.length !== 1 || docs[0].errors.length > 0)
             throw new Error('not valid YAML');
-        doc = parsed.toJS();
+        doc = docs[0].toJS();
     }
     catch {
         throw new errors_1.UserError(`${exports.MAPPING_FILE} is not valid YAML.`);
@@ -31226,17 +31297,58 @@ function globRefusal(glob) {
         return 'a path may not use an extglob such as @(a|b)';
     if (glob.includes('\\'))
         return 'a path may not use a backslash escape';
+    if (glob.includes('(') || glob.includes(')'))
+        return 'a path may not hold ( or )';
+    if (glob.includes('${'))
+        return 'a path may not hold ${';
     if (glob.split('/').some((seg) => seg.includes('**') && seg !== '**'))
         return '** must be a whole path segment';
-    for (const m of glob.matchAll(/\{([^}]*)\}/g)) {
-        const body = m[1];
-        if (!body.includes(',') || body.includes('..') || /[*?[{]/.test(body)) {
-            return 'a {...} must list literal alternatives separated by commas';
+    // One left-to-right pass over the braces and the classes, so a mapping of unclosed braces costs linear time.
+    let patterns = 1;
+    let open = -1;
+    for (let i = 0; i < glob.length; i++) {
+        if (glob[i] === '{') {
+            if (open >= 0)
+                return 'a {...} must list literal alternatives separated by commas';
+            open = i;
+        }
+        else if (glob[i] === '}') {
+            if (open < 0)
+                return 'a path has an unbalanced brace';
+            const body = glob.substring(open + 1, i);
+            if (!body.includes(',') || body.includes('..') || /[*?[{]/.test(body)) {
+                return 'a {...} must list literal alternatives separated by commas';
+            }
+            patterns *= body.split(',').length;
+            if (patterns > exports.GLOB_PATTERNS_MAX)
+                return `a path's braces may make at most ${exports.GLOB_PATTERNS_MAX} patterns`;
+            open = -1;
         }
     }
-    if (/\{[^}]*$|^[^{]*\}/.test(glob))
+    if (open >= 0)
         return 'a path has an unbalanced brace';
+    for (let i = glob.indexOf('['); i >= 0;) {
+        const end = glob.indexOf(']', i + 1);
+        if (end < 0)
+            break;
+        const body = glob.substring(i + 1, end);
+        if (body.includes('/') || rangeOverSlash(body))
+            return 'a [...] may not hold or span /';
+        if (body.includes('[:') || /^[!^]?$/.test(body))
+            return 'a [...] must list characters or ranges';
+        i = glob.indexOf('[', end + 1);
+    }
     return null;
+}
+/** What a mapping path's braces may expand to: minimatch builds every pattern for every file it tests. */
+exports.GLOB_PATTERNS_MAX = 64;
+/** A range such as `+-0` whose ends lie either side of `/`, which minimatch never matches and the CLI's regex would. */
+function rangeOverSlash(body) {
+    for (let i = 1; i + 1 < body.length; i++) {
+        if (body[i] === '-' && body[i - 1] <= '/' && body[i + 1] >= '/')
+            return true;
+    }
+    return false;
 }
 /** The repository's tracked files and its mapping. */
 function readRepo(root) {
@@ -31248,7 +31360,9 @@ function filesFor(files, mapping, service, environment) {
     if (!mapping)
         return files;
     const globs = mapping.filter((e) => e.service === service && e.environment === environment).flatMap((e) => e.paths);
-    return files.filter((f) => globs.some((g) => (0, minimatch_1.minimatch)(f, g, { dot: true })));
+    // Each glob is compiled once, not once per file.
+    const matchers = globs.map((g) => new minimatch_1.Minimatch(g, { dot: true }));
+    return files.filter((f) => matchers.some((m) => m.match(f)));
 }
 /** Reads the deployment files among `files`: regular files only, inside the root, never a link. */
 function scan(root, files, mapped = false) {

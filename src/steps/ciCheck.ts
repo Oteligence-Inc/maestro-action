@@ -3,11 +3,11 @@ import { execFileSync } from 'child_process';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { minimatch } from 'minimatch';
-import { parseDocument } from 'yaml';
+import { Minimatch } from 'minimatch';
+import { parseAllDocuments } from 'yaml';
 import { MaestroApi, expectOk } from '../api';
 import { CASES_DIGEST, Finding, RuleSet, VERSION, evaluate, unreadable } from '../ciRules';
-import { Problem, SourcedSetting, extract, kindOf } from '../logPolicy/extract';
+import { Problem, SourcedSetting, extract, kindOf, withoutYamlVersion } from '../logPolicy/extract';
 import { UserError } from '../util/errors';
 import { envPath } from './resolveConfig';
 
@@ -120,8 +120,9 @@ export async function fetchRules(
     const code = (res.body as { data?: { code?: unknown } } | undefined)?.data?.code;
     if (code === 'ci_rules_service_unknown') {
       throw new UserError(
-        `The locked analysis of "${printable(environment)}" holds no service named "${printable(service)}", so its log ` +
-          'policy rules cannot be read. Use the name the environment lists it under.',
+        `The locked analysis of "${printable(environment)}" holds no single service named "${printable(service)}" ` +
+          '(none, or two sharing it), so its log policy rules cannot be read. Use the service key or the name the ' +
+          'environment lists it under.',
       );
     }
     if (code === 'ci_rules_lock_unknown') {
@@ -184,9 +185,11 @@ export function readMapping(root: string, tracked: string[]): MappingEntry[] | n
   let doc: unknown;
   try {
     // Parsed silently, so no line of the file reaches the log; any error, a duplicate key included, refuses it.
-    const parsed = parseDocument(fs.readFileSync(file, 'utf8'), { logLevel: 'silent' });
-    if (parsed.errors.length > 0) throw new Error('not valid YAML');
-    doc = parsed.toJS();
+    // One document, as the CLI reads it, under the same schema whatever version it declares.
+    const parsed = parseAllDocuments(withoutYamlVersion(fs.readFileSync(file, 'utf8')), { logLevel: 'silent' });
+    const docs = Array.isArray(parsed) ? parsed : [parsed];
+    if (docs.length !== 1 || docs[0].errors.length > 0) throw new Error('not valid YAML');
+    doc = docs[0].toJS();
   } catch {
     throw new UserError(`${MAPPING_FILE} is not valid YAML.`);
   }
@@ -225,15 +228,48 @@ export function globRefusal(glob: string): string | null {
   if (glob.startsWith('!')) return `a path may not start with ! (list the paths to check instead)`;
   if (/[@!+?*]\(/.test(glob)) return 'a path may not use an extglob such as @(a|b)';
   if (glob.includes('\\')) return 'a path may not use a backslash escape';
+  if (glob.includes('(') || glob.includes(')')) return 'a path may not hold ( or )';
+  if (glob.includes('${')) return 'a path may not hold ${';
   if (glob.split('/').some((seg) => seg.includes('**') && seg !== '**')) return '** must be a whole path segment';
-  for (const m of glob.matchAll(/\{([^}]*)\}/g)) {
-    const body = m[1];
-    if (!body.includes(',') || body.includes('..') || /[*?[{]/.test(body)) {
-      return 'a {...} must list literal alternatives separated by commas';
+  // One left-to-right pass over the braces and the classes, so a mapping of unclosed braces costs linear time.
+  let patterns = 1;
+  let open = -1;
+  for (let i = 0; i < glob.length; i++) {
+    if (glob[i] === '{') {
+      if (open >= 0) return 'a {...} must list literal alternatives separated by commas';
+      open = i;
+    } else if (glob[i] === '}') {
+      if (open < 0) return 'a path has an unbalanced brace';
+      const body = glob.substring(open + 1, i);
+      if (!body.includes(',') || body.includes('..') || /[*?[{]/.test(body)) {
+        return 'a {...} must list literal alternatives separated by commas';
+      }
+      patterns *= body.split(',').length;
+      if (patterns > GLOB_PATTERNS_MAX) return `a path's braces may make at most ${GLOB_PATTERNS_MAX} patterns`;
+      open = -1;
     }
   }
-  if (/\{[^}]*$|^[^{]*\}/.test(glob)) return 'a path has an unbalanced brace';
+  if (open >= 0) return 'a path has an unbalanced brace';
+  for (let i = glob.indexOf('['); i >= 0; ) {
+    const end = glob.indexOf(']', i + 1);
+    if (end < 0) break;
+    const body = glob.substring(i + 1, end);
+    if (body.includes('/') || rangeOverSlash(body)) return 'a [...] may not hold or span /';
+    if (body.includes('[:') || /^[!^]?$/.test(body)) return 'a [...] must list characters or ranges';
+    i = glob.indexOf('[', end + 1);
+  }
   return null;
+}
+
+/** What a mapping path's braces may expand to: minimatch builds every pattern for every file it tests. */
+export const GLOB_PATTERNS_MAX = 64;
+
+/** A range such as `+-0` whose ends lie either side of `/`, which minimatch never matches and the CLI's regex would. */
+function rangeOverSlash(body: string): boolean {
+  for (let i = 1; i + 1 < body.length; i++) {
+    if (body[i] === '-' && body[i - 1] <= '/' && body[i + 1] >= '/') return true;
+  }
+  return false;
 }
 
 /** The repository's tracked files and its mapping. */
@@ -246,7 +282,9 @@ export function readRepo(root: string): Repo {
 export function filesFor(files: string[], mapping: MappingEntry[] | null, service: string, environment: string): string[] {
   if (!mapping) return files;
   const globs = mapping.filter((e) => e.service === service && e.environment === environment).flatMap((e) => e.paths);
-  return files.filter((f) => globs.some((g) => minimatch(f, g, { dot: true })));
+  // Each glob is compiled once, not once per file.
+  const matchers = globs.map((g) => new Minimatch(g, { dot: true }));
+  return files.filter((f) => matchers.some((m) => m.match(f)));
 }
 
 /** Reads the deployment files among `files`: regular files only, inside the root, never a link. */

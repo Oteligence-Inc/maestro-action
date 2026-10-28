@@ -107,7 +107,7 @@ describe('fetchRules', () => {
 
   it('names a service the locked analysis does not hold, apart from a missing environment', async () => {
     nock(BASE).get(RULES).query(true).reply(404, { data: { code: 'ci_rules_service_unknown' } });
-    await expect(fetchRules(client(), 'proj_1', 'prod', 'orders')).rejects.toThrow('holds no service named "orders"');
+    await expect(fetchRules(client(), 'proj_1', 'prod', 'orders')).rejects.toThrow('holds no single service named "orders" (none, or two sharing it)');
   });
 
   it('names an environment that does not exist', async () => {
@@ -200,6 +200,12 @@ describe('which files are read', () => {
     ['a//b.yaml', false],
     ['tab\tname.yaml', false],
     ['x'.repeat(401), false],
+    ['x'.repeat(400), true],
+    ['deploy/' + String.fromCharCode(0xe9).repeat(393), true],
+    ['deploy/' + String.fromCodePoint(0x1f600).repeat(196) + 'x', true],
+    ['deploy/' + String.fromCodePoint(0x1f600).repeat(197), false],
+    ['deploy/a' + String.fromCharCode(0x85) + 'b.env', true],
+    ['deploy/a' + String.fromCharCode(0x7f) + 'b.env', false],
   ])('sends %s as a path: %s', (p, ok) => {
     expect(sendablePath(p)).toBe(ok);
   });
@@ -396,11 +402,21 @@ describe('the mapping file', () => {
     ['with a blank service', 'services:\n  - service: "  "\n    environment: prod\n    paths: ["a"]\n'],
     ['with an empty path', 'services:\n  - service: o\n    environment: prod\n    paths: [""]\n'],
     ['with an unbalanced brace', 'services:\n  - service: o\n    environment: prod\n    paths: ["{a,b/c.env"]\n'],
+    ['of two documents', 'services:\n  - service: o\n    environment: prod\n    paths: [a]\n---\nservices: []\n'],
+    ['with a trailing document marker', 'services:\n  - service: o\n    environment: prod\n    paths: [a]\n---\n'],
+    ['with a top-level key given twice', 'x: 1\nx: 2\nservices:\n  - service: o\n    environment: prod\n    paths: [a]\n'],
   ])('refuses one that is %s', (_what, text) => {
     expect(() => readOf(repo({ '.maestro/check.yml': text }))).toThrow(UserError);
   });
 
   const good = 'services:\n  - service: orders\n    environment: prod\n    paths: ["a/**"]\n';
+
+  it('reads one that declares YAML 1.2 or 1.1 under one schema, as the CLI does', () => {
+    const text = '%YAML 1.2\n---\nservices:\n  - service: orders\n    environment: prod\n    paths: ["a/**"]\n';
+    expect(readOf(repo({ '.maestro/check.yml': text }))).toEqual([{ service: 'orders', environment: 'prod', paths: ['a/**'] }]);
+    const old = '%YAML 1.1\n---\nservices:\n  - service: orders\n    environment: on\n    paths: ["a/**"]\n';
+    expect(readOf(repo({ '.maestro/check.yml': old }))).toEqual([{ service: 'orders', environment: 'on', paths: ['a/**'] }]);
+  });
 
   it('reads a tracked one, and refuses one that is untracked, a link or too large', () => {
     expect(readOf(repo({ '.maestro/check.yml': good }))).toEqual([{ service: 'orders', environment: 'prod', paths: ['a/**'] }]);
@@ -426,12 +442,26 @@ describe('the mapping file', () => {
     ['deploy/**', null],
     ['helm/*.yaml', null],
     ['{a,b}/c.env', null],
+    ['{a,b}'.repeat(6), null],
+    ['v[0-9].yaml', null],
     ['v?.yaml', null],
     ['[!x].env', null],
     ['!k8s/dev/**', 'start with !'],
     ['helm/{values.yaml,values-*.yaml}', 'literal alternatives'],
     ['deploy/**.yaml', 'whole path segment'],
     ['@(prod|staging)/a.yaml', 'extglob'],
+    ['deploy/?(a).yaml', 'extglob'],
+    ['deploy/*(a).yaml', 'extglob'],
+    ['deploy/!(a).yaml', 'extglob'],
+    ['a[/x]b', 'hold or span /'],
+    ['a[+-0]b', 'hold or span /'],
+    ['{a,{b,c}', 'literal alternatives'],
+    ['deploy/(a).yaml', '( or )'],
+    ['{a,@}(x)', '( or )'],
+    ['${a,b}/c.env', '${'],
+    ['[[:alpha:]]x.env', 'characters or ranges'],
+    ['a[!]b', 'characters or ranges'],
+    ['{a,b}'.repeat(7), 'at most 64 patterns'],
     ['{a}/b', 'literal alternatives'],
     ['{1..3}/b', 'literal alternatives'],
     ['a\\*b', 'backslash'],

@@ -42,6 +42,16 @@ describe('folding and values', () => {
     expect(NAME.test('logging.level.outer$inner')).toBe(false);
   });
 
+  it('refuses a rule set with a rule missing one of its lists', () => {
+    const set = Object.values(suite.ruleSets)[0];
+    for (const list of ['exact', 'prefixes', 'suffixes', 'except', 'values']) {
+      const rule = { ...set.rules[0] } as unknown as Record<string, unknown>;
+      delete rule[list];
+      expect(unreadable({ ...set, rules: [rule as unknown as typeof set.rules[0]] })).toContain('is out of shape');
+    }
+    expect(unreadable({ ...set, rules: [set.rules[0]] })).toBeNull();
+  });
+
   it('refuses a test it does not know when asked to evaluate one', () => {
     const set = Object.values(suite.ruleSets)[0];
     expect(() => passesTest({ ...set.rules[0], test: 'regex' }, 'x', set)).toThrow('unknown test regex');

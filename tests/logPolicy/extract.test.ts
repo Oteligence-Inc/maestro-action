@@ -9,6 +9,7 @@ import {
   keyPathNames,
   kindOf,
   property,
+  replaceTemplates,
   untemplated,
 } from '../../src/logPolicy/extract';
 import { NAME, RuleSet } from '../../src/ciRules';
@@ -391,6 +392,64 @@ describe('YAML documents and compose env values, as the CLI reads them', () => {
     expect(names(versioned, 'yaml')).toContain('logging.level.root=DEBUG@6');
     const tagged = '%TAG !e! tag:example.com,2000:\n---\nlogging:\n  level:\n    root: !e!level DEBUG\n';
     expect(extract('v.yaml', tagged, 'yaml').problems).toEqual([]);
+    const commented = '%TAG !e! tag:example.com,2000:\n# header\n---\nlogging:\n  level:\n    root: !e!level DEBUG\n';
+    expect(extract('v.yaml', commented, 'yaml').problems).toEqual([]);
+    expect(names(commented, 'yaml')).toContain('logging.level.root=DEBUG@6');
+  });
+
+  it('names a broken document at its first line, as the CLI does', () => {
+    expect(extract('v.yaml', 'a: 1\n---\nb: [unclosed\n', 'yaml').problems).toEqual([
+      { path: 'v.yaml', line: 2, reason: 'not valid YAML' },
+    ]);
+  });
+
+  it('blanks a multi-line action after a list dash, reads one sharing its line as a template, and keeps YAML after one', () => {
+    const dashed = 'env:\n- {{ include "x" .\n    | nindent 2 }}\nlogging:\n  level:\n    root: DEBUG\n';
+    expect(untemplated(dashed).split('\n').slice(1, 3)).toEqual(['', '']);
+    const shared = 'a: {{ .Values.a\n  | default "x" }}\nlogging:\n  level:\n    root: DEBUG\n';
+    expect(names(shared, 'yaml')).toEqual(expect.arrayContaining(['a=__TEMPLATE__@1', 'logging.level.root=DEBUG@5']));
+    const trailing = '{{- if .Values.a\n  }} x: 1\nlogging:\n  level:\n    root: DEBUG\n';
+    expect(untemplated(trailing).split('\n')[1]).not.toBe('');
+  });
+
+  it('reads the template patterns as the regular expressions read them, in linear time', () => {
+    const reference = (t: string, dollar: boolean, strings: boolean) =>
+      t.replace(
+        new RegExp((strings ? '"[^"]*"|' : '') + (dollar ? '\\$\\{[^}]*\\}|' : '') + '\\{\\{[^}]*\\}\\}', 'g'),
+        (m) => (m.startsWith('"') ? m : '<' + m.length + '>'),
+      );
+    const alphabet = ['{', '}', '$', '"', 'a', '\n'];
+    let seed = 7;
+    for (let n = 0; n < 2000; n++) {
+      let t = '';
+      const len = n % 24;
+      for (let i = 0; i < len; i++) {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        t += alphabet[seed % alphabet.length];
+      }
+      for (const [dollar, strings] of [[false, false], [true, false], [true, true]]) {
+        expect(replaceTemplates(t, { dollar, strings }, (m) => '<' + m.length + '>')).toBe(reference(t, dollar, strings));
+      }
+    }
+    const started = Date.now();
+    replaceTemplates('{{'.repeat(1 << 19) + '$'.repeat(4) + '{'.repeat(1 << 19), { dollar: true, strings: true }, () => '');
+    untemplated('{{}}'.repeat(1 << 18));
+    untemplated('{{'.repeat(1 << 17) + 'x');
+    expect(Date.now() - started).toBeLessThan(10000);
+  });
+
+  it('keeps an explicitly tagged !!str yes a word, and reads an explicit !!bool yes as true', () => {
+    expect(names('b: !!str yes\n', 'yaml')).toEqual(['b=yes@1']);
+    expect(names('b: !!bool yes\nc: !!bool Off\nd: ! on\n', 'yaml')).toEqual(['b=true@1', 'c=false@2', 'd=true@3']);
+  });
+
+  it('reads every file under one schema whatever version it declares, and wherever the directive stands', () => {
+    expect(names('%YAML 1.1\n---\nOTEL_JAVAAGENT_DEBUG: y\nt: 2001-12-14\n', 'yaml')).toEqual([
+      'otel.javaagent.debug=y@3',
+      't=2001-12-14@4',
+    ]);
+    const misplaced = 'logging:\n  level:\n    root: DEBUG\n%YAML 1.2\n---\na: 1\n';
+    expect(names(misplaced, 'yaml')).toEqual(expect.arrayContaining(['logging.level.root=DEBUG@3', 'a=1@6']));
   });
 
   it('reads a YAML file whose lines end in a lone CR', () => {

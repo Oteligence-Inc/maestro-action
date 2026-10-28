@@ -44,7 +44,10 @@ in `platform-overview/TODO.md`.
   source they can still differ on: YAML the two parsers accept differently (malformed indentation, a tag or anchor on
   its own line); a name holding a character whose lower case differs between JavaScript and Go; a `.properties` value
   with a `\uXXXX` escape; a Dockerfile with an `# escape=` directive; an exec-form element that is not a string;
-  whitespace JavaScript's `trim` and Go's `TrimSpace` treat differently (U+FEFF, U+0085); and, past `FINDINGS_MAX`, the
+  whitespace JavaScript's `trim` and Go's `TrimSpace` treat differently (U+FEFF, U+0085), and the same split in an env
+  file's key pattern, where JavaScript's `\s` is Unicode and Go's is ASCII; a YAML file that is not valid UTF-8, which
+  yaml.v3 refuses and the Action reads with replacement characters; a `<<` merge key in the mapping, which yaml.v3
+  merges and the Action's YAML 1.2 parser does not; and, past `FINDINGS_MAX`, the
   order of two findings on one line from a Spring JSON object or of paths with characters outside the Basic
   Multilingual Plane. A difference shows as a check that passes in one and fails in the other on the same files.
 - **Fix:** add each case to both suites from one shared fixture and align the side that differs.
