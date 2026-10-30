@@ -7,9 +7,10 @@ import { Problem } from '../../src/logPolicy/extract';
 import { findingsOf, scan } from '../../src/steps/ciCheck';
 import evaluation from '../fixtures/ci-rules/evaluation-cases.json';
 
-// The CLI's suite holds a byte-identical copy of this file and pins the same digest, so the two read every case alike.
+// The CLI's suite holds a copy of this file and pins the same digest. Each suite checks only its own copy, so a case
+// is added to both by copying the file and its digest to both repositories.
 const SUITE = path.join(__dirname, '..', 'fixtures', 'ci-rules', 'extraction-cases.json');
-const EXTRACTION_CASES_DIGEST = 'fbcdb035926c15560356ab6985441e4182fad05cc3f2fcab04c23390d3fd139f';
+const EXTRACTION_CASES_DIGEST = '9fbf390d61674648da83f4f83f1cf4bbe98ee7be2b2de7fb1c7b4da3c43446e0';
 
 interface Case {
   name: string;

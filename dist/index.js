@@ -30298,13 +30298,18 @@ function kindOf(path) {
     return null;
 }
 /**
- * A file's text as its deployment reads it: a .properties file as ISO-8859-1, as Java reads one, and any other kind
- * as UTF-8, or null when it is not valid UTF-8, which the YAML readers refuse.
+ * A file's text as its deployment reads it, and the problem to name: a .properties file as ISO-8859-1, as Java reads
+ * one; any other kind as UTF-8; a Dockerfile or env file that is not valid UTF-8 as ISO-8859-1, named, since BuildKit
+ * and compose still apply its settings; a YAML file that is not valid UTF-8 not at all, as the YAML readers refuse it.
  */
 function decode(bytes, kind) {
     if (kind === 'properties')
-        return bytes.toString('latin1');
-    return (0, buffer_1.isUtf8)(bytes) ? bytes.toString('utf8') : null;
+        return { text: bytes.toString('latin1'), problem: null };
+    if ((0, buffer_1.isUtf8)(bytes))
+        return { text: bytes.toString('utf8'), problem: null };
+    if (kind === 'yaml')
+        return { text: null, problem: 'not valid UTF-8, not read' };
+    return { text: bytes.toString('latin1'), problem: 'not valid UTF-8, read as ISO-8859-1' };
 }
 /** A file's lines as the tools that read it split them: at CRLF, a lone CR or LF, and nowhere else. */
 function lines(text) {
@@ -30569,10 +30574,7 @@ function documents(text) {
         out.push({ part: cur.join('\n'), start });
     return out;
 }
-/** The most lines of one document re-indented for the YAML parser before it is named as not valid. */
-const REINDENTS_MAX = 32;
-const FLOW_INDENT = /^Flow (?:map|sequence) in block collection must be sufficiently indented/;
-const OPEN_QUOTE = /^Missing closing ["']quote/;
+const DOCUMENT_MARKER = /^(?:---|\.\.\.)(?:[ \t]|$)/;
 /** The columns a line's content starts at: its indentation and any `- ` that opens a sequence item on it. */
 function contentColumn(line) {
     const m = /^[ ]*(?:-[ ]+)*/.exec(line);
@@ -30581,52 +30583,144 @@ function contentColumn(line) {
 function indentOf(line) {
     return /^[ ]*/.exec(line)?.[0].length ?? 0;
 }
-function blankOrComment(line) {
-    return /^[ \t]*(?:#|$)/.test(line);
-}
-/**
- * The 0-based line the YAML parser's first error asks to be indented, and the indentation to give it, or null. The
- * parser refuses a flow collection or a quoted scalar continued on a line indented no deeper than its key, which every
- * deployment reader (libyaml, go-yaml, SnakeYAML) reads, ignoring indentation there; indenting that line changes no
- * value, since leading space on such a line is not content.
- */
-function underIndented(docs, text) {
-    const error = docs.flatMap((d) => d.errors)[0];
-    const at = error?.linePos?.[0]?.line;
-    if (!error || at === undefined)
-        return null;
-    if (FLOW_INDENT.test(error.message)) {
-        const line = at - 1;
-        let before = line - 1;
-        while (before >= 0 && blankOrComment(text[before]))
-            before--;
-        if (before < 0)
-            return null;
-        const indent = contentColumn(text[before]) + 1;
-        return indentOf(text[line]) < indent ? { line, indent } : null;
-    }
-    if (OPEN_QUOTE.test(error.message)) {
-        const opened = at - 1;
-        const indent = contentColumn(text[opened]) + 1;
-        for (let line = opened + 1; line < text.length; line++) {
-            if (!/^[ \t]*$/.test(text[line]) && indentOf(text[line]) < indent)
-                return { line, indent };
+/** The offset of the quote that closes the quoted scalar opening at `start`, or -1. */
+function quoteEnd(text, start) {
+    const q = text[start];
+    for (let i = start + 1; i < text.length; i++) {
+        if (q === '"' && text[i] === '\\')
+            i++;
+        else if (text[i] === q) {
+            if (q === "'" && text[i + 1] === "'")
+                i++;
+            else
+                return i;
         }
     }
-    return null;
+    return -1;
 }
-/** A document part parsed, with the lines the parser refuses for indentation alone indented until it reads them. */
-function parsed(part) {
-    const text = withoutYamlVersion(part).split('\n');
-    for (let i = 0;; i++) {
-        const counter = new yaml_1.LineCounter();
-        const all = (0, yaml_1.parseAllDocuments)(text.join('\n'), { lineCounter: counter, uniqueKeys: false });
-        const docs = Array.isArray(all) ? all : [all];
-        const fix = i < REINDENTS_MAX ? underIndented(docs, text) : null;
-        if (!fix)
-            return { docs, counter };
-        text[fix.line] = ' '.repeat(fix.indent - indentOf(text[fix.line])) + text[fix.line];
+/** Whether a quote at `i` inside a flow collection opens a scalar: it follows `[`, `{`, `,`, `:`, `?` or nothing. */
+function opensScalar(text, i) {
+    let j = i - 1;
+    while (j >= 0 && (text[j] === ' ' || text[j] === '\t' || text[j] === '\n'))
+        j--;
+    return j < 0 || '[{,:?'.includes(text[j]);
+}
+/** The offset of the character that closes the flow collection or quoted scalar opening at `start`, or -1. */
+function closing(text, start) {
+    if (text[start] === '"' || text[start] === "'")
+        return quoteEnd(text, start);
+    let depth = 0;
+    for (let i = start; i < text.length; i++) {
+        const c = text[i];
+        if (c === '[' || c === '{')
+            depth++;
+        else if (c === ']' || c === '}') {
+            if (--depth === 0)
+                return i;
+        }
+        else if ((c === '"' || c === "'") && opensScalar(text, i)) {
+            i = quoteEnd(text, i);
+            if (i < 0)
+                return -1;
+        }
+        else if (c === '#' && (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\t' || text[i - 1] === '\n')) {
+            i = text.indexOf('\n', i);
+            if (i < 0)
+                return -1;
+        }
     }
+    return -1;
+}
+/**
+ * In a part that does not parse, the first flow collection or quoted scalar the parser ended before its closing
+ * character, which it does when the construct continues on lines indented no deeper than its key: every deployment
+ * reader (libyaml, go-yaml, SnakeYAML) reads those, ignoring indentation there. Indents each such line past its key and
+ * says whether one changed; indenting changes no value, since a continuation line's leading space is not content. A
+ * line that is a document marker is left, as yaml.v3 refuses it there.
+ */
+function reindent(docs, lines, counter) {
+    if (!docs.some((d) => d.errors.length > 0))
+        return false;
+    const text = lines.join('\n');
+    let open = -1;
+    let end = -1;
+    for (const doc of docs) {
+        (0, yaml_1.visit)(doc, (_key, node, path) => {
+            const range = node?.range;
+            if (!range || (open >= 0 && range[0] >= open))
+                return;
+            const quoted = (0, yaml_1.isScalar)(node) && (node.type === 'QUOTE_DOUBLE' || node.type === 'QUOTE_SINGLE');
+            const flow = (0, yaml_1.isCollection)(node) && node.flow && !path.some((a) => (0, yaml_1.isCollection)(a) && a.flow);
+            if (!quoted && !flow)
+                return;
+            const close = closing(text, range[0]);
+            if (close > range[1] - 1) {
+                open = range[0];
+                end = close;
+            }
+        });
+    }
+    if (open < 0)
+        return false;
+    const first = counter.linePos(open).line - 1;
+    const last = counter.linePos(end).line - 1;
+    const indent = contentColumn(lines[first]) + 1;
+    let changed = false;
+    for (let line = first + 1; line <= last; line++) {
+        if (/^[ \t]*$/.test(lines[line]) || indentOf(lines[line]) >= indent)
+            continue;
+        if (DOCUMENT_MARKER.test(lines[line]))
+            return false;
+        lines[line] = ' '.repeat(indent - indentOf(lines[line])) + lines[line];
+        changed = true;
+    }
+    return changed;
+}
+/**
+ * A document part parsed, each flow collection or quoted scalar the parser refuses for its indentation alone indented
+ * until it reads it: one reparse per such collection.
+ */
+function parsed(part) {
+    const lines = withoutYamlVersion(part).split('\n');
+    for (;;) {
+        const counter = new yaml_1.LineCounter();
+        const all = (0, yaml_1.parseAllDocuments)(lines.join('\n'), { lineCounter: counter, uniqueKeys: false });
+        const docs = Array.isArray(all) ? all : [all];
+        if (!reindent(docs, lines, counter))
+            return { docs, counter };
+    }
+}
+/** An anchor name yaml.v3 reads; it refuses a document that uses another. */
+const ANCHOR_NAME = /^[0-9A-Za-z_-]+$/;
+/**
+ * Each alias of a document and the node it names: the latest anchor of its name before it, as yaml.v3 resolves it.
+ * Null when an alias names no anchor before it, or an anchor or alias has a name yaml.v3 refuses: the document is then
+ * not valid YAML, as yaml.v3 and the Kubernetes reader find it.
+ */
+function aliasTargets(doc) {
+    const anchors = new Map();
+    const targets = new Map();
+    let valid = true;
+    (0, yaml_1.visit)(doc, (_key, node) => {
+        if (!node)
+            return;
+        if ((0, yaml_1.isAlias)(node)) {
+            const target = anchors.get(node.source);
+            if (!ANCHOR_NAME.test(node.source) || !target)
+                valid = false;
+            else
+                targets.set(node, target);
+        }
+        else if ((0, yaml_1.isScalar)(node) || (0, yaml_1.isCollection)(node)) {
+            const anchor = node.anchor;
+            if (anchor !== undefined) {
+                if (!ANCHOR_NAME.test(anchor))
+                    valid = false;
+                anchors.set(anchor, node);
+            }
+        }
+    });
+    return valid ? targets : null;
 }
 /**
  * Reads a YAML stream, each line placed at the file line `lineAt` gives it. An embedded stream (a file a ConfigMap or
@@ -30637,11 +30731,14 @@ function yamlSettings(path, text, out, lineAt, embedded) {
     const source = joined.includes('{{') ? untemplated(joined) : joined;
     for (const { part, start } of documents(source)) {
         const { docs, counter } = parsed(part);
-        for (const doc of docs) {
-            if (doc.errors.length > 0) {
-                // Named at the document's first line, as the CLI names it: the two parsers place an error on different lines.
+        for (const [n, doc] of docs.entries()) {
+            // yaml.v3 refuses a document after `...` that does not open with `---`.
+            const aliases = doc.errors.length > 0 || (n > 0 && !doc.directives?.docStart) ? null : aliasTargets(doc);
+            if (!aliases) {
+                // Named at the part's first line, as the CLI names it, and the rest of the part (documents after a `...`) is not
+                // read, since yaml.v3 stops there: the two parsers place an error on different lines.
                 out.problems.push({ path, line: lineAt(start + 1), reason: 'not valid YAML' });
-                continue;
+                break;
             }
             const at = (node) => {
                 const pos = node?.range?.[0];
@@ -30650,7 +30747,7 @@ function yamlSettings(path, text, out, lineAt, embedded) {
             const contents = doc.contents;
             if (!contents)
                 continue;
-            walkYaml({ path, out, at, doc, embedded, secret: isSecret(contents) }, contents, [], 0, 0);
+            walkYaml({ path, out, at, aliases, embedded, secret: isSecret(contents) }, contents, [], 0, 0);
         }
     }
 }
@@ -30694,27 +30791,33 @@ function scalarText(node) {
  * `aliasLine` is the line of the outermost alias being expanded, 0 outside any; every node read inside one counts.
  */
 function visit(w, node, aliasLine) {
-    let n = node ?? null;
-    if (n && (0, yaml_1.isAlias)(n)) {
-        if (aliasLine === 0)
-            aliasLine = w.at(n);
-        n = n.resolve(w.doc) ?? null;
-    }
+    const n = node ?? null;
+    if (n && (0, yaml_1.isAlias)(n) && aliasLine === 0)
+        aliasLine = w.at(n);
     if (aliasLine !== 0 && ++w.out.aliasNodes > exports.ALIAS_NODES_MAX) {
         once(w.out, w.path, aliasLine, `aliases expand past ${exports.ALIAS_NODES_MAX} nodes, the rest not read`);
         return [null, aliasLine];
     }
-    return [n, aliasLine];
+    return [n && (0, yaml_1.isAlias)(n) ? w.aliases.get(n) ?? null : n, aliasLine];
 }
+/** A merge key: a plain `<<`, untagged or tagged `!!merge` (which the parser reads as a symbol). */
 function isMergeKey(node) {
-    return (0, yaml_1.isScalar)(node) && node.type === 'PLAIN' && node.value === '<<' &&
-        (node.tag === undefined || node.tag === 'tag:yaml.org,2002:merge');
+    if (!(0, yaml_1.isScalar)(node) || node.type !== 'PLAIN')
+        return false;
+    if (node.tag === 'tag:yaml.org,2002:merge')
+        return true;
+    return node.tag === undefined && node.value === '<<';
 }
 /**
  * A mapping's entries with its merge keys applied: its own first, then each merged mapping's in turn, a key already
- * given taking precedence, as YAML's merge key reads them.
+ * given taking precedence, as YAML's merge key reads them. Merges nest at most DEPTH_MAX deep, so a mapping that merges
+ * itself is named rather than read for ever.
  */
-function entries(w, map, aliasLine) {
+function entries(w, map, aliasLine, depth = 0) {
+    if (depth > exports.DEPTH_MAX) {
+        once(w.out, w.path, w.at(map), `nested deeper than ${exports.DEPTH_MAX} levels, not read below`);
+        return [];
+    }
     const out = [];
     const seen = new Set();
     const merges = [];
@@ -30738,7 +30841,7 @@ function entries(w, map, aliasLine) {
         for (const [s, sal] of sources) {
             if (!s || !(0, yaml_1.isMap)(s))
                 continue;
-            for (const e of entries(w, s, sal)) {
+            for (const e of entries(w, s, sal, depth + 1)) {
                 if (seen.has(e.key))
                     continue;
                 seen.add(e.key);
@@ -30757,26 +30860,26 @@ function embeddedKind(key) {
         return 'properties';
     return null;
 }
-/** The bytes a Kubernetes Secret's data value holds, or null when it is not base64. */
+/** The bytes a Kubernetes Secret's data value holds, or null when it is not base64; like Kubernetes, it ignores CR and LF. */
 function base64Bytes(text) {
-    const t = text.replace(/[\t\n\v\f\r ]/g, '');
+    const t = text.replace(/[\r\n]/g, '');
     if (t.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(t))
         return null;
     return Buffer.from(t, 'base64');
 }
-/** Reads a file a ConfigMap's or Secret's value carries: a literal block's lines at their own lines, any other at its. */
+/**
+ * Reads a file a ConfigMap's or Secret's value carries, from the bytes a mounted copy holds: a literal block's lines at
+ * their own lines, any other value's settings at its line.
+ */
 function readEmbedded(w, kind, written, text, encoded) {
     const at = w.at(written);
-    let body = text;
-    if (encoded) {
-        const bytes = base64Bytes(text);
-        if (!bytes)
-            return;
-        body = decode(bytes, kind);
-        if (body === null) {
-            w.out.problems.push({ path: w.path, line: at, reason: 'not valid UTF-8, not read' });
-            return;
-        }
+    const bytes = encoded ? base64Bytes(text) : Buffer.from(text, 'utf8');
+    if (!bytes)
+        return;
+    const { text: body, problem } = decode(bytes, kind);
+    if (body === null) {
+        w.out.problems.push({ path: w.path, line: at, reason: problem ?? 'not read' });
+        return;
     }
     const literal = !encoded && (0, yaml_1.isScalar)(written) && written.type === 'BLOCK_LITERAL';
     const lineAt = literal ? (k) => at + k : () => at;
@@ -30802,12 +30905,18 @@ function walkYaml(w, node, keys, depth, aliasLine) {
             const text = scalarText(value);
             if (text !== null) {
                 const line = w.at(written);
-                add(out, path, line, keyPathNames([...keys, key]), text);
-                if (COMMAND_KEYS.has(lower))
-                    commandLine(text, path, line, out);
+                // A Secret's data values are base64; one that is not, or does not decode to text, sets nothing.
+                const encoded = parent === 'data' && w.secret;
+                const bytes = encoded ? base64Bytes(text) : null;
+                const setting = !encoded ? text : bytes && (0, buffer_1.isUtf8)(bytes) ? bytes.toString('utf8') : null;
+                if (setting !== null) {
+                    add(out, path, line, keyPathNames([...keys, key]), setting);
+                    if (COMMAND_KEYS.has(lower))
+                        commandLine(setting, path, line, out);
+                }
                 const kind = embeddedKind(key);
                 if (kind && !w.embedded && (parent === 'data' || parent === 'stringdata')) {
-                    readEmbedded(w, kind, written, text, parent === 'data' && w.secret);
+                    readEmbedded(w, kind, written, text, encoded);
                 }
             }
             else if ((0, yaml_1.isSeq)(value) && COMMAND_KEYS.has(lower)) {
@@ -31681,11 +31790,11 @@ function scan(root, files, mapped = false) {
             result.problems.push({ path: rel, line: 1, reason: 'holds a NUL byte, not read' });
             continue;
         }
-        const text = (0, extract_1.decode)(bytes, kind);
-        if (text === null) {
-            result.problems.push({ path: rel, line: 1, reason: 'not valid UTF-8, not read' });
+        const { text, problem } = (0, extract_1.decode)(bytes, kind);
+        if (problem)
+            result.problems.push({ path: rel, line: 1, reason: problem });
+        if (text === null)
             continue;
-        }
         const found = (0, extract_1.extract)(rel, text, kind);
         result.read++;
         for (const s of found.settings)

@@ -318,11 +318,9 @@ export function scan(root: string, files: string[], mapped = false): Scan {
       result.problems.push({ path: rel, line: 1, reason: 'holds a NUL byte, not read' });
       continue;
     }
-    const text = decode(bytes, kind);
-    if (text === null) {
-      result.problems.push({ path: rel, line: 1, reason: 'not valid UTF-8, not read' });
-      continue;
-    }
+    const { text, problem } = decode(bytes, kind);
+    if (problem) result.problems.push({ path: rel, line: 1, reason: problem });
+    if (text === null) continue;
     const found = extract(rel, text, kind);
     result.read++;
     for (const s of found.settings) result.settings.push({ ...s, origin: origins + s.origin });

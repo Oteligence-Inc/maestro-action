@@ -493,3 +493,12 @@ describe('YAML documents and compose env values, as the CLI reads them', () => {
     expect(names('LOGGING_LEVEL_ROOT=DEBUG # temporary\n', 'env')).toEqual(['logging.level.root=DEBUG@1']);
   });
 });
+
+describe('YAML merge keys', () => {
+  it('names a mapping that merges itself rather than overflowing the stack', () => {
+    const run = () => extract('v.yaml', 'a: &a\n  <<: *a\n  LOGGING_LEVEL_ROOT: DEBUG\n', 'yaml');
+    expect(run).not.toThrow();
+    expect(run().problems).toEqual([{ path: 'v.yaml', line: 2, reason: 'nested deeper than 64 levels, not read below' }]);
+    expect(names('a: &a\n  <<: *a\n  LOGGING_LEVEL_ROOT: DEBUG\n', 'yaml')).toContain('logging.level.root=DEBUG@3');
+  });
+});
