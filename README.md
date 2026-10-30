@@ -216,7 +216,7 @@ It prints only `SUMMARY.txt`, `build-annex.json`, `build-statement.json`, `build
 for a build from a lock, `lock-record.json`. Any other name is a file the build did not make. `LC_ALL=C` matters:
 `comm` compares in the locale's order and reports every line when that differs from `sort`'s.
 
-After step 9 the Action calls `GET .../staleness` and emits a **`::warning`** naming any
+Before step 9 registers the JAR, the Action calls `GET .../staleness` and emits a **`::warning`** naming any
 **peer** services *this run* made stale (so they can be re-built). This is the only
 staleness signal that reaches CI/CD-only users.
 
@@ -237,7 +237,8 @@ This run changed the cross-service graph and made these peer services stale:
 order-service. Re-run each one's CI to refresh its instrumentation.
 ```
 
-Set `fail-on-warnings: true` to make that a hard failure instead.
+Set `fail-on-warnings: true` to make that a hard failure instead. The check runs before the JAR is registered, so a
+run it stops leaves the environment's registered JAR as it was.
 
 ## Drift from the lock
 

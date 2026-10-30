@@ -29976,6 +29976,8 @@ async function run() {
         });
         core.info(`Verified the build's files against its record (${verified.record}).`);
         core.info(SIGNATURE_LINES[verified.signature]);
+        // Before registering, so a run that fail-on-warnings stops leaves the environment's JAR as it was.
+        await (0, staleness_1.warnStalePeers)(api, inputs, cfg, analysisJobId, inputs.failOnWarnings);
         await (0, register_1.registerJarForEnv)(api, inputs, cfg, upload, buildJobId, analysisNames); // [9]
         core.setOutput('extension-dir', paths.extensionDir);
         core.setOutput('config-path', paths.configPath);
@@ -29986,8 +29988,6 @@ async function run() {
         core.setOutput('build-record', verified.record);
         core.setOutput('build-signature', verified.signature);
         core.setOutput('generated', 'true');
-        // v6 staleness signal — attributed to the analysis job that re-stamped current signatures.
-        await (0, staleness_1.warnStalePeers)(api, inputs, cfg, analysisJobId, inputs.failOnWarnings);
         await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'completed', 'success'); // deploy-run: done
         core.info('Maestro instrumentation complete.');
     }
