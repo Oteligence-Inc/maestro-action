@@ -3,6 +3,7 @@ import {
   SETTINGS_MAX,
   argumentSetting,
   commandLineSettings,
+  MalformedEscape,
   documents,
   envValue,
   extract,
@@ -73,7 +74,7 @@ describe('Dockerfiles', () => {
 
   it('names a CMD that is not a JSON array as a problem, by line', () => {
     const out = extract('Dockerfile', 'FROM x\nCMD ["java", "-Dsecret=hunter2"\n', 'dockerfile');
-    expect(out.problems).toEqual([{ path: 'Dockerfile', line: 2, reason: 'CMD is not a JSON array' }]);
+    expect(out.problems).toEqual([{ path: 'Dockerfile', line: 2, reason: 'CMD is not a JSON array of strings' }]);
     expect(JSON.stringify(out.problems)).not.toContain('hunter2');
   });
 });
@@ -266,8 +267,19 @@ describe('a properties line, as java.util.Properties reads it', () => {
     ['debug', 'debug', ''],
     ['password hunter2 more', 'password', 'hunter2 more'],
     ['k==v', 'k', '=v'],
+    ['logging.level.\\u0072oot=\\u0044EBUG', 'logging.level.root', 'DEBUG'],
+    ['a=\\t\\n\\r\\fx', 'a', '\t\n\r\fx'],
+    ['a=f\\alse', 'a', 'false'],
+    ['a=DEBUG  ', 'a', 'DEBUG  '],
+    ['a=\\', 'a', ''],
+    ['\\u00e9=x', '\u00e9', 'x'],
+    ['a=\\uD83D\\uDE00', 'a', '\uD83D\uDE00'],
   ])('reads %s as key %s', (line, key, value) => {
     expect(property(line)).toEqual({ key, value });
+  });
+
+  it.each(['a=\\u00', 'a=\\u00G1', '\\uZZZZ=x'])('refuses the malformed escape in %s', (line) => {
+    expect(() => property(line)).toThrow(MalformedEscape);
   });
 
   it('never takes a whole line as a key, so a value never reaches a name', () => {
@@ -278,7 +290,7 @@ describe('a properties line, as java.util.Properties reads it', () => {
   });
 
   it('continues a line on an odd run of backslashes only', () => {
-    expect(names('a=x\\\\\nlogging.level.root=DEBUG\n', 'properties')).toEqual(['a=x\\\\@1', 'logging.level.root=DEBUG@2']);
+    expect(names('a=x\\\\\nlogging.level.root=DEBUG\n', 'properties')).toEqual(['a=x\\@1', 'logging.level.root=DEBUG@2']);
     expect(names('a=x\\\nlogging.level.root=DEBUG\n', 'properties')).toEqual(['a=xlogging.level.root=DEBUG@1']);
   });
 });

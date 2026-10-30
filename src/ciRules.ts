@@ -64,11 +64,11 @@ const LEVELS = ['ALL', 'TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL', 'OFF'
 export const NAME = /^[a-z0-9._-]{1,200}$/;
 
 /**
- * A folded name as a finding carries it: a character outside NAME reads as _, which folding never leaves, and a name
- * past 200 characters is cut. A setting on such a name is still judged.
+ * A folded name as a finding carries it: each character outside NAME, a character past U+FFFF included, reads as one _,
+ * which folding never leaves, and a name past 200 characters is cut. A setting on such a name is still judged.
  */
 export function findingName(folded: string): string {
-  return folded.replace(/[^a-z0-9._-]/g, '_').substring(0, 200);
+  return folded.replace(/[^a-z0-9._-]/gu, '_').substring(0, 200);
 }
 
 /** A template placeholder anywhere, or a value written as $VAR or @name@: it passes no test but any. */

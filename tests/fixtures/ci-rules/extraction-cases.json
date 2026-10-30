@@ -1,0 +1,660 @@
+{
+  "version": 1,
+  "about": "Cases of deployment files in and findings out, held by the GitHub Action's and the CLI's suites alike. A runner writes each case's files (text as UTF-8, or base64 as bytes) to an empty directory, scans them in the order listed, and evaluates the settings against the lock-free rule set of evaluation-cases.json; it must give exactly the case's findings, in order, and its problems. The two copies are byte-identical: each suite pins this file's SHA-256.",
+  "cases": [
+    {
+      "name": "a block mapping indented between two levels is not valid YAML",
+      "files": [
+        {
+          "path": "deploy/a.yaml",
+          "text": "logging:\n  level:\n    root: INFO\n   com.acme: TRACE\n"
+        }
+      ],
+      "findings": [],
+      "problems": [
+        {
+          "path": "deploy/a.yaml",
+          "line": 1,
+          "reason": "not valid YAML"
+        }
+      ]
+    },
+    {
+      "name": "a tag or an anchor alone on its line is read",
+      "files": [
+        {
+          "path": "deploy/tagged.yaml",
+          "text": "logging:\n  level:\n    !!map\n    root: DEBUG\nenv:\n  &e\n  - name: OTEL_JAVAAGENT_DEBUG\n    value: \"true\"\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.root",
+          "path": "deploy/tagged.yaml",
+          "line": 4
+        },
+        {
+          "rule": "AGENT_DEBUG",
+          "severity": "error",
+          "name": "otel.javaagent.debug",
+          "path": "deploy/tagged.yaml",
+          "line": 8
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "a value whose anchor or tag stands alone on the line before it is placed at the value's line",
+      "files": [
+        {
+          "path": "deploy/props.yaml",
+          "text": "logging:\n  level:\n    root: &lvl\n      DEBUG\n    com.acme: !!str\n      # traced\n      TRACE\nenv:\n  - name: OTEL_JAVAAGENT_DEBUG\n    value: !!str\n      true\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.root",
+          "path": "deploy/props.yaml",
+          "line": 4
+        },
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.com.acme",
+          "path": "deploy/props.yaml",
+          "line": 7
+        },
+        {
+          "rule": "AGENT_DEBUG",
+          "severity": "error",
+          "name": "otel.javaagent.debug",
+          "path": "deploy/props.yaml",
+          "line": 11
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "an anchor that holds itself is read to the nesting limit and named where the nesting passes it",
+      "files": [
+        {
+          "path": "deploy/self.yaml",
+          "text": "a: &a\n  b: *a\n  LOGGING_LEVEL_ROOT: DEBUG\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.root",
+          "path": "deploy/self.yaml",
+          "line": 3
+        }
+      ],
+      "problems": [
+        {
+          "path": "deploy/self.yaml",
+          "line": 2,
+          "reason": "nested deeper than 64 levels, not read below"
+        }
+      ]
+    },
+    {
+      "name": "a flow collection continued at or below its key's indentation is read, as deployment readers read it",
+      "files": [
+        {
+          "path": "deploy/flow.yaml",
+          "text": "logging:\n  level: {root: DEBUG,\ncom.acme: TRACE}\nspec:\n  containers:\n    - command: [java,\n      \"-Dotel.javaagent.debug=true\"]\n      args: [\"--debug\"\n]\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.root",
+          "path": "deploy/flow.yaml",
+          "line": 2
+        },
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.com.acme",
+          "path": "deploy/flow.yaml",
+          "line": 3
+        },
+        {
+          "rule": "AGENT_DEBUG",
+          "severity": "error",
+          "name": "otel.javaagent.debug",
+          "path": "deploy/flow.yaml",
+          "line": 7
+        },
+        {
+          "rule": "SPRING_DEBUG",
+          "severity": "warning",
+          "name": "debug",
+          "path": "deploy/flow.yaml",
+          "line": 8
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "a quoted value continued at column 0 is read",
+      "files": [
+        {
+          "path": "deploy/quoted.yaml",
+          "text": "env:\n  JAVA_TOOL_OPTIONS: \"-Dotel.javaagent.debug=true\n-Dlogging.level.root=DEBUG\"\n  B: 'x\ny'\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "AGENT_DEBUG",
+          "severity": "error",
+          "name": "otel.javaagent.debug",
+          "path": "deploy/quoted.yaml",
+          "line": 2
+        },
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.root",
+          "path": "deploy/quoted.yaml",
+          "line": 2
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "a flow collection that never closes is not valid YAML",
+      "files": [
+        {
+          "path": "deploy/open.yaml",
+          "text": "args: [\"--debug\",\nLOGGING_LEVEL_ROOT: DEBUG\n"
+        }
+      ],
+      "findings": [],
+      "problems": [
+        {
+          "path": "deploy/open.yaml",
+          "line": 1,
+          "reason": "not valid YAML"
+        }
+      ]
+    },
+    {
+      "name": "a merge key and an alias are read as a deployment reads them",
+      "files": [
+        {
+          "path": "deploy/docker-compose.yml",
+          "text": "x-env: &env\n  DEBUG: \"true\"\nx-list: &list\n  - OTEL_JAVAAGENT_DEBUG=true\nx-level: &level TRACE\nservices:\n  orders:\n    environment:\n      <<: *env\n  billing:\n    environment:\n      <<: *env\n      DEBUG: \"false\"\n  ledger:\n    environment: *list\n  audit:\n    environment:\n      LOGGING_LEVEL_COM_ACME: *level\n"
+        },
+        {
+          "path": "deploy/merge-list.yml",
+          "text": "x-a: &a\n  TRACE: \"true\"\n  LOGGING_LEVEL_ROOT: DEBUG\nx-b: &b\n  TRACE: \"false\"\n  DEBUG: \"true\"\nservices:\n  pay:\n    environment:\n      <<: [*a, *b]\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "SPRING_DEBUG",
+          "severity": "warning",
+          "name": "debug",
+          "path": "deploy/docker-compose.yml",
+          "line": 2
+        },
+        {
+          "rule": "AGENT_DEBUG",
+          "severity": "error",
+          "name": "otel.javaagent.debug",
+          "path": "deploy/docker-compose.yml",
+          "line": 4
+        },
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.com.acme",
+          "path": "deploy/docker-compose.yml",
+          "line": 18
+        },
+        {
+          "rule": "SPRING_DEBUG",
+          "severity": "warning",
+          "name": "trace",
+          "path": "deploy/merge-list.yml",
+          "line": 2
+        },
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.root",
+          "path": "deploy/merge-list.yml",
+          "line": 3
+        },
+        {
+          "rule": "SPRING_DEBUG",
+          "severity": "warning",
+          "name": "debug",
+          "path": "deploy/merge-list.yml",
+          "line": 6
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "aliases that expand past the limit are named, and the rest of the file is read",
+      "files": [
+        {
+          "path": "deploy/bomb.yaml",
+          "text": "a: &a [x, x, x, x, x, x, x, x, x, x]\nb: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]\nc: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]\nd: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]\ne: [*d, *d]\nDEBUG: \"true\"\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "SPRING_DEBUG",
+          "severity": "warning",
+          "name": "debug",
+          "path": "deploy/bomb.yaml",
+          "line": 6
+        }
+      ],
+      "problems": [
+        {
+          "path": "deploy/bomb.yaml",
+          "line": 4,
+          "reason": "aliases expand past 10000 nodes, the rest not read"
+        }
+      ]
+    },
+    {
+      "name": "a YAML file that is not valid UTF-8 is named and not read",
+      "files": [
+        {
+          "path": "deploy/latin.yaml",
+          "base64": "bG9nZ2luZzoKICBsZXZlbDoKICAgIHJvb3Q6IERFQlVHCm5vdGU6IGNhZukK"
+        }
+      ],
+      "findings": [],
+      "problems": [
+        {
+          "path": "deploy/latin.yaml",
+          "line": 1,
+          "reason": "not valid UTF-8, not read"
+        }
+      ]
+    },
+    {
+      "name": "an env file or Dockerfile that is not valid UTF-8 is named and not read",
+      "files": [
+        {
+          "path": "deploy/app.env",
+          "base64": "TE9HR0lOR19MRVZFTF9ST09UPURFQlVHCk5PVEU9Y2Fm6Qo="
+        },
+        {
+          "path": "deploy/Dockerfile",
+          "base64": "RlJPTSB4CkVOViBERUJVRz10cnVlIE5PVEU94oIK"
+        }
+      ],
+      "findings": [],
+      "problems": [
+        {
+          "path": "deploy/app.env",
+          "line": 1,
+          "reason": "not valid UTF-8, not read"
+        },
+        {
+          "path": "deploy/Dockerfile",
+          "line": 1,
+          "reason": "not valid UTF-8, not read"
+        }
+      ]
+    },
+    {
+      "name": "a .properties file is read as ISO-8859-1, as Java reads it",
+      "files": [
+        {
+          "path": "config/app.properties",
+          "base64": "77u/ZGVidWc9dHJ1ZQojIGNhZukKbG9nZ2luZy5sZXZlbC5yb290PURFQlVHCmxvZ2dpbmcubGV2ZWwuY2Fmw6k9VFJBQ0UK"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.root",
+          "path": "config/app.properties",
+          "line": 3
+        },
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.caf__",
+          "path": "config/app.properties",
+          "line": 4
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "a .properties escape is read as Java reads it",
+      "files": [
+        {
+          "path": "config/escaped.properties",
+          "text": "logging.level.root=\\u0044EBUG\nlogging.level.\\u0063om.acme=TRACE\notel.javaagent.debug=tr\\\n    ue\nlogging.level.x=\\u00\ntrace=f\\alse\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.root",
+          "path": "config/escaped.properties",
+          "line": 1
+        },
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.com.acme",
+          "path": "config/escaped.properties",
+          "line": 2
+        },
+        {
+          "rule": "AGENT_DEBUG",
+          "severity": "error",
+          "name": "otel.javaagent.debug",
+          "path": "config/escaped.properties",
+          "line": 3
+        }
+      ],
+      "problems": [
+        {
+          "path": "config/escaped.properties",
+          "line": 5,
+          "reason": "a malformed \\uxxxx escape, line not read"
+        }
+      ]
+    },
+    {
+      "name": "a Dockerfile escape directive sets the continuation character",
+      "files": [
+        {
+          "path": "win/Dockerfile",
+          "text": "# escape=`\nFROM x\nENV LOGGING_LEVEL_ROOT=DEBUG `\n    OTEL_JAVAAGENT_DEBUG=true\nENV JAVA_HOME=C:\\java\\\nENV DEBUG=true\n"
+        },
+        {
+          "path": "late/Dockerfile",
+          "text": "FROM x\n# escape=`\nENV LOGGING_LEVEL_ROOT=DEBUG `\n    OTEL_JAVAAGENT_DEBUG=true\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.root",
+          "path": "late/Dockerfile",
+          "line": 3
+        },
+        {
+          "rule": "AGENT_DEBUG",
+          "severity": "error",
+          "name": "otel.javaagent.debug",
+          "path": "win/Dockerfile",
+          "line": 3
+        },
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.root",
+          "path": "win/Dockerfile",
+          "line": 3
+        },
+        {
+          "rule": "SPRING_DEBUG",
+          "severity": "warning",
+          "name": "debug",
+          "path": "win/Dockerfile",
+          "line": 6
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "an exec form holding an element that is not a string is not an exec form",
+      "files": [
+        {
+          "path": "Dockerfile",
+          "text": "FROM x\nCMD [\"java\", 1, \"-Dotel.javaagent.debug=true\"]\nENTRYPOINT [\"java\", null, \"--debug\"]\n"
+        }
+      ],
+      "findings": [],
+      "problems": [
+        {
+          "path": "Dockerfile",
+          "line": 2,
+          "reason": "CMD is not a JSON array of strings"
+        },
+        {
+          "path": "Dockerfile",
+          "line": 3,
+          "reason": "ENTRYPOINT is not a JSON array of strings"
+        }
+      ]
+    },
+    {
+      "name": "whitespace is what Go's unicode.IsSpace and compose read as whitespace; a command line splits at ASCII whitespace only",
+      "files": [
+        {
+          "path": "deploy/space.env",
+          "text": "LOGGING_LEVEL_ROOT=DEBUG\u0085\nOTEL_JAVAAGENT_DEBUG=true\ufeff\n\u00a0LOGGING_LEVEL_COM_ACME=TRACE\nJAVA_TOOL_OPTIONS=-Dotel.javaagent.debug=true\u00a0-Dx=y\n\u0085DEBUG=true\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.root",
+          "path": "deploy/space.env",
+          "line": 1
+        },
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.com.acme",
+          "path": "deploy/space.env",
+          "line": 3
+        },
+        {
+          "rule": "SPRING_DEBUG",
+          "severity": "warning",
+          "name": "debug",
+          "path": "deploy/space.env",
+          "line": 5
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "a name is folded and shown as the platform folds and shows it",
+      "files": [
+        {
+          "path": "deploy/names.yaml",
+          "text": "LOGG\u0130NG_LEVEL_ROOT: DEBUG\nlogging:\n  level:\n    \"\ud83d\ude00\": DEBUG\n    \u212aafka: TRACE\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level._",
+          "path": "deploy/names.yaml",
+          "line": 4
+        },
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.kafka",
+          "path": "deploy/names.yaml",
+          "line": 5
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "findings on one line sort by name, and paths sort by UTF-16 code unit",
+      "files": [
+        {
+          "path": "deploy/\uff41.env",
+          "text": "SPRING_APPLICATION_JSON={\"logging.level.zeta\":\"DEBUG\",\"logging.level.alpha\":\"TRACE\"}\n"
+        },
+        {
+          "path": "deploy/\ud83d\ude00.env",
+          "text": "OTEL_JAVAAGENT_DEBUG=true\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "AGENT_DEBUG",
+          "severity": "error",
+          "name": "otel.javaagent.debug",
+          "path": "deploy/\ud83d\ude00.env",
+          "line": 1
+        },
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.alpha",
+          "path": "deploy/\uff41.env",
+          "line": 1
+        },
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.zeta",
+          "path": "deploy/\uff41.env",
+          "line": 1
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "a ConfigMap's application.yaml is read as YAML, at its own lines",
+      "files": [
+        {
+          "path": "deploy/configmap.yaml",
+          "text": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: orders-config\ndata:\n  application.yaml: |\n    logging:\n      level:\n        root: DEBUG\n    management:\n      endpoints:\n        web:\n          exposure:\n            include: health,loggers\n  LOGGING_LEVEL_COM_ACME: TRACE\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.root",
+          "path": "deploy/configmap.yaml",
+          "line": 9
+        },
+        {
+          "rule": "LOGGERS_ENDPOINT_EXPOSED",
+          "severity": "warning",
+          "name": "management.endpoints.web.exposure.include",
+          "path": "deploy/configmap.yaml",
+          "line": 14
+        },
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.com.acme",
+          "path": "deploy/configmap.yaml",
+          "line": 15
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "a ConfigMap's application.properties and a Secret's stringData application-prod.yml are read",
+      "files": [
+        {
+          "path": "deploy/config.yaml",
+          "text": "kind: ConfigMap\ndata:\n  application.properties: |\n    # comment\n    logging.level.root=DEBUG\n    debug=true\n---\nkind: Secret\nstringData:\n  application-prod.yml: |\n    otel:\n      javaagent:\n        debug: true\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.root",
+          "path": "deploy/config.yaml",
+          "line": 5
+        },
+        {
+          "rule": "SPRING_DEBUG",
+          "severity": "warning",
+          "name": "debug",
+          "path": "deploy/config.yaml",
+          "line": 6
+        },
+        {
+          "rule": "AGENT_DEBUG",
+          "severity": "error",
+          "name": "otel.javaagent.debug",
+          "path": "deploy/config.yaml",
+          "line": 13
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "an embedded file whose YAML does not parse is named at its first line",
+      "files": [
+        {
+          "path": "deploy/bad.yaml",
+          "text": "kind: ConfigMap\ndata:\n  application.yaml: |\n    logging: [\n  DEBUG: \"true\"\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "SPRING_DEBUG",
+          "severity": "warning",
+          "name": "debug",
+          "path": "deploy/bad.yaml",
+          "line": 5
+        }
+      ],
+      "problems": [
+        {
+          "path": "deploy/bad.yaml",
+          "line": 4,
+          "reason": "not valid YAML"
+        }
+      ]
+    },
+    {
+      "name": "a Secret's base64 data holding application.properties is decoded and read at its key's line",
+      "files": [
+        {
+          "path": "deploy/secret.yaml",
+          "text": "kind: Secret\ndata:\n  application.properties: bG9nZ2luZy5sZXZlbC5yb290PURFQlVHCmRlYnVnPXRydWUK\n  application.yaml: not base64!\n---\nkind: ConfigMap\ndata:\n  application.properties: bG9nZ2luZy5sZXZlbC5yb290PURFQlVHCg==\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.root",
+          "path": "deploy/secret.yaml",
+          "line": 3
+        },
+        {
+          "rule": "SPRING_DEBUG",
+          "severity": "warning",
+          "name": "debug",
+          "path": "deploy/secret.yaml",
+          "line": 3
+        }
+      ],
+      "problems": []
+    }
+  ]
+}

@@ -7,7 +7,7 @@ import { Minimatch } from 'minimatch';
 import { parseAllDocuments } from 'yaml';
 import { MaestroApi, expectOk } from '../api';
 import { CASES_DIGEST, Finding, RuleSet, VERSION, evaluate, unreadable } from '../ciRules';
-import { Problem, SourcedSetting, extract, kindOf, withoutYamlVersion } from '../logPolicy/extract';
+import { Problem, SourcedSetting, decode, extract, kindOf, trimSpace, withoutYamlVersion } from '../logPolicy/extract';
 import { UserError } from '../util/errors';
 import { envPath } from './resolveConfig';
 
@@ -201,9 +201,9 @@ export function readMapping(root: string, tracked: string[]): MappingEntry[] | n
     const entry = e as Partial<MappingEntry> | null;
     if (
       typeof entry?.service !== 'string' ||
-      entry.service.trim() === '' ||
+      trimSpace(entry.service) === '' ||
       typeof entry.environment !== 'string' ||
-      entry.environment.trim() === '' ||
+      trimSpace(entry.environment) === '' ||
       !Array.isArray(entry.paths) ||
       entry.paths.length === 0 ||
       !entry.paths.every((g) => typeof g === 'string' && g !== '')
@@ -318,7 +318,12 @@ export function scan(root: string, files: string[], mapped = false): Scan {
       result.problems.push({ path: rel, line: 1, reason: 'holds a NUL byte, not read' });
       continue;
     }
-    const found = extract(rel, bytes.toString('utf8'), kind);
+    const text = decode(bytes, kind);
+    if (text === null) {
+      result.problems.push({ path: rel, line: 1, reason: 'not valid UTF-8, not read' });
+      continue;
+    }
+    const found = extract(rel, text, kind);
     result.read++;
     for (const s of found.settings) result.settings.push({ ...s, origin: origins + s.origin });
     origins += found.origins;
@@ -327,7 +332,10 @@ export function scan(root: string, files: string[], mapped = false): Scan {
   return result;
 }
 
-/** The findings of a scan: for each source setting, one finding per rule, under the longest name it matched. */
+/**
+ * The findings of a scan: for each source setting, one finding per rule, under the longest name it matched; a finding
+ * two sources give (a YAML anchor read where it stands and through an alias) is given once.
+ */
 export function findingsOf(set: RuleSet, settings: SourcedSetting[]): Finding[] {
   const byOrigin = new Map<number, SourcedSetting[]>();
   for (const s of settings) {
@@ -336,17 +344,20 @@ export function findingsOf(set: RuleSet, settings: SourcedSetting[]): Finding[] 
     byOrigin.set(s.origin, group);
   }
   const out: Finding[] = [];
+  const given = new Set<string>();
   for (const group of byOrigin.values()) {
     const ruled = new Set<string>();
     for (const f of evaluate(set, group)) {
-      if (ruled.has(f.rule)) continue;
+      const key = `${f.rule}|${f.name}|${f.path}|${f.line}`;
+      if (ruled.has(f.rule) || given.has(key)) continue;
       ruled.add(f.rule);
+      given.add(key);
       out.push(f);
     }
   }
-  // Code-unit order, as the CLI sorts: the first FINDINGS_MAX the two send are the same ones.
+  // UTF-16 code-unit order, as the CLI and job-manager compare strings: the first FINDINGS_MAX the two send are the same.
   const order = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
-  return out.sort((a, b) => order(a.path, b.path) || a.line - b.line || order(a.rule, b.rule));
+  return out.sort((a, b) => order(a.path, b.path) || a.line - b.line || order(a.rule, b.rule) || order(a.name, b.name));
 }
 
 export function checkResult(service: string, set: RuleSet, findings: Finding[]): CheckResult {

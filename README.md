@@ -262,20 +262,31 @@ the step: `fail-on-warnings` applies to peer staleness only, and the build is st
 Before it uploads anything, the Action reads the environment's log policy rules from Maestro
 (`GET .../envs/{env}/ci-rules?service=...&versions=1&lockedVersionUid=...`, the lock this run builds) and checks
 the repository's tracked deployment files against them: YAML (Helm values, Kubernetes manifests, compose files),
-Dockerfiles, `.env` files and `.properties` files, each split into lines at CRLF, CR or LF and read past a byte
-order mark. It reads environment variables and their Spring and OTel property names as one name
+Dockerfiles, `.env` files and `.properties` files, each split into lines at CRLF, CR or LF. A `.properties` file is
+read as ISO-8859-1, as Java reads it, escapes (`\u0044`) included; any other file is UTF-8, read past a byte order
+mark, and one that is not valid UTF-8 is named and not read, as the YAML readers refuse it. It reads environment variables and their Spring and OTel property names as one name
 (`LOGGING_LEVEL_ROOT` is `logging.level.root`), a Kubernetes `env` entry, a compose `environment` list or map and a
 ConfigMap's or Secret's `data` keys (a one-word variable such as `DEBUG` included), `-D` and `--` arguments on a
 command line and in each element of an exec-form command (`["sh", "-c", "java -D..."]` too),
 `JAVA_TOOL_OPTIONS` / `JAVA_OPTS` / `JDK_JAVA_OPTIONS` / `_JAVA_OPTIONS`, and the JSON in
-`SPRING_APPLICATION_JSON`. A `.properties` line is split into key and value as Java reads it. A Helm template's
+`SPRING_APPLICATION_JSON`. A Spring config file a ConfigMap's `data` or a Secret's `stringData` carries under a key
+ending in `.yaml`, `.yml` or `.properties` (`application.yaml: |`) is read as that file, each setting at its own line;
+a Secret's `data` value is base64-decoded first and its settings are named at the key's line. YAML anchors, aliases
+and `<<` merge keys are read as a deployment reads them (a key the mapping sets itself wins over a merged one), up
+to 10000 nodes of alias expansion per file. A flow collection (`[...]`, `{...}`) or a quoted value continued on a
+line indented no deeper than its key is read, as Kubernetes, compose and Spring read it. A `.properties` line is split
+into key and value as Java reads it. A Dockerfile's `# escape=` directive is honoured, and an exec form holding
+anything but strings is named, since Docker runs it in a shell. Whitespace is what Go's `unicode.IsSpace` and compose
+read as whitespace, except that a command line splits at ASCII whitespace only, as the JVM splits it. A Helm template's
 actions are removed before its YAML is read, keeping its line numbers, and a value written as a template, `$VAR` or
 `@name@` fails every test except `any`. It never reads an untracked file, a link, `.git`, `.github`, `.o11y` (the CLI's project link), `node_modules`,
 `target`, `build`, `dist`, `vendor`, `.maestro` (the mapping, below, is read as the mapping), `src/test` or
 `src/main/resources` (the packaged configuration, which Maestro's analysis reads from the JAR), or an example env file (`.env.example`, `.env.sample`, `.env.template`); a
 mapping's own paths (below) are read wherever they point, `.git` aside. A file over 1 MiB, one holding a NUL byte,
 and one past 20000 settings or 64 levels of YAML nesting are named, and the rest of the repository is read. The
-repository's own git config cannot run an fsmonitor command during the read.
+repository's own git config cannot run an fsmonitor command during the read. The Maestro CLI's `maestro check` reads
+every file the same way: the two hold one set of extraction cases (`tests/fixtures/ci-rules/extraction-cases.json`)
+and report the same findings on each.
 
 The rules come from the environment's lock: a level below the lock's floor, a lowered floor, a logs exporter other
 than the lock's, debug switches (Spring's and the agent's), a logging file chosen at deploy, the loggers endpoint

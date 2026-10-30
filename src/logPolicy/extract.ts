@@ -1,5 +1,6 @@
-import { LineCounter, isMap, isPair, isScalar, isSeq, parseAllDocuments } from 'yaml';
-import type { Node, Pair } from 'yaml';
+import { isUtf8 } from 'buffer';
+import { LineCounter, isAlias, isMap, isScalar, isSeq, parseAllDocuments } from 'yaml';
+import type { Document, Node, Pair } from 'yaml';
 import { Setting, fold } from '../ciRules';
 
 /** A file the check could not read in full: its path and line, never its content. */
@@ -18,6 +19,8 @@ export interface Extracted {
   settings: SourcedSetting[];
   problems: Problem[];
   origins: number;
+  /** The YAML nodes read through aliases, counted against ALIAS_NODES_MAX. */
+  aliasNodes: number;
 }
 
 export type FileKind = 'yaml' | 'dockerfile' | 'env' | 'properties';
@@ -31,10 +34,39 @@ const ENV_KEYS = new Set(['environment', 'env', 'data', 'stringdata']);
 export const SETTINGS_MAX = 20000;
 /** The deepest YAML nesting read; a deeper node is named and not read. */
 export const DEPTH_MAX = 64;
+/** The most YAML nodes one file's aliases expand to; past it the file is named and the rest of its aliases not read. */
+export const ALIAS_NODES_MAX = 10000;
 /** Example env files, which a deployment never reads. */
 const ENV_EXAMPLES = /(^|\.)env\.(example|sample|template)$/;
 /** Sequence keys whose items are a container's command line. */
 const COMMAND_KEYS = new Set(['args', 'command', 'entrypoint', 'cmd']);
+
+/**
+ * The whitespace a deployment file's text is trimmed and split at: Go's unicode.IsSpace, as compose reads an env file
+ * and the CLI reads every file. A command line is split at ASCII whitespace only, as the JVM and a shell split it.
+ */
+const SPACE = '\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000';
+const IS_SPACE = new RegExp(`^[${SPACE}]$`);
+const SPACE_AT = new RegExp(`[${SPACE}]`);
+
+function isSpace(c: string): boolean {
+  return IS_SPACE.test(c);
+}
+
+/** `s` without the whitespace at either end, as Go's strings.TrimSpace gives it. */
+export function trimSpace(s: string): string {
+  let start = 0;
+  let end = s.length;
+  while (start < end && isSpace(s[start])) start++;
+  while (end > start && isSpace(s[end - 1])) end--;
+  return s.substring(start, end);
+}
+
+function trimSpaceStart(s: string): string {
+  let start = 0;
+  while (start < s.length && isSpace(s[start])) start++;
+  return s.substring(start);
+}
 
 /** The kind of deployment file a repository path is, or null for a file the check does not read. */
 export function kindOf(path: string): FileKind | null {
@@ -50,28 +82,41 @@ export function kindOf(path: string): FileKind | null {
   return null;
 }
 
+/**
+ * A file's text as its deployment reads it: a .properties file as ISO-8859-1, as Java reads one, and any other kind
+ * as UTF-8, or null when it is not valid UTF-8, which the YAML readers refuse.
+ */
+export function decode(bytes: Buffer, kind: FileKind): string | null {
+  if (kind === 'properties') return bytes.toString('latin1');
+  return isUtf8(bytes) ? bytes.toString('utf8') : null;
+}
+
 /** A file's lines as the tools that read it split them: at CRLF, a lone CR or LF, and nowhere else. */
 export function lines(text: string): string[] {
   return text.split(/\r\n|\r|\n/);
 }
 
+const ENV_LINE = new RegExp(`^[${SPACE}]*(?:export[${SPACE}]+)?([A-Za-z_][A-Za-z0-9_.-]*)[${SPACE}]*=(.*)$`, 's');
+
+/** The settings a deployment file holds, from its text as `decode` gives it. */
 export function extract(path: string, raw: string, kind: FileKind): Extracted {
-  const out: Extracted = { settings: [], problems: [], origins: 0 };
+  const out: Extracted = { settings: [], problems: [], origins: 0, aliasNodes: 0 };
   const text = raw.charCodeAt(0) === 0xfeff ? raw.substring(1) : raw;
+  const same = (line: number) => line;
   switch (kind) {
     case 'yaml':
-      yamlSettings(path, text, out);
+      yamlSettings(path, text, out, same, false);
       break;
     case 'dockerfile':
       dockerfileSettings(path, text, out);
       break;
     case 'env':
-      for (const { line, key, value } of keyValueLines(text, /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=(.*)$/s)) {
+      for (const { line, key, value } of keyValueLines(text, ENV_LINE)) {
         add(out, path, line, key, envValue(value));
       }
       break;
     case 'properties':
-      for (const { line, key, value } of propertiesLines(text)) add(out, path, line, key, value);
+      propertiesSettings(path, text, out, same);
       break;
   }
   return out;
@@ -102,6 +147,11 @@ function add(out: Extracted, path: string, line: number, names: string | string[
       springJson(out, path, line, value);
     }
   }
+}
+
+/** Records a problem the file has not recorded already. */
+function once(out: Extracted, path: string, line: number, reason: string): void {
+  if (!out.problems.some((p) => p.reason === reason)) out.problems.push({ path, line, reason });
 }
 
 /** The settings a command line passes: {@code -Dk=v}, {@code -Dk}, {@code --k=v} and {@code --k}. */
@@ -141,7 +191,7 @@ function commandElement(element: string, path: string, line: number, out: Extrac
 
 function tokens(commandLine: string): string[] {
   const out: string[] = [];
-  const re = /"[^"]*"|'[^']*'|[^\s"']+(?:"[^"]*"|'[^']*'|[^\s"']*)*/g;
+  const re = /"[^"]*"|'[^']*'|[^\t\n\v\f\r "']+(?:"[^"]*"|'[^']*'|[^\t\n\v\f\r "']*)*/g;
   for (const m of commandLine.matchAll(re)) out.push(m[0]);
   return out;
 }
@@ -158,7 +208,7 @@ function springJsonParsed(value: string): unknown {
 }
 
 function springJson(out: Extracted, path: string, line: number, value: string): void {
-  if (value.trim() === '') return;
+  if (trimSpace(value) === '') return;
   let parsed: unknown;
   try {
     parsed = springJsonParsed(value);
@@ -247,8 +297,8 @@ function blankMultiLineActions(text: string): string {
       lineStart = text.lastIndexOf('\n', i - 1) + 1;
       lineEnd = text.indexOf('\n', j + 2);
       if (lineEnd < 0) lineEnd = text.length;
-      const before = text.substring(lineStart, i).trim();
-      alone = (before === '' || before === '-') && text.substring(j + 2, lineEnd).trim() === '';
+      const before = trimSpace(text.substring(lineStart, i));
+      alone = (before === '' || before === '-') && trimSpace(text.substring(j + 2, lineEnd)) === '';
     }
     if (alone) {
       out += text.substring(from, lineStart) + '\n'.repeat(action.split('\n').length - 1);
@@ -261,14 +311,16 @@ function blankMultiLineActions(text: string): string {
   return out + text.substring(from);
 }
 
+const TEMPLATE_VALUE = new RegExp(`:[${SPACE}]*\\{\\{`);
+
 /**
  * A line of template actions and nothing else, such as `{{- if .Values.x }}`, `- {{ include "x" . }}` or
  * `{{- end }} {{- end }}`, unless it holds a key whose value is an action.
  */
 function wholeLineAction(line: string): boolean {
-  let t = line.trim();
-  if (t.startsWith('-')) t = t.substring(1).trimStart();
-  return t.length >= 4 && t.startsWith('{{') && t.endsWith('}}') && !/:\s*\{\{/.test(line);
+  let t = trimSpace(line);
+  if (t.startsWith('-')) t = trimSpaceStart(t.substring(1));
+  return t.length >= 4 && t.startsWith('{{') && t.endsWith('}}') && !TEMPLATE_VALUE.test(line);
 }
 
 /**
@@ -288,33 +340,103 @@ export function documents(text: string): { part: string; start: number }[] {
       content = false;
     }
     cur.push(l);
-    const t = l.trim();
+    const t = trimSpace(l);
     if (t !== '' && t !== '---' && !t.startsWith('#') && !t.startsWith('%')) content = true;
   });
   if (cur.length > 0) out.push({ part: cur.join('\n'), start });
   return out;
 }
 
-function yamlSettings(path: string, text: string, out: Extracted): void {
+/** The most lines of one document re-indented for the YAML parser before it is named as not valid. */
+const REINDENTS_MAX = 32;
+
+const FLOW_INDENT = /^Flow (?:map|sequence) in block collection must be sufficiently indented/;
+const OPEN_QUOTE = /^Missing closing ["']quote/;
+
+/** The columns a line's content starts at: its indentation and any `- ` that opens a sequence item on it. */
+function contentColumn(line: string): number {
+  const m = /^[ ]*(?:-[ ]+)*/.exec(line);
+  return m ? m[0].length : 0;
+}
+
+function indentOf(line: string): number {
+  return /^[ ]*/.exec(line)?.[0].length ?? 0;
+}
+
+function blankOrComment(line: string): boolean {
+  return /^[ \t]*(?:#|$)/.test(line);
+}
+
+/**
+ * The 0-based line the YAML parser's first error asks to be indented, and the indentation to give it, or null. The
+ * parser refuses a flow collection or a quoted scalar continued on a line indented no deeper than its key, which every
+ * deployment reader (libyaml, go-yaml, SnakeYAML) reads, ignoring indentation there; indenting that line changes no
+ * value, since leading space on such a line is not content.
+ */
+function underIndented(docs: Document.Parsed[], text: string[]): { line: number; indent: number } | null {
+  const error = docs.flatMap((d) => d.errors)[0];
+  const at = error?.linePos?.[0]?.line;
+  if (!error || at === undefined) return null;
+  if (FLOW_INDENT.test(error.message)) {
+    const line = at - 1;
+    let before = line - 1;
+    while (before >= 0 && blankOrComment(text[before])) before--;
+    if (before < 0) return null;
+    const indent = contentColumn(text[before]) + 1;
+    return indentOf(text[line]) < indent ? { line, indent } : null;
+  }
+  if (OPEN_QUOTE.test(error.message)) {
+    const opened = at - 1;
+    const indent = contentColumn(text[opened]) + 1;
+    for (let line = opened + 1; line < text.length; line++) {
+      if (!/^[ \t]*$/.test(text[line]) && indentOf(text[line]) < indent) return { line, indent };
+    }
+  }
+  return null;
+}
+
+/** A document part parsed, with the lines the parser refuses for indentation alone indented until it reads them. */
+function parsed(part: string): { docs: Document.Parsed[]; counter: LineCounter } {
+  const text = withoutYamlVersion(part).split('\n');
+  for (let i = 0; ; i++) {
+    const counter = new LineCounter();
+    const all = parseAllDocuments(text.join('\n'), { lineCounter: counter, uniqueKeys: false });
+    const docs = Array.isArray(all) ? all : [all as unknown as Document.Parsed];
+    const fix = i < REINDENTS_MAX ? underIndented(docs, text) : null;
+    if (!fix) return { docs, counter };
+    text[fix.line] = ' '.repeat(fix.indent - indentOf(text[fix.line])) + text[fix.line];
+  }
+}
+
+/**
+ * Reads a YAML stream, each line placed at the file line `lineAt` gives it. An embedded stream (a file a ConfigMap or
+ * Secret carries) is not searched for further embedded files.
+ */
+function yamlSettings(path: string, text: string, out: Extracted, lineAt: (line: number) => number, embedded: boolean): void {
   const joined = lines(text).join('\n');
   const source = joined.includes('{{') ? untemplated(joined) : joined;
   for (const { part, start } of documents(source)) {
-    const counter = new LineCounter();
-    const docs = parseAllDocuments(withoutYamlVersion(part), { lineCounter: counter, uniqueKeys: false });
-    const list = Array.isArray(docs) ? docs : [docs];
-    const lineOf = (node: Node | null | undefined): number => {
-      const at = node?.range?.[0];
-      return start + (at === undefined ? 1 : counter.linePos(at).line);
-    };
-    for (const doc of list) {
+    const { docs, counter } = parsed(part);
+    for (const doc of docs) {
       if (doc.errors.length > 0) {
         // Named at the document's first line, as the CLI names it: the two parsers place an error on different lines.
-        out.problems.push({ path, line: start + 1, reason: 'not valid YAML' });
+        out.problems.push({ path, line: lineAt(start + 1), reason: 'not valid YAML' });
         continue;
       }
-      walkYaml(doc.contents as Node | null, [], path, out, lineOf, 0);
+      const at = (node: Node | null | undefined): number => {
+        const pos = node?.range?.[0];
+        return lineAt(start + (pos === undefined ? 1 : counter.linePos(pos).line));
+      };
+      const contents = doc.contents as Node | null;
+      if (!contents) continue;
+      walkYaml({ path, out, at, doc, embedded, secret: isSecret(contents) }, contents, [], 0, 0);
     }
   }
+}
+
+/** Whether a document is a Kubernetes Secret, whose data values are base64. */
+function isSecret(root: Node): boolean {
+  return isMap(root) && (root.items as Pair[]).some((p) => scalarText(p.key) === 'kind' && scalarText(p.value) === 'Secret');
 }
 
 /**
@@ -346,67 +468,177 @@ function scalarText(node: unknown): string | null {
   return typeof v === 'object' ? null : String(v);
 }
 
-function walkYaml(
-  node: Node | null,
-  keys: string[],
-  path: string,
-  out: Extracted,
-  lineOf: (n: Node | null | undefined) => number,
-  depth: number,
-): void {
-  if (depth > DEPTH_MAX) {
-    if (!out.problems.some((p) => p.reason.startsWith('nested deeper'))) {
-      out.problems.push({ path, line: lineOf(node), reason: `nested deeper than ${DEPTH_MAX} levels, not read below` });
+/** One YAML document being read. */
+interface Walk {
+  path: string;
+  out: Extracted;
+  at: (node: Node | null | undefined) => number;
+  doc: Document.Parsed;
+  embedded: boolean;
+  secret: boolean;
+}
+
+/**
+ * A node read through the alias it may be, or null once the file's aliases have expanded past ALIAS_NODES_MAX.
+ * `aliasLine` is the line of the outermost alias being expanded, 0 outside any; every node read inside one counts.
+ */
+function visit(w: Walk, node: Node | null | undefined, aliasLine: number): [Node | null, number] {
+  let n: Node | null = node ?? null;
+  if (n && isAlias(n)) {
+    if (aliasLine === 0) aliasLine = w.at(n);
+    n = (n.resolve(w.doc) as Node | undefined) ?? null;
+  }
+  if (aliasLine !== 0 && ++w.out.aliasNodes > ALIAS_NODES_MAX) {
+    once(w.out, w.path, aliasLine, `aliases expand past ${ALIAS_NODES_MAX} nodes, the rest not read`);
+    return [null, aliasLine];
+  }
+  return [n, aliasLine];
+}
+
+/** One entry of a mapping as a deployment reads it: `written`, the node as written (an alias keeps its own line). */
+interface Entry {
+  key: string;
+  written: Node | null;
+  value: Node | null;
+  aliasLine: number;
+}
+
+function isMergeKey(node: unknown): boolean {
+  return isScalar(node) && node.type === 'PLAIN' && node.value === '<<' &&
+    (node.tag === undefined || node.tag === 'tag:yaml.org,2002:merge');
+}
+
+/**
+ * A mapping's entries with its merge keys applied: its own first, then each merged mapping's in turn, a key already
+ * given taking precedence, as YAML's merge key reads them.
+ */
+function entries(w: Walk, map: Node, aliasLine: number): Entry[] {
+  const out: Entry[] = [];
+  const seen = new Set<string>();
+  const merges: (Node | null)[] = [];
+  for (const pair of (map as unknown as { items: Pair[] }).items) {
+    if (isMergeKey(pair.key)) {
+      merges.push(pair.value as Node | null);
+      continue;
     }
+    const key = scalarText(pair.key);
+    if (key === null) continue;
+    const [value, al] = visit(w, pair.value as Node | null, aliasLine);
+    seen.add(key);
+    out.push({ key, written: pair.value as Node | null, value, aliasLine: al });
+  }
+  for (const m of merges) {
+    const [src, al] = visit(w, m, aliasLine);
+    if (!src) continue;
+    const sources: [Node | null, number][] = isSeq(src) ? (src.items as Node[]).map((item) => visit(w, item, al)) : [[src, al]];
+    for (const [s, sal] of sources) {
+      if (!s || !isMap(s)) continue;
+      for (const e of entries(w, s, sal)) {
+        if (seen.has(e.key)) continue;
+        seen.add(e.key);
+        out.push(e);
+      }
+    }
+  }
+  return out;
+}
+
+/** The kind of file a data or stringData key names, or null. */
+function embeddedKind(key: string): FileKind | null {
+  const k = key.toLowerCase();
+  if (k.endsWith('.yaml') || k.endsWith('.yml')) return 'yaml';
+  if (k.endsWith('.properties')) return 'properties';
+  return null;
+}
+
+/** The bytes a Kubernetes Secret's data value holds, or null when it is not base64. */
+function base64Bytes(text: string): Buffer | null {
+  const t = text.replace(/[\t\n\v\f\r ]/g, '');
+  if (t.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(t)) return null;
+  return Buffer.from(t, 'base64');
+}
+
+/** Reads a file a ConfigMap's or Secret's value carries: a literal block's lines at their own lines, any other at its. */
+function readEmbedded(w: Walk, kind: FileKind, written: Node | null, text: string, encoded: boolean): void {
+  const at = w.at(written);
+  let body: string | null = text;
+  if (encoded) {
+    const bytes = base64Bytes(text);
+    if (!bytes) return;
+    body = decode(bytes, kind);
+    if (body === null) {
+      w.out.problems.push({ path: w.path, line: at, reason: 'not valid UTF-8, not read' });
+      return;
+    }
+  }
+  const literal = !encoded && isScalar(written) && written.type === 'BLOCK_LITERAL';
+  const lineAt = literal ? (k: number) => at + k : () => at;
+  if (kind === 'properties') propertiesSettings(w.path, body, w.out, lineAt);
+  else yamlSettings(w.path, body.charCodeAt(0) === 0xfeff ? body.substring(1) : body, w.out, lineAt, true);
+}
+
+function walkYaml(w: Walk, node: Node, keys: string[], depth: number, aliasLine: number): void {
+  const { path, out } = w;
+  if (depth > DEPTH_MAX) {
+    once(out, path, w.at(node), `nested deeper than ${DEPTH_MAX} levels, not read below`);
     return;
   }
   if (isMap(node)) {
-    envEntry(node.items as Pair[], path, out, lineOf);
-    for (const pair of node.items as Pair[]) {
-      if (!isPair(pair)) continue;
-      const key = scalarText(pair.key);
-      if (key === null) continue;
-      const value = pair.value as Node | null;
+    const list = entries(w, node, aliasLine);
+    envEntry(w, list);
+    const parent = keys.length > 0 ? keys[keys.length - 1].toLowerCase() : '';
+    for (const { key, written, value, aliasLine: al } of list) {
+      if (!value) continue;
+      const lower = key.toLowerCase();
       const text = scalarText(value);
       if (text !== null) {
-        add(out, path, lineOf(value ?? (pair.key as Node)), keyPathNames([...keys, key]), text);
-        if (COMMAND_KEYS.has(key.toLowerCase())) commandLine(text, path, lineOf(value), out);
-      } else if (isSeq(value) && COMMAND_KEYS.has(key.toLowerCase())) {
-        for (const item of value.items as Node[]) {
-          const t = scalarText(item);
-          if (t !== null) commandElement(t, path, lineOf(item), out);
+        const line = w.at(written);
+        add(out, path, line, keyPathNames([...keys, key]), text);
+        if (COMMAND_KEYS.has(lower)) commandLine(text, path, line, out);
+        const kind = embeddedKind(key);
+        if (kind && !w.embedded && (parent === 'data' || parent === 'stringdata')) {
+          readEmbedded(w, kind, written, text, parent === 'data' && w.secret);
         }
-      } else if (isSeq(value) && key.toLowerCase() === 'environment') {
+      } else if (isSeq(value) && COMMAND_KEYS.has(lower)) {
         for (const item of value.items as Node[]) {
-          const t = scalarText(item);
+          const t = scalarText(visit(w, item, al)[0]);
+          if (t !== null) commandElement(t, path, w.at(item), out);
+        }
+      } else if (isSeq(value) && lower === 'environment') {
+        for (const item of value.items as Node[]) {
+          const [it, ial] = visit(w, item, al);
+          if (!it) continue;
+          const t = scalarText(it);
           const eq = t === null ? -1 : t.indexOf('=');
-          if (t !== null && eq > 0) add(out, path, lineOf(item), t.substring(0, eq), t.substring(eq + 1));
-          else walkYaml(item, [...keys, key], path, out, lineOf, depth + 1);
+          if (t !== null && eq > 0) add(out, path, w.at(item), t.substring(0, eq), t.substring(eq + 1));
+          else walkYaml(w, it, [...keys, key], depth + 1, ial);
         }
       } else {
-        walkYaml(value, [...keys, key], path, out, lineOf, depth + 1);
+        walkYaml(w, value, [...keys, key], depth + 1, al);
       }
     }
   } else if (isSeq(node)) {
-    for (const item of node.items as Node[]) walkYaml(item, keys, path, out, lineOf, depth + 1);
+    for (const item of node.items as Node[]) {
+      const [it, al] = visit(w, item, aliasLine);
+      if (it) walkYaml(w, it, keys, depth + 1, al);
+    }
   }
 }
 
 /** A Kubernetes env entry ({name, value}) as the setting it names. */
-function envEntry(items: Pair[], path: string, out: Extracted, lineOf: (n: Node | null | undefined) => number): void {
+function envEntry(w: Walk, list: Entry[]): void {
   let name: string | null = null;
-  let valueNode: Node | null = null;
-  let hasValue = false;
-  for (const pair of items) {
-    if (!isPair(pair)) continue;
-    const k = scalarText(pair.key);
-    if (k === 'name') name = scalarText(pair.value);
-    if (k === 'value') {
-      hasValue = scalarText(pair.value) !== null;
-      valueNode = pair.value as Node;
+  let written: Node | null = null;
+  let value: Node | null = null;
+  for (const e of list) {
+    if (e.key === 'name') name = scalarText(e.value);
+    if (e.key === 'value') {
+      written = e.written;
+      value = e.value;
     }
   }
-  if (name && hasValue) add(out, path, lineOf(valueNode), name, scalarText(valueNode) ?? '');
+  const text = scalarText(value);
+  if (name && text !== null) add(w.out, w.path, w.at(written), name, text);
 }
 
 /**
@@ -428,21 +660,39 @@ function commandLine(text: string, path: string, line: number, out: Extracted): 
   for (const s of commandLineSettings(text)) add(out, path, line, s.name, s.value);
 }
 
+const DOCKER_INSTRUCTION = new RegExp(`^[${SPACE}]*(ENV|CMD|ENTRYPOINT)[${SPACE}](.*)$`, 'is');
+/** A parser directive line, which only the lines before a Dockerfile's first other line can be. */
+const DOCKER_DIRECTIVE = /^#[ \t]*([A-Za-z][A-Za-z0-9]*)[ \t]*=[ \t]*(.*?)[ \t]*$/;
+/** The parser directives BuildKit knows; a line naming another is a comment, which ends them. */
+const DOCKER_DIRECTIVES = new Set(['syntax', 'escape', 'check']);
+
+/** The character a Dockerfile continues a line with: a backslash, or the one its escape directive names. */
+function dockerEscape(physical: string[]): string {
+  let escape = '\\';
+  for (const l of physical) {
+    const m = DOCKER_DIRECTIVE.exec(l);
+    if (!m || !DOCKER_DIRECTIVES.has(m[1].toLowerCase())) break;
+    if (m[1].toLowerCase() === 'escape' && (m[2] === '`' || m[2] === '\\')) escape = m[2];
+  }
+  return escape;
+}
+
 function dockerfileSettings(path: string, text: string, out: Extracted): void {
   const physical = lines(text);
+  const escape = dockerEscape(physical);
   for (let i = 0; i < physical.length; i++) {
     const start = i + 1;
     const parts = [physical[i]];
-    while (parts[parts.length - 1].trimEnd().endsWith('\\') && i + 1 < physical.length) {
-      const last = parts[parts.length - 1].trimEnd();
+    while (i + 1 < physical.length) {
+      const last = parts[parts.length - 1].replace(/[ \t]+$/, '');
+      if (!last.endsWith(escape)) break;
       parts[parts.length - 1] = last.substring(0, last.length - 1) + ' ';
       parts.push(physical[++i]);
     }
-    const logical = parts.join('');
-    const m = /^\s*(ENV|CMD|ENTRYPOINT)\s(.*)$/is.exec(logical);
+    const m = DOCKER_INSTRUCTION.exec(parts.join(''));
     if (!m) continue;
     const instruction = m[1].toUpperCase();
-    const rest = m[2].trim();
+    const rest = trimSpace(m[2]);
     if (instruction === 'ENV') {
       if (/^[A-Za-z_][A-Za-z0-9_.-]*=/.test(rest)) {
         for (const t of tokens(rest)) {
@@ -450,21 +700,22 @@ function dockerfileSettings(path: string, text: string, out: Extracted): void {
           if (eq > 0) add(out, path, start, t.substring(0, eq), unquote(t.substring(eq + 1)));
         }
       } else {
-        const sp = rest.search(/\s/);
-        if (sp > 0) add(out, path, start, rest.substring(0, sp), unquote(rest.substring(sp + 1).trim()));
+        const sp = rest.search(SPACE_AT);
+        if (sp > 0) add(out, path, start, rest.substring(0, sp), unquote(trimSpace(rest.substring(sp))));
       }
     } else if (rest.startsWith('[')) {
+      // An exec form is a JSON array of strings; Docker runs anything else in a shell, which no JVM starts from.
       let elements: unknown;
       try {
         elements = JSON.parse(rest);
       } catch {
         elements = null;
       }
-      if (!Array.isArray(elements)) {
-        out.problems.push({ path, line: start, reason: `${instruction} is not a JSON array` });
+      if (!Array.isArray(elements) || !elements.every((e) => typeof e === 'string')) {
+        out.problems.push({ path, line: start, reason: `${instruction} is not a JSON array of strings` });
         continue;
       }
-      for (const e of elements) commandElement(String(e), path, start, out);
+      for (const e of elements as string[]) commandElement(e, path, start, out);
     } else {
       commandLine(rest, path, start, out);
     }
@@ -474,9 +725,9 @@ function dockerfileSettings(path: string, text: string, out: Extracted): void {
 function keyValueLines(text: string, re: RegExp): { line: number; key: string; value: string }[] {
   const out: { line: number; key: string; value: string }[] = [];
   lines(text).forEach((l, i) => {
-    if (/^\s*#/.test(l)) return;
+    if (trimSpace(l).startsWith('#')) return;
     const m = re.exec(l);
-    if (m) out.push({ line: i + 1, key: m[1], value: m[2].trim() });
+    if (m) out.push({ line: i + 1, key: m[1], value: trimSpace(m[2]) });
   });
   return out;
 }
@@ -489,66 +740,104 @@ function continues(line: string): boolean {
 }
 
 const PROPERTY_SPACE = new Set([' ', '\t', '\f']);
+const PROPERTY_ESCAPES: Record<string, string> = { t: '\t', n: '\n', r: '\r', f: '\f' };
+
+/** Thrown for a `\u` escape without four hex digits, which java.util.Properties refuses. */
+export class MalformedEscape extends Error {}
+
+/**
+ * `s` with java.util.Properties' escapes read: `\uXXXX`, `\t`, `\n`, `\r` and `\f`, and a backslash before any other
+ * character as that character.
+ */
+function unescape(s: string): string {
+  if (!s.includes('\\')) return s;
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] !== '\\') {
+      out += s[i];
+      continue;
+    }
+    if (++i === s.length) break;
+    const c = s[i];
+    if (c === 'u') {
+      const hex = s.substring(i + 1, i + 5);
+      if (!/^[0-9A-Fa-f]{4}$/.test(hex)) throw new MalformedEscape();
+      out += String.fromCharCode(parseInt(hex, 16));
+      i += 4;
+    } else {
+      out += PROPERTY_ESCAPES[c] ?? c;
+    }
+  }
+  return out;
+}
 
 /**
  * One logical properties line as java.util.Properties reads it: the key ends at the first unescaped `=`, `:` or
- * space, and one `=` or `:` after the spaces that follow it is part of the separator.
+ * space, one `=` or `:` after the spaces that follow it is part of the separator, and the escapes in both are read.
+ * Throws {@link MalformedEscape} for a malformed `\u` escape.
  */
 export function property(logical: string): { key: string; value: string } {
   let i = 0;
   while (i < logical.length && PROPERTY_SPACE.has(logical[i])) i++;
-  let key = '';
+  const keyStart = i;
   for (; i < logical.length; i++) {
     const c = logical[i];
     if (c === '\\' && i + 1 < logical.length) {
-      key += logical[++i];
+      i++;
       continue;
     }
     if (c === '=' || c === ':' || PROPERTY_SPACE.has(c)) break;
-    key += c;
   }
+  const key = logical.substring(keyStart, i);
   while (i < logical.length && PROPERTY_SPACE.has(logical[i])) i++;
   if (i < logical.length && (logical[i] === '=' || logical[i] === ':')) {
     i++;
     while (i < logical.length && PROPERTY_SPACE.has(logical[i])) i++;
   }
-  return { key, value: logical.substring(i).trim() };
+  return { key: unescape(key), value: unescape(logical.substring(i)) };
 }
 
-function propertiesLines(text: string): { line: number; key: string; value: string }[] {
-  const out: { line: number; key: string; value: string }[] = [];
+function propertiesSettings(path: string, text: string, out: Extracted, lineAt: (line: number) => number): void {
   const physical = lines(text);
   for (let i = 0; i < physical.length; i++) {
     const start = i + 1;
-    if (/^[ \t\f]*[#!]/.test(physical[i]) || physical[i].trim() === '') continue;
+    if (/^[ \t\f]*(?:[#!]|$)/.test(physical[i])) continue;
     const parts = [physical[i]];
     while (continues(parts[parts.length - 1]) && i + 1 < physical.length) {
       parts[parts.length - 1] = parts[parts.length - 1].slice(0, -1);
       parts.push(physical[++i].replace(/^[ \t\f]+/, ''));
     }
-    const { key, value } = property(parts.join(''));
-    if (key !== '') out.push({ line: start, key, value });
+    let read: { key: string; value: string };
+    try {
+      read = property(parts.join(''));
+    } catch (e) {
+      if (!(e instanceof MalformedEscape)) throw e;
+      out.problems.push({ path, line: lineAt(start), reason: 'a malformed \\uxxxx escape, line not read' });
+      continue;
+    }
+    if (read.key !== '') add(out, path, lineAt(start), read.key, read.value);
   }
-  return out;
 }
+
+const ENV_COMMENT = new RegExp(`[${SPACE}]#`);
 
 /**
  * An env file value as compose reads it: a quoted value up to its closing quote, an unquoted one up to a comment that a
  * space and # start.
  */
 export function envValue(raw: string): string {
-  const t = raw.trim();
+  const t = trimSpace(raw);
   const q = t[0];
   if (q === '"' || q === "'") {
     const close = t.indexOf(q, 1);
     return close > 0 ? t.substring(1, close) : t;
   }
-  const comment = t.search(/\s#/);
-  return (comment >= 0 ? t.substring(0, comment) : t).trim();
+  const comment = t.search(ENV_COMMENT);
+  return trimSpace(comment >= 0 ? t.substring(0, comment) : t);
 }
 
 function unquote(v: string): string {
-  const t = v.trim();
+  const t = trimSpace(v);
   if (t.length >= 2 && ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'")))) {
     return t.substring(1, t.length - 1);
   }

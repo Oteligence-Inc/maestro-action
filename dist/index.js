@@ -29713,11 +29713,11 @@ const LEVELS = ['ALL', 'TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL', 'OFF'
 /** The shape of a folded name a finding carries; job-manager lists no other. */
 exports.NAME = /^[a-z0-9._-]{1,200}$/;
 /**
- * A folded name as a finding carries it: a character outside NAME reads as _, which folding never leaves, and a name
- * past 200 characters is cut. A setting on such a name is still judged.
+ * A folded name as a finding carries it: each character outside NAME, a character past U+FFFF included, reads as one _,
+ * which folding never leaves, and a name past 200 characters is cut. A setting on such a name is still judged.
  */
 function findingName(folded) {
-    return folded.replace(/[^a-z0-9._-]/g, '_').substring(0, 200);
+    return folded.replace(/[^a-z0-9._-]/gu, '_').substring(0, 200);
 }
 /** A template placeholder anywhere, or a value written as $VAR or @name@: it passes no test but any. */
 const PLACEHOLDER = /^(?:[\s\S]*(?:\$\{|\$\(|#\{|\{\{|__TEMPLATE__)[\s\S]*|\$[A-Za-z_][\s\S]*|@[A-Za-z0-9_.-]+@)$/;
@@ -30222,8 +30222,10 @@ function trustedHostname(raw) {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.DEPTH_MAX = exports.SETTINGS_MAX = void 0;
+exports.MalformedEscape = exports.ALIAS_NODES_MAX = exports.DEPTH_MAX = exports.SETTINGS_MAX = void 0;
+exports.trimSpace = trimSpace;
 exports.kindOf = kindOf;
+exports.decode = decode;
 exports.lines = lines;
 exports.extract = extract;
 exports.commandLineSettings = commandLineSettings;
@@ -30235,6 +30237,7 @@ exports.withoutYamlVersion = withoutYamlVersion;
 exports.keyPathNames = keyPathNames;
 exports.property = property;
 exports.envValue = envValue;
+const buffer_1 = __nccwpck_require__(181);
 const yaml_1 = __nccwpck_require__(8815);
 const ciRules_1 = __nccwpck_require__(7944);
 /** Environment variables whose value is a JVM command line; `_JAVA_OPTIONS` folds to `java.options`. */
@@ -30245,10 +30248,38 @@ const ENV_KEYS = new Set(['environment', 'env', 'data', 'stringdata']);
 exports.SETTINGS_MAX = 20000;
 /** The deepest YAML nesting read; a deeper node is named and not read. */
 exports.DEPTH_MAX = 64;
+/** The most YAML nodes one file's aliases expand to; past it the file is named and the rest of its aliases not read. */
+exports.ALIAS_NODES_MAX = 10000;
 /** Example env files, which a deployment never reads. */
 const ENV_EXAMPLES = /(^|\.)env\.(example|sample|template)$/;
 /** Sequence keys whose items are a container's command line. */
 const COMMAND_KEYS = new Set(['args', 'command', 'entrypoint', 'cmd']);
+/**
+ * The whitespace a deployment file's text is trimmed and split at: Go's unicode.IsSpace, as compose reads an env file
+ * and the CLI reads every file. A command line is split at ASCII whitespace only, as the JVM and a shell split it.
+ */
+const SPACE = '\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000';
+const IS_SPACE = new RegExp(`^[${SPACE}]$`);
+const SPACE_AT = new RegExp(`[${SPACE}]`);
+function isSpace(c) {
+    return IS_SPACE.test(c);
+}
+/** `s` without the whitespace at either end, as Go's strings.TrimSpace gives it. */
+function trimSpace(s) {
+    let start = 0;
+    let end = s.length;
+    while (start < end && isSpace(s[start]))
+        start++;
+    while (end > start && isSpace(s[end - 1]))
+        end--;
+    return s.substring(start, end);
+}
+function trimSpaceStart(s) {
+    let start = 0;
+    while (start < s.length && isSpace(s[start]))
+        start++;
+    return s.substring(start);
+}
 /** The kind of deployment file a repository path is, or null for a file the check does not read. */
 function kindOf(path) {
     const base = path.split('/').pop() ?? '';
@@ -30266,28 +30297,39 @@ function kindOf(path) {
         return 'properties';
     return null;
 }
+/**
+ * A file's text as its deployment reads it: a .properties file as ISO-8859-1, as Java reads one, and any other kind
+ * as UTF-8, or null when it is not valid UTF-8, which the YAML readers refuse.
+ */
+function decode(bytes, kind) {
+    if (kind === 'properties')
+        return bytes.toString('latin1');
+    return (0, buffer_1.isUtf8)(bytes) ? bytes.toString('utf8') : null;
+}
 /** A file's lines as the tools that read it split them: at CRLF, a lone CR or LF, and nowhere else. */
 function lines(text) {
     return text.split(/\r\n|\r|\n/);
 }
+const ENV_LINE = new RegExp(`^[${SPACE}]*(?:export[${SPACE}]+)?([A-Za-z_][A-Za-z0-9_.-]*)[${SPACE}]*=(.*)$`, 's');
+/** The settings a deployment file holds, from its text as `decode` gives it. */
 function extract(path, raw, kind) {
-    const out = { settings: [], problems: [], origins: 0 };
+    const out = { settings: [], problems: [], origins: 0, aliasNodes: 0 };
     const text = raw.charCodeAt(0) === 0xfeff ? raw.substring(1) : raw;
+    const same = (line) => line;
     switch (kind) {
         case 'yaml':
-            yamlSettings(path, text, out);
+            yamlSettings(path, text, out, same, false);
             break;
         case 'dockerfile':
             dockerfileSettings(path, text, out);
             break;
         case 'env':
-            for (const { line, key, value } of keyValueLines(text, /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=(.*)$/s)) {
+            for (const { line, key, value } of keyValueLines(text, ENV_LINE)) {
                 add(out, path, line, key, envValue(value));
             }
             break;
         case 'properties':
-            for (const { line, key, value } of propertiesLines(text))
-                add(out, path, line, key, value);
+            propertiesSettings(path, text, out, same);
             break;
     }
     return out;
@@ -30321,6 +30363,11 @@ function add(out, path, line, names, value) {
             springJson(out, path, line, value);
         }
     }
+}
+/** Records a problem the file has not recorded already. */
+function once(out, path, line, reason) {
+    if (!out.problems.some((p) => p.reason === reason))
+        out.problems.push({ path, line, reason });
 }
 /** The settings a command line passes: {@code -Dk=v}, {@code -Dk}, {@code --k=v} and {@code --k}. */
 function commandLineSettings(commandLine) {
@@ -30364,7 +30411,7 @@ function commandElement(element, path, line, out) {
 }
 function tokens(commandLine) {
     const out = [];
-    const re = /"[^"]*"|'[^']*'|[^\s"']+(?:"[^"]*"|'[^']*'|[^\s"']*)*/g;
+    const re = /"[^"]*"|'[^']*'|[^\t\n\v\f\r "']+(?:"[^"]*"|'[^']*'|[^\t\n\v\f\r "']*)*/g;
     for (const m of commandLine.matchAll(re))
         out.push(m[0]);
     return out;
@@ -30381,7 +30428,7 @@ function springJsonParsed(value) {
     }
 }
 function springJson(out, path, line, value) {
-    if (value.trim() === '')
+    if (trimSpace(value) === '')
         return;
     let parsed;
     try {
@@ -30472,8 +30519,8 @@ function blankMultiLineActions(text) {
             lineEnd = text.indexOf('\n', j + 2);
             if (lineEnd < 0)
                 lineEnd = text.length;
-            const before = text.substring(lineStart, i).trim();
-            alone = (before === '' || before === '-') && text.substring(j + 2, lineEnd).trim() === '';
+            const before = trimSpace(text.substring(lineStart, i));
+            alone = (before === '' || before === '-') && trimSpace(text.substring(j + 2, lineEnd)) === '';
         }
         if (alone) {
             out += text.substring(from, lineStart) + '\n'.repeat(action.split('\n').length - 1);
@@ -30486,15 +30533,16 @@ function blankMultiLineActions(text) {
     }
     return out + text.substring(from);
 }
+const TEMPLATE_VALUE = new RegExp(`:[${SPACE}]*\\{\\{`);
 /**
  * A line of template actions and nothing else, such as `{{- if .Values.x }}`, `- {{ include "x" . }}` or
  * `{{- end }} {{- end }}`, unless it holds a key whose value is an action.
  */
 function wholeLineAction(line) {
-    let t = line.trim();
+    let t = trimSpace(line);
     if (t.startsWith('-'))
-        t = t.substring(1).trimStart();
-    return t.length >= 4 && t.startsWith('{{') && t.endsWith('}}') && !/:\s*\{\{/.test(line);
+        t = trimSpaceStart(t.substring(1));
+    return t.length >= 4 && t.startsWith('{{') && t.endsWith('}}') && !TEMPLATE_VALUE.test(line);
 }
 /**
  * A YAML stream split at its document markers, each part with the line it starts on, so a document that does not parse
@@ -30513,7 +30561,7 @@ function documents(text) {
             content = false;
         }
         cur.push(l);
-        const t = l.trim();
+        const t = trimSpace(l);
         if (t !== '' && t !== '---' && !t.startsWith('#') && !t.startsWith('%'))
             content = true;
     });
@@ -30521,26 +30569,94 @@ function documents(text) {
         out.push({ part: cur.join('\n'), start });
     return out;
 }
-function yamlSettings(path, text, out) {
+/** The most lines of one document re-indented for the YAML parser before it is named as not valid. */
+const REINDENTS_MAX = 32;
+const FLOW_INDENT = /^Flow (?:map|sequence) in block collection must be sufficiently indented/;
+const OPEN_QUOTE = /^Missing closing ["']quote/;
+/** The columns a line's content starts at: its indentation and any `- ` that opens a sequence item on it. */
+function contentColumn(line) {
+    const m = /^[ ]*(?:-[ ]+)*/.exec(line);
+    return m ? m[0].length : 0;
+}
+function indentOf(line) {
+    return /^[ ]*/.exec(line)?.[0].length ?? 0;
+}
+function blankOrComment(line) {
+    return /^[ \t]*(?:#|$)/.test(line);
+}
+/**
+ * The 0-based line the YAML parser's first error asks to be indented, and the indentation to give it, or null. The
+ * parser refuses a flow collection or a quoted scalar continued on a line indented no deeper than its key, which every
+ * deployment reader (libyaml, go-yaml, SnakeYAML) reads, ignoring indentation there; indenting that line changes no
+ * value, since leading space on such a line is not content.
+ */
+function underIndented(docs, text) {
+    const error = docs.flatMap((d) => d.errors)[0];
+    const at = error?.linePos?.[0]?.line;
+    if (!error || at === undefined)
+        return null;
+    if (FLOW_INDENT.test(error.message)) {
+        const line = at - 1;
+        let before = line - 1;
+        while (before >= 0 && blankOrComment(text[before]))
+            before--;
+        if (before < 0)
+            return null;
+        const indent = contentColumn(text[before]) + 1;
+        return indentOf(text[line]) < indent ? { line, indent } : null;
+    }
+    if (OPEN_QUOTE.test(error.message)) {
+        const opened = at - 1;
+        const indent = contentColumn(text[opened]) + 1;
+        for (let line = opened + 1; line < text.length; line++) {
+            if (!/^[ \t]*$/.test(text[line]) && indentOf(text[line]) < indent)
+                return { line, indent };
+        }
+    }
+    return null;
+}
+/** A document part parsed, with the lines the parser refuses for indentation alone indented until it reads them. */
+function parsed(part) {
+    const text = withoutYamlVersion(part).split('\n');
+    for (let i = 0;; i++) {
+        const counter = new yaml_1.LineCounter();
+        const all = (0, yaml_1.parseAllDocuments)(text.join('\n'), { lineCounter: counter, uniqueKeys: false });
+        const docs = Array.isArray(all) ? all : [all];
+        const fix = i < REINDENTS_MAX ? underIndented(docs, text) : null;
+        if (!fix)
+            return { docs, counter };
+        text[fix.line] = ' '.repeat(fix.indent - indentOf(text[fix.line])) + text[fix.line];
+    }
+}
+/**
+ * Reads a YAML stream, each line placed at the file line `lineAt` gives it. An embedded stream (a file a ConfigMap or
+ * Secret carries) is not searched for further embedded files.
+ */
+function yamlSettings(path, text, out, lineAt, embedded) {
     const joined = lines(text).join('\n');
     const source = joined.includes('{{') ? untemplated(joined) : joined;
     for (const { part, start } of documents(source)) {
-        const counter = new yaml_1.LineCounter();
-        const docs = (0, yaml_1.parseAllDocuments)(withoutYamlVersion(part), { lineCounter: counter, uniqueKeys: false });
-        const list = Array.isArray(docs) ? docs : [docs];
-        const lineOf = (node) => {
-            const at = node?.range?.[0];
-            return start + (at === undefined ? 1 : counter.linePos(at).line);
-        };
-        for (const doc of list) {
+        const { docs, counter } = parsed(part);
+        for (const doc of docs) {
             if (doc.errors.length > 0) {
                 // Named at the document's first line, as the CLI names it: the two parsers place an error on different lines.
-                out.problems.push({ path, line: start + 1, reason: 'not valid YAML' });
+                out.problems.push({ path, line: lineAt(start + 1), reason: 'not valid YAML' });
                 continue;
             }
-            walkYaml(doc.contents, [], path, out, lineOf, 0);
+            const at = (node) => {
+                const pos = node?.range?.[0];
+                return lineAt(start + (pos === undefined ? 1 : counter.linePos(pos).line));
+            };
+            const contents = doc.contents;
+            if (!contents)
+                continue;
+            walkYaml({ path, out, at, doc, embedded, secret: isSecret(contents) }, contents, [], 0, 0);
         }
     }
+}
+/** Whether a document is a Kubernetes Secret, whose data values are base64. */
+function isSecret(root) {
+    return (0, yaml_1.isMap)(root) && root.items.some((p) => scalarText(p.key) === 'kind' && scalarText(p.value) === 'Secret');
 }
 /**
  * `text` with each `%YAML` directive line blanked: both interpreters then read every file under one schema, YAML 1.2
@@ -30573,73 +30689,176 @@ function scalarText(node) {
         return boolText(node.source);
     return typeof v === 'object' ? null : String(v);
 }
-function walkYaml(node, keys, path, out, lineOf, depth) {
-    if (depth > exports.DEPTH_MAX) {
-        if (!out.problems.some((p) => p.reason.startsWith('nested deeper'))) {
-            out.problems.push({ path, line: lineOf(node), reason: `nested deeper than ${exports.DEPTH_MAX} levels, not read below` });
+/**
+ * A node read through the alias it may be, or null once the file's aliases have expanded past ALIAS_NODES_MAX.
+ * `aliasLine` is the line of the outermost alias being expanded, 0 outside any; every node read inside one counts.
+ */
+function visit(w, node, aliasLine) {
+    let n = node ?? null;
+    if (n && (0, yaml_1.isAlias)(n)) {
+        if (aliasLine === 0)
+            aliasLine = w.at(n);
+        n = n.resolve(w.doc) ?? null;
+    }
+    if (aliasLine !== 0 && ++w.out.aliasNodes > exports.ALIAS_NODES_MAX) {
+        once(w.out, w.path, aliasLine, `aliases expand past ${exports.ALIAS_NODES_MAX} nodes, the rest not read`);
+        return [null, aliasLine];
+    }
+    return [n, aliasLine];
+}
+function isMergeKey(node) {
+    return (0, yaml_1.isScalar)(node) && node.type === 'PLAIN' && node.value === '<<' &&
+        (node.tag === undefined || node.tag === 'tag:yaml.org,2002:merge');
+}
+/**
+ * A mapping's entries with its merge keys applied: its own first, then each merged mapping's in turn, a key already
+ * given taking precedence, as YAML's merge key reads them.
+ */
+function entries(w, map, aliasLine) {
+    const out = [];
+    const seen = new Set();
+    const merges = [];
+    for (const pair of map.items) {
+        if (isMergeKey(pair.key)) {
+            merges.push(pair.value);
+            continue;
         }
+        const key = scalarText(pair.key);
+        if (key === null)
+            continue;
+        const [value, al] = visit(w, pair.value, aliasLine);
+        seen.add(key);
+        out.push({ key, written: pair.value, value, aliasLine: al });
+    }
+    for (const m of merges) {
+        const [src, al] = visit(w, m, aliasLine);
+        if (!src)
+            continue;
+        const sources = (0, yaml_1.isSeq)(src) ? src.items.map((item) => visit(w, item, al)) : [[src, al]];
+        for (const [s, sal] of sources) {
+            if (!s || !(0, yaml_1.isMap)(s))
+                continue;
+            for (const e of entries(w, s, sal)) {
+                if (seen.has(e.key))
+                    continue;
+                seen.add(e.key);
+                out.push(e);
+            }
+        }
+    }
+    return out;
+}
+/** The kind of file a data or stringData key names, or null. */
+function embeddedKind(key) {
+    const k = key.toLowerCase();
+    if (k.endsWith('.yaml') || k.endsWith('.yml'))
+        return 'yaml';
+    if (k.endsWith('.properties'))
+        return 'properties';
+    return null;
+}
+/** The bytes a Kubernetes Secret's data value holds, or null when it is not base64. */
+function base64Bytes(text) {
+    const t = text.replace(/[\t\n\v\f\r ]/g, '');
+    if (t.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(t))
+        return null;
+    return Buffer.from(t, 'base64');
+}
+/** Reads a file a ConfigMap's or Secret's value carries: a literal block's lines at their own lines, any other at its. */
+function readEmbedded(w, kind, written, text, encoded) {
+    const at = w.at(written);
+    let body = text;
+    if (encoded) {
+        const bytes = base64Bytes(text);
+        if (!bytes)
+            return;
+        body = decode(bytes, kind);
+        if (body === null) {
+            w.out.problems.push({ path: w.path, line: at, reason: 'not valid UTF-8, not read' });
+            return;
+        }
+    }
+    const literal = !encoded && (0, yaml_1.isScalar)(written) && written.type === 'BLOCK_LITERAL';
+    const lineAt = literal ? (k) => at + k : () => at;
+    if (kind === 'properties')
+        propertiesSettings(w.path, body, w.out, lineAt);
+    else
+        yamlSettings(w.path, body.charCodeAt(0) === 0xfeff ? body.substring(1) : body, w.out, lineAt, true);
+}
+function walkYaml(w, node, keys, depth, aliasLine) {
+    const { path, out } = w;
+    if (depth > exports.DEPTH_MAX) {
+        once(out, path, w.at(node), `nested deeper than ${exports.DEPTH_MAX} levels, not read below`);
         return;
     }
     if ((0, yaml_1.isMap)(node)) {
-        envEntry(node.items, path, out, lineOf);
-        for (const pair of node.items) {
-            if (!(0, yaml_1.isPair)(pair))
+        const list = entries(w, node, aliasLine);
+        envEntry(w, list);
+        const parent = keys.length > 0 ? keys[keys.length - 1].toLowerCase() : '';
+        for (const { key, written, value, aliasLine: al } of list) {
+            if (!value)
                 continue;
-            const key = scalarText(pair.key);
-            if (key === null)
-                continue;
-            const value = pair.value;
+            const lower = key.toLowerCase();
             const text = scalarText(value);
             if (text !== null) {
-                add(out, path, lineOf(value ?? pair.key), keyPathNames([...keys, key]), text);
-                if (COMMAND_KEYS.has(key.toLowerCase()))
-                    commandLine(text, path, lineOf(value), out);
-            }
-            else if ((0, yaml_1.isSeq)(value) && COMMAND_KEYS.has(key.toLowerCase())) {
-                for (const item of value.items) {
-                    const t = scalarText(item);
-                    if (t !== null)
-                        commandElement(t, path, lineOf(item), out);
+                const line = w.at(written);
+                add(out, path, line, keyPathNames([...keys, key]), text);
+                if (COMMAND_KEYS.has(lower))
+                    commandLine(text, path, line, out);
+                const kind = embeddedKind(key);
+                if (kind && !w.embedded && (parent === 'data' || parent === 'stringdata')) {
+                    readEmbedded(w, kind, written, text, parent === 'data' && w.secret);
                 }
             }
-            else if ((0, yaml_1.isSeq)(value) && key.toLowerCase() === 'environment') {
+            else if ((0, yaml_1.isSeq)(value) && COMMAND_KEYS.has(lower)) {
                 for (const item of value.items) {
-                    const t = scalarText(item);
+                    const t = scalarText(visit(w, item, al)[0]);
+                    if (t !== null)
+                        commandElement(t, path, w.at(item), out);
+                }
+            }
+            else if ((0, yaml_1.isSeq)(value) && lower === 'environment') {
+                for (const item of value.items) {
+                    const [it, ial] = visit(w, item, al);
+                    if (!it)
+                        continue;
+                    const t = scalarText(it);
                     const eq = t === null ? -1 : t.indexOf('=');
                     if (t !== null && eq > 0)
-                        add(out, path, lineOf(item), t.substring(0, eq), t.substring(eq + 1));
+                        add(out, path, w.at(item), t.substring(0, eq), t.substring(eq + 1));
                     else
-                        walkYaml(item, [...keys, key], path, out, lineOf, depth + 1);
+                        walkYaml(w, it, [...keys, key], depth + 1, ial);
                 }
             }
             else {
-                walkYaml(value, [...keys, key], path, out, lineOf, depth + 1);
+                walkYaml(w, value, [...keys, key], depth + 1, al);
             }
         }
     }
     else if ((0, yaml_1.isSeq)(node)) {
-        for (const item of node.items)
-            walkYaml(item, keys, path, out, lineOf, depth + 1);
+        for (const item of node.items) {
+            const [it, al] = visit(w, item, aliasLine);
+            if (it)
+                walkYaml(w, it, keys, depth + 1, al);
+        }
     }
 }
 /** A Kubernetes env entry ({name, value}) as the setting it names. */
-function envEntry(items, path, out, lineOf) {
+function envEntry(w, list) {
     let name = null;
-    let valueNode = null;
-    let hasValue = false;
-    for (const pair of items) {
-        if (!(0, yaml_1.isPair)(pair))
-            continue;
-        const k = scalarText(pair.key);
-        if (k === 'name')
-            name = scalarText(pair.value);
-        if (k === 'value') {
-            hasValue = scalarText(pair.value) !== null;
-            valueNode = pair.value;
+    let written = null;
+    let value = null;
+    for (const e of list) {
+        if (e.key === 'name')
+            name = scalarText(e.value);
+        if (e.key === 'value') {
+            written = e.written;
+            value = e.value;
         }
     }
-    if (name && hasValue)
-        add(out, path, lineOf(valueNode), name, scalarText(valueNode) ?? '');
+    const text = scalarText(value);
+    if (name && text !== null)
+        add(w.out, w.path, w.at(written), name, text);
 }
 /**
  * The names a nested key path is read as: the whole path, and each tail of it that folds to at least two segments,
@@ -30660,22 +30879,41 @@ function commandLine(text, path, line, out) {
     for (const s of commandLineSettings(text))
         add(out, path, line, s.name, s.value);
 }
+const DOCKER_INSTRUCTION = new RegExp(`^[${SPACE}]*(ENV|CMD|ENTRYPOINT)[${SPACE}](.*)$`, 'is');
+/** A parser directive line, which only the lines before a Dockerfile's first other line can be. */
+const DOCKER_DIRECTIVE = /^#[ \t]*([A-Za-z][A-Za-z0-9]*)[ \t]*=[ \t]*(.*?)[ \t]*$/;
+/** The parser directives BuildKit knows; a line naming another is a comment, which ends them. */
+const DOCKER_DIRECTIVES = new Set(['syntax', 'escape', 'check']);
+/** The character a Dockerfile continues a line with: a backslash, or the one its escape directive names. */
+function dockerEscape(physical) {
+    let escape = '\\';
+    for (const l of physical) {
+        const m = DOCKER_DIRECTIVE.exec(l);
+        if (!m || !DOCKER_DIRECTIVES.has(m[1].toLowerCase()))
+            break;
+        if (m[1].toLowerCase() === 'escape' && (m[2] === '`' || m[2] === '\\'))
+            escape = m[2];
+    }
+    return escape;
+}
 function dockerfileSettings(path, text, out) {
     const physical = lines(text);
+    const escape = dockerEscape(physical);
     for (let i = 0; i < physical.length; i++) {
         const start = i + 1;
         const parts = [physical[i]];
-        while (parts[parts.length - 1].trimEnd().endsWith('\\') && i + 1 < physical.length) {
-            const last = parts[parts.length - 1].trimEnd();
+        while (i + 1 < physical.length) {
+            const last = parts[parts.length - 1].replace(/[ \t]+$/, '');
+            if (!last.endsWith(escape))
+                break;
             parts[parts.length - 1] = last.substring(0, last.length - 1) + ' ';
             parts.push(physical[++i]);
         }
-        const logical = parts.join('');
-        const m = /^\s*(ENV|CMD|ENTRYPOINT)\s(.*)$/is.exec(logical);
+        const m = DOCKER_INSTRUCTION.exec(parts.join(''));
         if (!m)
             continue;
         const instruction = m[1].toUpperCase();
-        const rest = m[2].trim();
+        const rest = trimSpace(m[2]);
         if (instruction === 'ENV') {
             if (/^[A-Za-z_][A-Za-z0-9_.-]*=/.test(rest)) {
                 for (const t of tokens(rest)) {
@@ -30685,12 +30923,13 @@ function dockerfileSettings(path, text, out) {
                 }
             }
             else {
-                const sp = rest.search(/\s/);
+                const sp = rest.search(SPACE_AT);
                 if (sp > 0)
-                    add(out, path, start, rest.substring(0, sp), unquote(rest.substring(sp + 1).trim()));
+                    add(out, path, start, rest.substring(0, sp), unquote(trimSpace(rest.substring(sp))));
             }
         }
         else if (rest.startsWith('[')) {
+            // An exec form is a JSON array of strings; Docker runs anything else in a shell, which no JVM starts from.
             let elements;
             try {
                 elements = JSON.parse(rest);
@@ -30698,12 +30937,12 @@ function dockerfileSettings(path, text, out) {
             catch {
                 elements = null;
             }
-            if (!Array.isArray(elements)) {
-                out.problems.push({ path, line: start, reason: `${instruction} is not a JSON array` });
+            if (!Array.isArray(elements) || !elements.every((e) => typeof e === 'string')) {
+                out.problems.push({ path, line: start, reason: `${instruction} is not a JSON array of strings` });
                 continue;
             }
             for (const e of elements)
-                commandElement(String(e), path, start, out);
+                commandElement(e, path, start, out);
         }
         else {
             commandLine(rest, path, start, out);
@@ -30713,11 +30952,11 @@ function dockerfileSettings(path, text, out) {
 function keyValueLines(text, re) {
     const out = [];
     lines(text).forEach((l, i) => {
-        if (/^\s*#/.test(l))
+        if (trimSpace(l).startsWith('#'))
             return;
         const m = re.exec(l);
         if (m)
-            out.push({ line: i + 1, key: m[1], value: m[2].trim() });
+            out.push({ line: i + 1, key: m[1], value: trimSpace(m[2]) });
     });
     return out;
 }
@@ -30729,25 +30968,60 @@ function continues(line) {
     return n % 2 === 1;
 }
 const PROPERTY_SPACE = new Set([' ', '\t', '\f']);
+const PROPERTY_ESCAPES = { t: '\t', n: '\n', r: '\r', f: '\f' };
+/** Thrown for a `\u` escape without four hex digits, which java.util.Properties refuses. */
+class MalformedEscape extends Error {
+}
+exports.MalformedEscape = MalformedEscape;
+/**
+ * `s` with java.util.Properties' escapes read: `\uXXXX`, `\t`, `\n`, `\r` and `\f`, and a backslash before any other
+ * character as that character.
+ */
+function unescape(s) {
+    if (!s.includes('\\'))
+        return s;
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+        if (s[i] !== '\\') {
+            out += s[i];
+            continue;
+        }
+        if (++i === s.length)
+            break;
+        const c = s[i];
+        if (c === 'u') {
+            const hex = s.substring(i + 1, i + 5);
+            if (!/^[0-9A-Fa-f]{4}$/.test(hex))
+                throw new MalformedEscape();
+            out += String.fromCharCode(parseInt(hex, 16));
+            i += 4;
+        }
+        else {
+            out += PROPERTY_ESCAPES[c] ?? c;
+        }
+    }
+    return out;
+}
 /**
  * One logical properties line as java.util.Properties reads it: the key ends at the first unescaped `=`, `:` or
- * space, and one `=` or `:` after the spaces that follow it is part of the separator.
+ * space, one `=` or `:` after the spaces that follow it is part of the separator, and the escapes in both are read.
+ * Throws {@link MalformedEscape} for a malformed `\u` escape.
  */
 function property(logical) {
     let i = 0;
     while (i < logical.length && PROPERTY_SPACE.has(logical[i]))
         i++;
-    let key = '';
+    const keyStart = i;
     for (; i < logical.length; i++) {
         const c = logical[i];
         if (c === '\\' && i + 1 < logical.length) {
-            key += logical[++i];
+            i++;
             continue;
         }
         if (c === '=' || c === ':' || PROPERTY_SPACE.has(c))
             break;
-        key += c;
     }
+    const key = logical.substring(keyStart, i);
     while (i < logical.length && PROPERTY_SPACE.has(logical[i]))
         i++;
     if (i < logical.length && (logical[i] === '=' || logical[i] === ':')) {
@@ -30755,42 +31029,50 @@ function property(logical) {
         while (i < logical.length && PROPERTY_SPACE.has(logical[i]))
             i++;
     }
-    return { key, value: logical.substring(i).trim() };
+    return { key: unescape(key), value: unescape(logical.substring(i)) };
 }
-function propertiesLines(text) {
-    const out = [];
+function propertiesSettings(path, text, out, lineAt) {
     const physical = lines(text);
     for (let i = 0; i < physical.length; i++) {
         const start = i + 1;
-        if (/^[ \t\f]*[#!]/.test(physical[i]) || physical[i].trim() === '')
+        if (/^[ \t\f]*(?:[#!]|$)/.test(physical[i]))
             continue;
         const parts = [physical[i]];
         while (continues(parts[parts.length - 1]) && i + 1 < physical.length) {
             parts[parts.length - 1] = parts[parts.length - 1].slice(0, -1);
             parts.push(physical[++i].replace(/^[ \t\f]+/, ''));
         }
-        const { key, value } = property(parts.join(''));
-        if (key !== '')
-            out.push({ line: start, key, value });
+        let read;
+        try {
+            read = property(parts.join(''));
+        }
+        catch (e) {
+            if (!(e instanceof MalformedEscape))
+                throw e;
+            out.problems.push({ path, line: lineAt(start), reason: 'a malformed \\uxxxx escape, line not read' });
+            continue;
+        }
+        if (read.key !== '')
+            add(out, path, lineAt(start), read.key, read.value);
     }
-    return out;
 }
+const ENV_COMMENT = new RegExp(`[${SPACE}]#`);
 /**
  * An env file value as compose reads it: a quoted value up to its closing quote, an unquoted one up to a comment that a
  * space and # start.
  */
 function envValue(raw) {
-    const t = raw.trim();
+    const t = trimSpace(raw);
     const q = t[0];
     if (q === '"' || q === "'") {
         const close = t.indexOf(q, 1);
         return close > 0 ? t.substring(1, close) : t;
     }
-    const comment = t.search(/\s#/);
-    return (comment >= 0 ? t.substring(0, comment) : t).trim();
+    const comment = t.search(ENV_COMMENT);
+    return trimSpace(comment >= 0 ? t.substring(0, comment) : t);
 }
 function unquote(v) {
-    const t = v.trim();
+    const t = trimSpace(v);
     if (t.length >= 2 && ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'")))) {
         return t.substring(1, t.length - 1);
     }
@@ -31268,9 +31550,9 @@ function readMapping(root, tracked) {
     return services.map((e, i) => {
         const entry = e;
         if (typeof entry?.service !== 'string' ||
-            entry.service.trim() === '' ||
+            (0, extract_1.trimSpace)(entry.service) === '' ||
             typeof entry.environment !== 'string' ||
-            entry.environment.trim() === '' ||
+            (0, extract_1.trimSpace)(entry.environment) === '' ||
             !Array.isArray(entry.paths) ||
             entry.paths.length === 0 ||
             !entry.paths.every((g) => typeof g === 'string' && g !== '')) {
@@ -31399,7 +31681,12 @@ function scan(root, files, mapped = false) {
             result.problems.push({ path: rel, line: 1, reason: 'holds a NUL byte, not read' });
             continue;
         }
-        const found = (0, extract_1.extract)(rel, bytes.toString('utf8'), kind);
+        const text = (0, extract_1.decode)(bytes, kind);
+        if (text === null) {
+            result.problems.push({ path: rel, line: 1, reason: 'not valid UTF-8, not read' });
+            continue;
+        }
+        const found = (0, extract_1.extract)(rel, text, kind);
         result.read++;
         for (const s of found.settings)
             result.settings.push({ ...s, origin: origins + s.origin });
@@ -31408,7 +31695,10 @@ function scan(root, files, mapped = false) {
     }
     return result;
 }
-/** The findings of a scan: for each source setting, one finding per rule, under the longest name it matched. */
+/**
+ * The findings of a scan: for each source setting, one finding per rule, under the longest name it matched; a finding
+ * two sources give (a YAML anchor read where it stands and through an alias) is given once.
+ */
 function findingsOf(set, settings) {
     const byOrigin = new Map();
     for (const s of settings) {
@@ -31417,18 +31707,21 @@ function findingsOf(set, settings) {
         byOrigin.set(s.origin, group);
     }
     const out = [];
+    const given = new Set();
     for (const group of byOrigin.values()) {
         const ruled = new Set();
         for (const f of (0, ciRules_1.evaluate)(set, group)) {
-            if (ruled.has(f.rule))
+            const key = `${f.rule}|${f.name}|${f.path}|${f.line}`;
+            if (ruled.has(f.rule) || given.has(key))
                 continue;
             ruled.add(f.rule);
+            given.add(key);
             out.push(f);
         }
     }
-    // Code-unit order, as the CLI sorts: the first FINDINGS_MAX the two send are the same ones.
+    // UTF-16 code-unit order, as the CLI and job-manager compare strings: the first FINDINGS_MAX the two send are the same.
     const order = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
-    return out.sort((a, b) => order(a.path, b.path) || a.line - b.line || order(a.rule, b.rule));
+    return out.sort((a, b) => order(a.path, b.path) || a.line - b.line || order(a.rule, b.rule) || order(a.name, b.name));
 }
 function checkResult(service, set, findings) {
     return {
