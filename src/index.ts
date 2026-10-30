@@ -75,7 +75,7 @@ export async function run(): Promise<void> {
     const analysisNames = analysis.names;
 
     const profile = buildProfileFromLocked(cfg.locked);
-    const build = await submitBuild(api, cfg, upload, analysisJobId, profile, ciCheck); // [6b]
+    const build = await submitBuild(api, cfg, upload, analysisJobId, profile, inputs.service, ciCheck); // [6b]
     const buildJobId = build.jobId;
     // Before the build runs, so a build that fails still says how its inputs drifted from the lock.
     reportDrift(build.drift, analysisNames);
