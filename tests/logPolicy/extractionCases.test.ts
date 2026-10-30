@@ -10,7 +10,7 @@ import evaluation from '../fixtures/ci-rules/evaluation-cases.json';
 // The CLI's suite holds a copy of this file and pins the same digest. Each suite checks only its own copy, so a case
 // is added to both by copying the file and its digest to both repositories.
 const SUITE = path.join(__dirname, '..', 'fixtures', 'ci-rules', 'extraction-cases.json');
-const EXTRACTION_CASES_DIGEST = '8f6b8e80e890278565b266da0e91302220415c2de6a6ab95c066a6c5a284a2f7';
+const EXTRACTION_CASES_DIGEST = 'd5dda09b77be17a1a0b3b3411ace5ffa38d72b227747e11f33fd30d0bd5602e8';
 
 interface Case {
   name: string;

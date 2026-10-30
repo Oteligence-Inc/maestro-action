@@ -472,7 +472,7 @@ function aliasTargets(doc: Document.Parsed): Map<Alias, Node> | null {
     if (!node) return;
     if (isAlias(node)) {
       const target = anchors.get(node.source);
-      if (!ANCHOR_NAME.test(node.source) || !target) valid = false;
+      if (!target) valid = false;
       else targets.set(node, target);
     } else if (isScalar(node) || isCollection(node)) {
       const anchor = (node as { anchor?: string }).anchor;

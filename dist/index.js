@@ -30706,7 +30706,7 @@ function aliasTargets(doc) {
             return;
         if ((0, yaml_1.isAlias)(node)) {
             const target = anchors.get(node.source);
-            if (!ANCHOR_NAME.test(node.source) || !target)
+            if (!target)
                 valid = false;
             else
                 targets.set(node, target);

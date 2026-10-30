@@ -239,6 +239,10 @@
         {
           "path": "deploy/defined.yaml",
           "text": "x: &level-1_A DEBUG\nlogging:\n  level:\n    root: *level-1_A\n"
+        },
+        {
+          "path": "deploy/anchor-only.yaml",
+          "text": "x: &a.b DEBUG\nLOGGING_LEVEL_ROOT: DEBUG\n"
         }
       ],
       "findings": [
@@ -263,6 +267,11 @@
         },
         {
           "path": "deploy/dotted.yaml",
+          "line": 1,
+          "reason": "not valid YAML"
+        },
+        {
+          "path": "deploy/anchor-only.yaml",
           "line": 1,
           "reason": "not valid YAML"
         }
