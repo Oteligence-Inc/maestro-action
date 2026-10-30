@@ -99,12 +99,13 @@ included; non-empty strings; each path through `globRefusal`, one linear pass th
    `ACTION_README_URL`. A private-cloud installation's key comes from its own VM.
    A refusal is a `BuildVerificationError` (a `UserError`), the downloaded files (the bundle and both configs) are
    deleted, and nothing registers.
-8. `registerJarForEnv`: `PUT .../envs/{env}/services/{service}/jar` under the `service` input. It warns when the
+8. `warnStalePeers`: `.../envs/{env}/staleness`, warning (or failing, with `fail-on-warnings`) for peers this run's
+   analysis made stale. It runs before the registration, so a run it fails registers nothing.
+   `registerJarForEnv`: `PUT .../envs/{env}/services/{service}/jar` under the `service` input. It warns when the
    analysis key differs from the `serviceKey` the lock's `registeredJars` recorded for that registration; for a lock
    that recorded none, when the analysis names the JAR differently from the registration; and when a lock from
    before per-JAR keys files a shared-name pair's selection under the shared name.
-9. `warnStalePeers`: `.../envs/{env}/staleness`, warning (or failing, with `fail-on-warnings`) for peers this run's
-   analysis made stale. `reportDeployRun` posts to `.../deploy-runs` at start and end, best-effort. The in-progress
+9. `reportDeployRun` posts to `.../deploy-runs` at start and end, best-effort. The in-progress
    report sets the `deployRunProjectUid` state before its request; a completed report sets `deployRunConclusion` before
    its request and clears `deployRunProjectUid` only on a 2xx, so the post step closes a run that was stopped or whose
    final report failed. job-manager's CI matrix reads a `cancelled` conclusion as a cancelled cell.

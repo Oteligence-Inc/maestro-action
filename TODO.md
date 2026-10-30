@@ -1,6 +1,6 @@
 # TODO: maestro-action
 
-**Open:** 1 · **Next ID:** 7
+**Open:** 0 · **Next ID:** 7
 
 Open bugs only. Severities reflect verified impact, not the original audit label.
 A ticket is the facet line plus Where, Failure mode (the repro), and Fix. Essays belong in
@@ -34,12 +34,3 @@ in `platform-overview/TODO.md`.
 ---
 
 ## LOW
-
-#### 6. A run that fails at the stale-peer check has already registered its JAR
-
-- **Needs:** ready · **Repos:** maestro-action
-- **Where:** `run` in `src/index.ts` (`registerJarForEnv`, then `warnStalePeers`)
-- **Failure mode:** REASONED. With `fail-on-warnings: true`, a run whose analysis makes a peer stale throws in `warnStalePeers` after `registerJarForEnv` has committed the JAR, so the customer's pipeline stops before its deploy step while the environment records the new JAR as the service's. job-manager then checks debug windows and names attribution against that run's build, and staleness compares against a JAR that never deployed.
-- **Fix:** call `warnStalePeers` before `registerJarForEnv`. The stale-peer read keys on the analysis job, not on the registration, so its answer does not change; then rebuild `dist/`, and move the platform's `maestro-deploy.yml` pins and the `v0` tag as for any release.
-- **Options:** (1) move the check before the registration: a run that fails registers nothing; (2) keep the order and say in the README that a `fail-on-warnings` failure has already registered the JAR: no release, but the platform keeps reading an undeployed JAR.
-- **Recommendation:** (1), a failed run should leave the environment as it found it.

@@ -26,6 +26,7 @@ import { submitAnalysis, submitBuild } from '../src/steps/submitJob';
 import { downloadArtifacts } from '../src/steps/download';
 import { readAnalysisOfUpload } from '../src/steps/analysisService';
 import { registerJarForEnv } from '../src/steps/register';
+import { warnStalePeers } from '../src/steps/staleness';
 import { BuildVerificationError, verifyBuild } from '../src/steps/verify';
 import { logPolicyCheck, readMapping } from '../src/steps/ciCheck';
 import { checkOnly } from '../src/steps/checkOnly';
@@ -173,6 +174,23 @@ it('registers nothing and fails the step when the download does not match its re
   expect(registerJarForEnv).not.toHaveBeenCalled();
   expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('does not match the record of its build'));
   expect(core.setOutput).not.toHaveBeenCalledWith('generated', 'true');
+});
+
+it('registers nothing when fail-on-warnings stops the run at its stale-peer check', async () => {
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  (warnStalePeers as jest.Mock).mockRejectedValueOnce(new UserError('fail-on-warnings: 1 peer made stale'));
+  await run();
+  expect(registerJarForEnv).not.toHaveBeenCalled();
+  expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('fail-on-warnings'));
+  expect(core.setOutput).not.toHaveBeenCalledWith('generated', 'true');
+});
+
+it('checks stale peers before it registers the JAR', async () => {
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  await run();
+  expect((warnStalePeers as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(
+    (registerJarForEnv as jest.Mock).mock.invocationCallOrder[0],
+  );
 });
 
 it("hands the register step both of the analysis's names, key first", async () => {
