@@ -122,8 +122,8 @@ the app image.
 ## Verifying the download
 
 Maestro records every build: one record per set of build inputs (the application JARs the build read, the lock as
-built, the analysis it read, the environment and its overrides, the Java and OpenTelemetry lines, and the platform's
-build code and JDK), holding the SHA-256 of every bundle file a rebuild reproduces. The first build of a set of inputs
+built, the analysis it read, the environment and its overrides, the Java and OpenTelemetry lines, the debug window
+verify keys the extension carries, and the platform's build code and JDK), holding the SHA-256 of every bundle file a rebuild reproduces. The first build of a set of inputs
 writes the record; it is never changed, and every later build of the same inputs is held to it.
 
 Before it registers anything, the Action checks that the record names the JAR this run uploaded and binds it to the
