@@ -157,8 +157,9 @@ Maestro build: the bundle carries `build-statement.json`, which names the key (`
 SHA-256 of its X.509 SubjectPublicKeyInfo), the record's inputs digest, the application JARs, the upload bound to each
 service, the lock version the build was made from and the SHA-256 of every file the record covers, and
 `build-statement.sig`, the raw Ed25519 signature over those exact bytes. A rebuild of one lock under one key states and
-signs the same bytes. Only the job processor holds the private key, so a server or storage that changes a file and its
-record entry together cannot also make the signature verify.
+signs the same bytes. The private key is held by the job processor and by the platform's operators and pipelines that
+can read the secret it is stored in, never by the server that answers this Action or by storage, so a server or storage
+that changes a file and its record entry together cannot also make the signature verify.
 
 With `signing-public-key` set, the step also fails, and removes what it downloaded, when:
 
@@ -176,6 +177,22 @@ show:** that those inputs are the lock you made. The lock, the analysis and the 
 through the platform, and the lock version the Action compares is the one the server reports, so a compromised
 platform can still have a genuine build made from inputs of its choosing. The four files outside the record
 (`build-annex.json`, `lock-record.json`, `summary.html`, `SUMMARY.txt`) are not signed either.
+
+### Hosted Maestro's signing key
+
+Hosted Maestro (`https://prod.api.oteligence.com`) signs every Maestro build with this key. Store it as a repository or
+organization variable, pass it as `signing-public-key` and set `require-signed-build: true`:
+
+```
+-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEALxYLFYcFT9GuOpiNpwHl4vfzOyeDb+mR7JvaiR2AqlU=
+-----END PUBLIC KEY-----
+```
+
+Its fingerprint is `sha256:b6eabd79f03de114223907189d5e63463652126be4f5e0a657859a8ae57192b5`, which Maestro's Help
+also shows. Check a copied key against it with
+`openssl pkey -pubin -in key.pem -outform DER | openssl dgst -sha256`. A private-cloud installation signs with its own
+key: print it on the VM with `python3 bin/build_signing_key.py public compose/.env`.
 
 To check a bundle by hand, from the folder it was extracted to, with the public key in `signing-public-key.pem`
 (OpenSSL 3, which reads raw Ed25519 input with `-rawin`):
