@@ -31005,6 +31005,13 @@ function dockerEscape(physical) {
     }
     return escape;
 }
+/** `line` without the spaces and tabs at its end, in linear time (a regular expression for it is quadratic). */
+function withoutTrailingBlanks(line) {
+    let end = line.length;
+    while (end > 0 && (line[end - 1] === ' ' || line[end - 1] === '\t'))
+        end--;
+    return line.substring(0, end);
+}
 function dockerfileSettings(path, text, out) {
     const physical = lines(text);
     const escape = dockerEscape(physical);
@@ -31012,7 +31019,7 @@ function dockerfileSettings(path, text, out) {
         const start = i + 1;
         const parts = [physical[i]];
         while (i + 1 < physical.length) {
-            const last = parts[parts.length - 1].replace(/[ \t]+$/, '');
+            const last = withoutTrailingBlanks(parts[parts.length - 1]);
             if (!last.endsWith(escape))
                 break;
             parts[parts.length - 1] = last.substring(0, last.length - 1) + ' ';

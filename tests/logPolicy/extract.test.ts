@@ -344,7 +344,7 @@ describe('Helm templates', () => {
     const ls = String.fromCharCode(0x2028);
     const started = Date.now();
     extract('a.properties', 'a' + ' '.repeat(2000) + 'b' + ls + 'c\n', 'properties');
-    extract('Dockerfile', 'ENV' + ' '.repeat(30000) + 'b' + ls + 'c\n', 'dockerfile');
+    extract('Dockerfile', 'ENV' + ' '.repeat(100000) + 'b' + ls + 'c\n', 'dockerfile');
     expect(Date.now() - started).toBeLessThan(1000);
   });
 });
