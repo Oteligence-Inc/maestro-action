@@ -187,15 +187,15 @@
       ]
     },
     {
-      "name": "a merge key and an alias are read as a deployment reads them",
+      "name": "a merge key and an alias are read as a deployment reads them, a key the mapping or an earlier merge gives winning",
       "files": [
         {
           "path": "deploy/docker-compose.yml",
-          "text": "x-env: &env\n  DEBUG: \"true\"\nx-list: &list\n  - OTEL_JAVAAGENT_DEBUG=true\nx-level: &level TRACE\nservices:\n  orders:\n    environment:\n      <<: *env\n  billing:\n    environment:\n      <<: *env\n      DEBUG: \"false\"\n  ledger:\n    environment: *list\n  audit:\n    environment:\n      LOGGING_LEVEL_COM_ACME: *level\n"
+          "text": "x-env: &env\n  DEBUG: \"true\"\nx-quiet: &quiet\n  DEBUG: \"true\"\nx-list: &list\n  - OTEL_JAVAAGENT_DEBUG=true\nx-level: &level TRACE\nservices:\n  orders:\n    environment:\n      <<: *env\n  billing:\n    environment:\n      <<: *quiet\n      DEBUG: \"false\"\n  ledger:\n    environment: *list\n  audit:\n    environment:\n      LOGGING_LEVEL_COM_ACME: *level\n"
         },
         {
           "path": "deploy/merge-list.yml",
-          "text": "x-a: &a\n  TRACE: \"true\"\n  LOGGING_LEVEL_ROOT: DEBUG\nx-b: &b\n  TRACE: \"false\"\n  DEBUG: \"true\"\nservices:\n  pay:\n    environment:\n      <<: [*a, *b]\n"
+          "text": "x-a: &a\n  TRACE: \"false\"\n  LOGGING_LEVEL_ROOT: DEBUG\nx-b: &b\n  TRACE: \"true\"\n  DEBUG: \"true\"\nservices:\n  pay:\n    environment:\n      <<: [*a, *b]\n"
         }
       ],
       "findings": [
@@ -211,21 +211,14 @@
           "severity": "error",
           "name": "otel.javaagent.debug",
           "path": "deploy/docker-compose.yml",
-          "line": 4
+          "line": 6
         },
         {
           "rule": "LOG_LEVEL_BELOW_FLOOR",
           "severity": "warning",
           "name": "logging.level.com.acme",
           "path": "deploy/docker-compose.yml",
-          "line": 18
-        },
-        {
-          "rule": "SPRING_DEBUG",
-          "severity": "warning",
-          "name": "trace",
-          "path": "deploy/merge-list.yml",
-          "line": 2
+          "line": 20
         },
         {
           "rule": "LOG_LEVEL_BELOW_FLOOR",
@@ -512,9 +505,27 @@
         {
           "path": "deploy/\ud83d\ude00.env",
           "text": "OTEL_JAVAAGENT_DEBUG=true\n"
+        },
+        {
+          "path": "deploy/Dockerfile",
+          "text": "FROM x\nENV LOGGING_LEVEL_ZETA=DEBUG LOGGING_LEVEL_ALPHA=TRACE\n"
         }
       ],
       "findings": [
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.alpha",
+          "path": "deploy/Dockerfile",
+          "line": 2
+        },
+        {
+          "rule": "LOG_LEVEL_BELOW_FLOOR",
+          "severity": "warning",
+          "name": "logging.level.zeta",
+          "path": "deploy/Dockerfile",
+          "line": 2
+        },
         {
           "rule": "AGENT_DEBUG",
           "severity": "error",
@@ -540,11 +551,11 @@
       "problems": []
     },
     {
-      "name": "a ConfigMap's application.yaml is read as YAML, at its own lines",
+      "name": "a ConfigMap's application.yaml is read as YAML, at its own lines, and a file it carries in turn is not",
       "files": [
         {
           "path": "deploy/configmap.yaml",
-          "text": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: orders-config\ndata:\n  application.yaml: |\n    logging:\n      level:\n        root: DEBUG\n    management:\n      endpoints:\n        web:\n          exposure:\n            include: health,loggers\n  LOGGING_LEVEL_COM_ACME: TRACE\n"
+          "text": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: orders-config\ndata:\n  application.yaml: |\n    logging:\n      level:\n        root: DEBUG\n    management:\n      endpoints:\n        web:\n          exposure:\n            include: health,loggers\n    data:\n      inner.yaml: |\n        debug: true\n  LOGGING_LEVEL_COM_ACME: TRACE\n"
         }
       ],
       "findings": [
@@ -567,7 +578,7 @@
           "severity": "warning",
           "name": "logging.level.com.acme",
           "path": "deploy/configmap.yaml",
-          "line": 15
+          "line": 18
         }
       ],
       "problems": []

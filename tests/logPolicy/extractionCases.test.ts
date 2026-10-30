@@ -9,7 +9,7 @@ import evaluation from '../fixtures/ci-rules/evaluation-cases.json';
 
 // The CLI's suite holds a byte-identical copy of this file and pins the same digest, so the two read every case alike.
 const SUITE = path.join(__dirname, '..', 'fixtures', 'ci-rules', 'extraction-cases.json');
-const EXTRACTION_CASES_DIGEST = 'e889028dcede9b4ad338c35661dad503b529b46e8a5b80d4b8c02d8d103d0ada';
+const EXTRACTION_CASES_DIGEST = 'fbcdb035926c15560356ab6985441e4182fad05cc3f2fcab04c23390d3fd139f';
 
 interface Case {
   name: string;
