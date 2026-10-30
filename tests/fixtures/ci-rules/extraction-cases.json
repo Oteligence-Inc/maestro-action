@@ -294,11 +294,11 @@
       ]
     },
     {
-      "name": "an explicit !!merge key merges; a quoted or !!str-tagged << does not",
+      "name": "a !!merge-tagged key merges, quoted or not; a quoted or !!str-tagged << does not",
       "files": [
         {
           "path": "deploy/merge-tags.yml",
-          "text": "x-a: &a\n  DEBUG: \"true\"\nx-b: &b\n  TRACE: \"true\"\nx-c: &c\n  TRACE: \"true\"\nservices:\n  one:\n    environment:\n      !!merge <<: *a\n  two:\n    environment:\n      \"<<\": *b\n  three:\n    environment:\n      !!str <<: *c\n"
+          "text": "x-a: &a\n  DEBUG: \"true\"\nx-b: &b\n  TRACE: \"true\"\nx-c: &c\n  TRACE: \"true\"\nx-d: &d\n  TRACE: \"true\"\nservices:\n  one:\n    environment:\n      !!merge <<: *a\n  two:\n    environment:\n      \"<<\": *b\n  three:\n    environment:\n      !!str <<: *c\n  four:\n    environment:\n      !!merge \"<<\": *d\n"
         }
       ],
       "findings": [
@@ -308,6 +308,13 @@
           "name": "debug",
           "path": "deploy/merge-tags.yml",
           "line": 2
+        },
+        {
+          "rule": "SPRING_DEBUG",
+          "severity": "warning",
+          "name": "trace",
+          "path": "deploy/merge-tags.yml",
+          "line": 8
         }
       ],
       "problems": []

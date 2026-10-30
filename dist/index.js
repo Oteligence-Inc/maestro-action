@@ -30800,13 +30800,13 @@ function visit(w, node, aliasLine) {
     }
     return [n && (0, yaml_1.isAlias)(n) ? w.aliases.get(n) ?? null : n, aliasLine];
 }
-/** A merge key: a plain `<<`, untagged or tagged `!!merge` (which the parser reads as a symbol). */
+/** A `<<` key yaml.v3 merges: a plain untagged one, or one tagged `!!merge` (read by the parser as a symbol). */
 function isMergeKey(node) {
-    if (!(0, yaml_1.isScalar)(node) || node.type !== 'PLAIN')
+    if (!(0, yaml_1.isScalar)(node))
         return false;
     if (node.tag === 'tag:yaml.org,2002:merge')
         return true;
-    return node.tag === undefined && node.value === '<<';
+    return node.type === 'PLAIN' && node.tag === undefined && node.value === '<<';
 }
 /**
  * A mapping's entries with its merge keys applied: its own first, then each merged mapping's in turn, a key already

@@ -580,11 +580,11 @@ interface Entry {
   aliasLine: number;
 }
 
-/** A merge key: a plain `<<`, untagged or tagged `!!merge` (which the parser reads as a symbol). */
+/** A `<<` key yaml.v3 merges: a plain untagged one, or one tagged `!!merge` (read by the parser as a symbol). */
 function isMergeKey(node: unknown): boolean {
-  if (!isScalar(node) || node.type !== 'PLAIN') return false;
+  if (!isScalar(node)) return false;
   if (node.tag === 'tag:yaml.org,2002:merge') return true;
-  return node.tag === undefined && node.value === '<<';
+  return node.type === 'PLAIN' && node.tag === undefined && node.value === '<<';
 }
 
 /**
