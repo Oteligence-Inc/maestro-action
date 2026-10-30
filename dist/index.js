@@ -29960,7 +29960,7 @@ async function run() {
         }
         const analysisNames = analysis.names;
         const profile = (0, submitJob_1.buildProfileFromLocked)(cfg.locked);
-        const build = await (0, submitJob_1.submitBuild)(api, cfg, upload, analysisJobId, profile, ciCheck); // [6b]
+        const build = await (0, submitJob_1.submitBuild)(api, cfg, upload, analysisJobId, profile, inputs.service, ciCheck); // [6b]
         const buildJobId = build.jobId;
         // Before the build runs, so a build that fails still says how its inputs drifted from the lock.
         (0, drift_1.reportDrift)(build.drift, analysisNames);
@@ -32889,7 +32889,7 @@ async function submitAnalysis(api, cfg, upload) {
  * extension bundle. The backend REQUIRES requestJson.profile, so we assemble it from the
  * locked selection (the CI equivalent of the wizard's "Generate").
  */
-async function submitBuild(api, cfg, upload, analysisJobId, profile, ciCheck = null) {
+async function submitBuild(api, cfg, upload, analysisJobId, profile, service, ciCheck = null) {
     const locked = cfg.locked;
     const res = await api.post('/api/job-manager/jobs', {
         projectUid: cfg.projectUid, // stamp the project so project-scoped reads (ci-runs) find this job
@@ -32902,6 +32902,8 @@ async function submitBuild(api, cfg, upload, analysisJobId, profile, ciCheck = n
             artifactGroupUid: upload.artifactGroupUid,
             analysisJobId,
             envName: cfg.envName,
+            // The name the JAR is registered under, so job-manager can tell which service each build deployed.
+            service,
             profile,
             // job-manager re-checks its digest against the rules it serves now and decides the build by the env's mode.
             ...(ciCheck ? { ciCheck } : {}),

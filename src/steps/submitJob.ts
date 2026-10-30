@@ -60,6 +60,7 @@ export async function submitBuild(
   upload: UploadResult,
   analysisJobId: string,
   profile: BuildProfile,
+  service: string,
   ciCheck: CheckResult | null = null,
 ): Promise<SubmittedBuild> {
   const locked = cfg.locked;
@@ -74,6 +75,8 @@ export async function submitBuild(
       artifactGroupUid: upload.artifactGroupUid,
       analysisJobId,
       envName: cfg.envName,
+      // The name the JAR is registered under, so job-manager can tell which service each build deployed.
+      service,
       profile,
       // job-manager re-checks its digest against the rules it serves now and decides the build by the env's mode.
       ...(ciCheck ? { ciCheck } : {}),

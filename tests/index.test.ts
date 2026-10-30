@@ -59,7 +59,8 @@ describe('the log policy check', () => {
     expect((logPolicyCheck as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(
       (uploadJar as jest.Mock).mock.invocationCallOrder[0],
     );
-    expect((submitBuild as jest.Mock).mock.calls[0][5]).toBe(result);
+    expect((submitBuild as jest.Mock).mock.calls[0][5]).toBe(inputs.service);
+    expect((submitBuild as jest.Mock).mock.calls[0][6]).toBe(result);
     expect(core.setFailed).not.toHaveBeenCalled();
   });
 

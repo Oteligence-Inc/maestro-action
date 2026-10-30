@@ -154,13 +154,14 @@ describe('submitBuild', () => {
       .reply(201, { data: { jobId: 'build_1' } }); // jobId variant also supported
 
     const profile = buildProfileFromLocked(locked);
-    const build = await submitBuild(client(), cfg, upload, 'job_a', profile);
+    const build = await submitBuild(client(), cfg, upload, 'job_a', profile, 'fund-transfer-service');
     expect(build).toEqual({ jobId: 'build_1', drift: undefined });
     expect(seen.jobType).toBe('MULTI_JAR_EXPLORER_BUILD');
     expect(seen.projectUid).toBe('proj_1'); // stamped so ci-runs (project-scoped) finds it
     expect(seen.lockedVersionUid).toBe('lv_9');
     expect(seen.requestJson.analysisJobId).toBe('job_a');
     expect(seen.requestJson.envName).toBe('prod'); // job-manager holds the build to this env's lock
+    expect(seen.requestJson.service).toBe('fund-transfer-service'); // the name the JAR is registered under
     expect(seen.requestJson.profile.methodConfigurations).toBeDefined();
   });
 
@@ -176,8 +177,8 @@ describe('submitBuild', () => {
     const ciCheck = { service: 'orders', ruleSetDigest: 'd'.repeat(64), total: 1,
       findings: [{ rule: 'LOG_LEVEL_BELOW_FLOOR', name: 'logging.level.root', path: 'v.yaml', line: 2 }] };
 
-    await submitBuild(client(), cfg, upload, 'job_a', buildProfileFromLocked(locked), ciCheck);
-    await submitBuild(client(), cfg, upload, 'job_a', buildProfileFromLocked(locked), null);
+    await submitBuild(client(), cfg, upload, 'job_a', buildProfileFromLocked(locked), 'orders', ciCheck);
+    await submitBuild(client(), cfg, upload, 'job_a', buildProfileFromLocked(locked), 'orders', null);
 
     expect(bodies[0].requestJson.ciCheck).toEqual(ciCheck);
     expect('ciCheck' in bodies[1].requestJson).toBe(false);
@@ -187,7 +188,7 @@ describe('submitBuild', () => {
     const drift = { status: 'checked', lockVersion: 9, services: {} };
     nock(BASE).post('/api/job-manager/jobs').reply(201, { data: { id: 'build_2', drift } });
 
-    const build = await submitBuild(client(), cfg, upload, 'job_a', buildProfileFromLocked(locked));
+    const build = await submitBuild(client(), cfg, upload, 'job_a', buildProfileFromLocked(locked), 'orders');
 
     expect(build).toEqual({ jobId: 'build_2', drift });
   });

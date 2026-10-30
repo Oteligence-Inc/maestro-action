@@ -106,7 +106,8 @@ the app image.
    staleness signatures), then `MULTI_JAR_EXPLORER_BUILD` (generates the extension from
    the locked selection: every entry except an auto-recommended SKIP one and a
    `user_removed` one; a SKIP row the user ticked is built, as the wizard builds it).
-   The build names its project and environment, so job-manager holds it to that environment's lock.
+   The build names its project and environment, so job-manager holds it to that environment's lock, and the
+   `service` it registers the JAR under, so Maestro knows which build last deployed each service.
    Before polling the build, the Action reports its **drift** from the lock (below), so a build that then fails
    still says how its inputs drifted.
 7. Poll each job to completion. A job that fails names Maestro's reason for it in the step's error (for example

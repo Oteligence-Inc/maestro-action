@@ -52,7 +52,8 @@ included; non-empty strings; each path through `globRefusal`, one linear pass th
    entry are left out, a user-ticked SKIP entry is built, and a method selected in several flows is configured
    once). The build request carries `projectUid` and `requestJson.envName` (`ResolvedConfig.envName`, the `environment`
    input), because job-manager resolves the build's environment from them and refuses an unknown name (409
-   `build_env_not_found`); `pollJob` on
+   `build_env_not_found`), and `requestJson.service` (the `service` input, the name the JAR is registered under), from
+   which job-manager chooses, per service, the newest build that deployed it; `pollJob` on
    `/api/job-manager/jobs/{id}/status` after each. A FAILED or NO_ASSET job throws `JobFailed` carrying the status's
    `customerReason` (control characters collapsed, 500 characters at most) when job-manager gives one. A job id
    that is not letters, digits, `-` and `_` is refused at submit (`extractJobId`), since it becomes a path segment
