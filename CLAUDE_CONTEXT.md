@@ -42,7 +42,9 @@ included; non-empty strings; each path through `globRefusal`, one linear pass th
    `run()` calls `checkOnly` right after `auth` (step 1) and returns, so steps 2 to 7 never run.
 3. The removed-service guard: once the lock's `registeredJars` is non-empty, a `service` input it does not contain is
    refused before any upload, listing the registered names.
-4. `uploadJar`: one glob match; `POST /api/file/artifact/upload/batch` with this JAR plus the other registered
+4. `uploadJar`: the glob's matches, sorted, go through `pickJar`, which uploads a single match whatever its name and,
+   of several, sets aside `original-*.jar|war`, `*-plain.jar|war`, `*-sources.jar`, `*-javadoc.jar` and `*-tests.jar`,
+   refusing unless exactly one remains; `POST /api/file/artifact/upload/batch` with this JAR plus the other registered
    services, each named by the `artifactUid` its lock entry froze (resolved in any of the org's projects for an
    organization key, in the key's own project for a scoped one, where another project's is a 403 `key_scope`; a 404
    when gone) or, for an entry with none, by SHA in this project (skipped on a miss); a signed `PUT` of the bytes when the

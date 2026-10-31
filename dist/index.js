@@ -33016,6 +33016,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.uploadJar = uploadJar;
+exports.pickJar = pickJar;
 const core = __importStar(__nccwpck_require__(7484));
 const fs = __importStar(__nccwpck_require__(9896));
 const glob_1 = __nccwpck_require__(1363);
@@ -33031,16 +33032,16 @@ const errors_1 = __nccwpck_require__(17);
  * A peer is named by the artifactUid the lock froze, which file-service resolves in any of the
  * org's projects and refuses with a 404 when it is gone. A lock entry with no uid is matched by
  * its SHA in this project and skipped on a miss.
- * v0: exactly one JAR per invocation (monorepo multi-JAR deferred — Build Spec §12).
+ * One JAR per invocation: see pickJar for a glob that matches several.
  */
 async function uploadJar(api, inputs, cfg) {
-    const matches = await (0, glob_1.glob)(inputs.jarsGlob, { nodir: true, windowsPathsNoEscape: true });
+    const matches = (await (0, glob_1.glob)(inputs.jarsGlob, { nodir: true, windowsPathsNoEscape: true })).sort();
     if (matches.length === 0)
         throw new errors_1.UserError(`No JAR matched "${inputs.jarsGlob}". Did "mvn package" run first?`);
-    if (matches.length > 1) {
-        throw new errors_1.UserError(`"${inputs.jarsGlob}" matched ${matches.length} files. v0 expects exactly one JAR per invocation: ${matches.join(', ')}`);
+    const { jar: jarPath, setAside } = pickJar(matches, inputs.jarsGlob);
+    if (setAside.length > 0) {
+        core.info(`Uploading ${jarPath}; set aside ${setAside.join(', ')}, which a build leaves beside the runnable JAR.`);
     }
-    const jarPath = matches[0];
     const fileName = jarPath.split(/[\\/]/).pop();
     const sizeBytes = fs.statSync(jarPath).size;
     const sha = await (0, sha_1.sha256File)(jarPath);
@@ -33099,6 +33100,26 @@ async function uploadJar(api, inputs, cfg) {
         sizeBytes,
         mustUpload,
     };
+}
+/** File names a build leaves beside the runnable JAR or WAR: Maven shade's original, Gradle Boot's plain archive, and
+ * the sources, javadoc and test JARs. */
+const BESIDE_THE_JAR_NAMES = 'original-*, *-plain, *-sources, *-javadoc and *-tests files';
+const BESIDE_THE_JAR = [/^original-.+\.(jar|war)$/, /-plain\.(jar|war)$/, /-sources\.jar$/, /-javadoc\.jar$/, /-tests\.jar$/];
+/**
+ * The one file to upload from the glob's matches. A single match is uploaded whatever its name; of several, the files a
+ * build leaves beside the runnable JAR are set aside, and exactly one must remain.
+ */
+function pickJar(matches, jarsGlob = 'jars') {
+    if (matches.length === 1)
+        return { jar: matches[0], setAside: [] };
+    const name = (p) => p.split(/[\\/]/).pop();
+    const setAside = matches.filter((m) => BESIDE_THE_JAR.some((re) => re.test(name(m))));
+    const left = matches.filter((m) => !setAside.includes(m));
+    if (left.length !== 1) {
+        throw new errors_1.UserError(`"${jarsGlob}" matched ${matches.length} files and ${left.length === 0 ? 'none is a runnable JAR' : `${left.length} are runnable JARs`} ` +
+            `once ${BESIDE_THE_JAR_NAMES} are set aside: ${matches.join(', ')}. Narrow the glob to one file.`);
+    }
+    return { jar: left[0], setAside };
 }
 
 

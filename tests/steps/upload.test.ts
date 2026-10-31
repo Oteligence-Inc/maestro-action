@@ -4,7 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 jest.mock('@actions/core');
 import { MaestroApi } from '../../src/api';
-import { uploadJar } from '../../src/steps/upload';
+import * as core from '@actions/core';
+import { pickJar, uploadJar } from '../../src/steps/upload';
+import { UserError } from '../../src/util/errors';
 import { sha256Buffer } from '../../src/util/sha';
 import { Inputs, ResolvedConfig } from '../../src/types';
 
@@ -107,4 +109,66 @@ it('fails with file-service\'s reason when a peer the lock named is no longer st
   await expect(uploadJar(client(), inputs, cfg)).rejects.toThrow(
     /HTTP 404.*No uploaded artifact art_order to reference for order-service\.jar/,
   );
+});
+
+describe('pickJar: the runnable JAR when the glob matches several', () => {
+  const dir = '/w/target';
+  const at = (...names: string[]) => names.map((n) => `${dir}/${n}`);
+
+  it('takes the shaded JAR a Maven shade build leaves beside original-*.jar', () => {
+    expect(pickJar(at('app-1.0.jar', 'original-app-1.0.jar'))).toEqual({
+      jar: `${dir}/app-1.0.jar`,
+      setAside: [`${dir}/original-app-1.0.jar`],
+    });
+  });
+
+  it('takes the boot JAR a Gradle Boot build leaves beside *-plain.jar, and the boot WAR beside *-plain.war', () => {
+    expect(pickJar(at('app-plain.jar', 'app.jar')).jar).toBe(`${dir}/app.jar`);
+    expect(pickJar(at('app.war', 'app-plain.war'))).toEqual({ jar: `${dir}/app.war`, setAside: [`${dir}/app-plain.war`] });
+  });
+
+  it('sets aside sources, javadoc and test JARs', () => {
+    const picked = pickJar(at('svc-sources.jar', 'svc.jar', 'svc-javadoc.jar', 'svc-tests.jar', 'svc-test-sources.jar'));
+    expect(picked.jar).toBe(`${dir}/svc.jar`);
+    expect(picked.setAside).toHaveLength(4);
+  });
+
+  it('refuses two runnable JARs, naming both', () => {
+    expect(() => pickJar(at('a.jar', 'b.jar', 'original-a.jar'))).toThrow(/matched 3 files.*a\.jar.*b\.jar/s);
+    expect(() => pickJar(at('a.jar', 'b.jar'))).toThrow(UserError);
+  });
+
+  it('refuses when every match is a file a build leaves beside the JAR', () => {
+    expect(() => pickJar(at('original-a.jar', 'a-plain.jar'))).toThrow(/original-a\.jar.*a-plain\.jar/s);
+  });
+
+  it('uploads a single match whatever its name', () => {
+    expect(pickJar(at('original-app.jar'))).toEqual({ jar: `${dir}/original-app.jar`, setAside: [] });
+  });
+
+  it('reads the file name after a backslash too', () => {
+    expect(pickJar(['C:\\w\\target\\app.jar', 'C:\\w\\target\\original-app.jar']).jar).toBe('C:\\w\\target\\app.jar');
+  });
+
+  it('does not set aside a JAR whose name only contains a marker', () => {
+    expect(() => pickJar(at('plain-text-service.jar', 'sources-api.jar'))).toThrow(UserError);
+  });
+});
+
+it('uploads the shaded JAR when the glob also matches original-*.jar, and says which it set aside', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-shade-'));
+  fs.writeFileSync(path.join(d, 'payment-service.jar'), JAR_BYTES);
+  fs.writeFileSync(path.join(d, 'original-payment-service.jar'), Buffer.from('thin'));
+  let batchBody: any;
+  nock(BASE)
+    .post('/api/file/artifact/upload/batch', (b) => {
+      batchBody = b;
+      return true;
+    })
+    .reply(200, { artifactGroupUid: 'grp_1', uploads: [{ artifactUid: 'art_0', preSignedUrl: null }] });
+  nock(BASE).put('/api/file/artifact/status').reply(200, {});
+  const glob = `${d.replace(/\\/g, '/')}/*.jar`;
+  await uploadJar(client(), { ...inputs, jarsGlob: glob } as Inputs, cfg).catch(() => undefined);
+  expect(batchBody.files[0]).toMatchObject({ fileName: 'payment-service.jar', sha256: JAR_SHA });
+  expect(core.info).toHaveBeenCalledWith(expect.stringMatching(/set aside .*original-payment-service\.jar/));
 });
