@@ -1,6 +1,6 @@
 # TODO: maestro-action
 
-**Open:** 0 · **Next ID:** 8
+**Open:** 1 · **Next ID:** 9
 
 Open bugs only. Severities reflect verified impact, not the original audit label.
 A ticket is the facet line plus Where, Failure mode (the repro), and Fix. Essays belong in
@@ -34,5 +34,14 @@ in `platform-overview/TODO.md`.
 ---
 
 ## MEDIUM
+
+#### 8. Customers' `@v0` does not set aside a build's side files or note a JDK AOT cache until the Action is released
+
+- **Needs:** approval · **Repos:** maestro-action, oteligence-frontend
+- **Where:** the floating `v0` tag (`release.yml`, moved by a pushed `v0.x.y` tag); `pickJar` in `src/steps/upload.ts` and `aotNotes` in `src/logPolicy/aot.ts` are on `main` only
+- **Failure mode:** **OBSERVED**: `git show v0:src/steps/upload.ts` still refuses any glob matching two files ("v0 expects exactly one JAR per invocation"), so a shade or Gradle Boot build's first CI run fails as before, and no AOT notice is printed. The frontend's Help describes the new behaviour and keeps the old refusal as a troubleshooting row until then.
+- **Fix:** push the next `v0.4.x` tag from `main` once this work is merged; `release.yml` re-tests, releases and moves `v0`.
+- **Options:** (a) release now: every `@v0` pipeline gets the set-aside and the notes on its next run, and the published behaviour changes for anyone pinned to `@v0`; (b) release with the prod UI deploy that ships the matching Help: Help and `@v0` change together, and `@v0` keeps the refusal until then.
+- **Recommendation:** (b), because Help's Action rows describe `@v0` and the two then change at once.
 
 ## LOW
