@@ -72,6 +72,9 @@ export async function run(): Promise<void> {
     for (const notice of analysis.notices) {
       core.warning(`The analysis left part of ${inputs.service} out: ${notice}`);
     }
+    for (const warning of analysis.warnings) {
+      core.warning(`Before you deploy ${inputs.service}: ${warning}`);
+    }
     const analysisNames = analysis.names;
 
     const profile = buildProfileFromLocked(cfg.locked);

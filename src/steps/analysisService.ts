@@ -11,9 +11,11 @@ export interface AnalysisOfUpload {
   names: string[];
   /** One line per kind of class or library the analysis left out of the JAR. */
   notices: string[];
+  /** One line per in-app tracer the service bundles beside the agent, with the setting that turns it off. */
+  warnings: string[];
 }
 
-const NOTHING: AnalysisOfUpload = { names: [], notices: [] };
+const NOTHING: AnalysisOfUpload = { names: [], notices: [], warnings: [] };
 
 /**
  * The analysis's names for the uploaded JAR, either of which can key its javaagent.config, and what it left out
@@ -33,10 +35,9 @@ export async function readAnalysisOfUpload(
     const mine = (preview.services ?? []).find((s: { jarUid?: string }) => s?.jarUid === artifactUid);
     // Uploads sharing a name are keyed name@<8 hex>; a preview from an older engine carries no key.
     const names = [mine?.serviceKey, mine?.name].filter((n): n is string => typeof n === 'string' && n !== '');
-    const notices = Array.isArray(mine?.notices)
-      ? mine.notices.filter((n: unknown): n is string => typeof n === 'string' && n !== '')
-      : [];
-    return { names: [...new Set(names)], notices };
+    const lines = (value: unknown): string[] =>
+      Array.isArray(value) ? value.filter((n: unknown): n is string => typeof n === 'string' && n !== '') : [];
+    return { names: [...new Set(names)], notices: lines(mine?.notices), warnings: lines(mine?.warnings) };
   } catch (err) {
     core.debug(`Could not read the analysis preview: ${err}`);
     return NOTHING;

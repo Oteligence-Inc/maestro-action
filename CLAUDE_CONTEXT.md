@@ -60,8 +60,9 @@ included; non-empty strings; each path through `globRefusal`, one linear pass th
    under `RUNNER_TEMP` and a log line.
 6. `readAnalysisOfUpload` (called after the analysis completes and before the build is submitted): the analysis
    preview (`/jobs/{id}/preview`, then its signed JSON) gives the uploaded JAR's `serviceKey` (its name, or
-   `name@<8 hex>` when uploads share a name) and display name, and its `notices` (what the analysis left out of the
-   JAR); `run` emits one `core.warning` per notice.
+   `name@<8 hex>` when uploads share a name) and display name, its `notices` (what the analysis left out of the
+   JAR) and its `warnings` (each in-app tracer the service bundles beside the agent); `run` emits one `core.warning`
+   per notice and one per warning, the latter as `Before you deploy <service>: ...`.
 6b. `reportDrift` (`src/steps/drift.ts`), right after `submitBuild` returns `{jobId, drift}` and before the build is
    polled: job-manager's drift of the build from its lock. One `core.warning` per kind of drift for the services
    `readAnalysisOfUpload` named, or for every service when it named none (the method names only inside

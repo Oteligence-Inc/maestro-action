@@ -53,7 +53,7 @@ describe('the log policy check', () => {
   const result = { service: 'fundtransfer', ruleSetDigest: 'd'.repeat(64), total: 0, findings: [] };
 
   it('runs before the upload, and the build carries its result', async () => {
-    (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [] });
+    (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [], warnings: [] });
     (logPolicyCheck as jest.Mock).mockResolvedValue(result);
     await run();
     expect((logPolicyCheck as jest.Mock).mock.calls[0].slice(0, 4)).toEqual([expect.anything(), 'proj_1', 'dev', 'fundtransfer']);
@@ -85,7 +85,7 @@ describe('the log policy check', () => {
 });
 
 it("warns on the build's drift for its own service right after submitting, before the build is polled", async () => {
-  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [] });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [], warnings: [] });
   (submitBuild as jest.Mock).mockResolvedValue({ jobId: 'build_1', drift: { status: 'checked', lockVersion: 3,
     services: { fundtransfer: { recommendedNotInLock: { count: 1, keys: ['fundtransfer::a.B.added'] },
       lockedNotInJar: { count: 0, keys: [] } } } } });
@@ -99,7 +99,7 @@ it("warns on the build's drift for its own service right after submitting, befor
 
 it('does not fail the step on drift with fail-on-warnings set', async () => {
   (parseInputs as jest.Mock).mockReturnValue({ ...inputs, failOnWarnings: true });
-  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [] });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [], warnings: [] });
   (submitBuild as jest.Mock).mockResolvedValue({ jobId: 'build_1', drift: { status: 'checked', lockVersion: 3,
     services: { fundtransfer: { recommendedNotInLock: { count: 0, keys: [] },
       lockedNotInJar: { count: 1, keys: ['fundtransfer::a.B.gone'] } } } } });
@@ -109,7 +109,7 @@ it('does not fail the step on drift with fail-on-warnings set', async () => {
 });
 
 it('reports the drift of a build that then fails', async () => {
-  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [] });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [], warnings: [] });
   (submitBuild as jest.Mock).mockResolvedValue({ jobId: 'build_1', drift: { status: 'checked', lockVersion: 3,
     services: { fundtransfer: { recommendedNotInLock: { count: 1, keys: ['fundtransfer::a.B.added'] },
       lockedNotInJar: { count: 0, keys: [] } } } } });
@@ -122,14 +122,14 @@ it('reports the drift of a build that then fails', async () => {
 });
 
 it('carries on when job-manager sends a drift it cannot read', async () => {
-  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [], warnings: [] });
   (submitBuild as jest.Mock).mockResolvedValue({ jobId: 'build_1', drift: 'unexpected' });
   await run();
   expect(core.setFailed).not.toHaveBeenCalled();
 });
 
 it("verifies the download against the build's record before registering, and outputs the record's status", async () => {
-  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [], warnings: [] });
   await run();
   expect(core.setFailed).not.toHaveBeenCalled();
   expect(verifyBuild).toHaveBeenCalledWith(expect.objectContaining({ extensionDir: 'x', uploadSha: 'abc' }));
@@ -148,7 +148,7 @@ it("hands the verify step the workflow's signing key and the lock this run built
     lockedVersionUid: 'lv_3',
     locked: { version: 3, goals: [], selection: [], registeredJars: {} },
   });
-  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [], warnings: [] });
   await run();
   expect(verifyBuild).toHaveBeenCalledWith(expect.objectContaining({ signingKey, lockedVersionUid: 'lv_3' }));
 });
@@ -158,7 +158,7 @@ it.each([
   ['not-checked', /signing-public-key is not set, so its signature was not checked/],
   ['unsigned', /The build is unsigned/],
 ])('says what it made of a %s signature', async (signature, line) => {
-  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [], warnings: [] });
   (verifyBuild as jest.Mock).mockResolvedValue({ record: 'recorded', signature });
   await run();
   expect(core.info).toHaveBeenCalledWith(expect.stringMatching(line));
@@ -166,7 +166,7 @@ it.each([
 });
 
 it('registers nothing and fails the step when the download does not match its record', async () => {
-  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [], warnings: [] });
   (verifyBuild as jest.Mock).mockRejectedValue(
     new BuildVerificationError('The download does not match the record of its build: x.jar'),
   );
@@ -177,7 +177,7 @@ it('registers nothing and fails the step when the download does not match its re
 });
 
 it('registers nothing when fail-on-warnings stops the run at its stale-peer check', async () => {
-  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [], warnings: [] });
   (warnStalePeers as jest.Mock).mockRejectedValueOnce(new UserError('fail-on-warnings: 1 peer made stale'));
   await run();
   expect(registerJarForEnv).not.toHaveBeenCalled();
@@ -186,7 +186,7 @@ it('registers nothing when fail-on-warnings stops the run at its stale-peer chec
 });
 
 it('checks stale peers before it registers the JAR', async () => {
-  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [], warnings: [] });
   await run();
   expect((warnStalePeers as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(
     (registerJarForEnv as jest.Mock).mock.invocationCallOrder[0],
@@ -194,7 +194,7 @@ it('checks stale peers before it registers the JAR', async () => {
 });
 
 it("hands the register step both of the analysis's names, key first", async () => {
-  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fund-transfer-service@1a2b3c4d', 'fund-transfer-service'], notices: [] });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fund-transfer-service@1a2b3c4d', 'fund-transfer-service'], notices: [], warnings: [] });
   await run();
   expect(core.setFailed).not.toHaveBeenCalled();
   expect(registerJarForEnv).toHaveBeenCalledWith(expect.anything(), inputs, expect.anything(), expect.anything(),
@@ -203,7 +203,7 @@ it("hands the register step both of the analysis's names, key first", async () =
 });
 
 it('hands it no name when the analysis gave none', async () => {
-  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [], warnings: [] });
   await run();
   expect(registerJarForEnv).toHaveBeenCalledWith(
     expect.anything(), inputs, expect.anything(), expect.anything(), 'build_1', []);
@@ -221,7 +221,7 @@ it('refuses a service input the environment does not register, naming the ones i
 });
 
 it('proceeds when the environment registers the service input', async () => {
-  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [], warnings: [] });
   (resolveLockedConfig as jest.Mock).mockResolvedValue({
     projectUid: 'proj_1',
     locked: { version: 3, goals: [], selection: [], registeredJars: { fundtransfer: { sha: 'old' } } },
@@ -235,6 +235,7 @@ it('warns once per thing the analysis left out of the JAR, and fails nothing', a
   (readAnalysisOfUpload as jest.Mock).mockResolvedValue({
     names: ['fundtransfer'],
     notices: ['1 class could not be parsed and is not analysed: A.class.', 'The embedded library lib.jar could not be read; its classes are not analysed.'],
+    warnings: [],
   });
   await run();
   expect(core.setFailed).not.toHaveBeenCalled();
@@ -244,17 +245,30 @@ it('warns once per thing the analysis left out of the JAR, and fails nothing', a
     'The analysis left part of fundtransfer out: The embedded library lib.jar could not be read; its classes are not analysed.');
 });
 
+it('warns once per in-app tracer the service bundles, and fails nothing', async () => {
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({
+    names: ['fundtransfer'],
+    notices: [],
+    warnings: ["This service bundles Micrometer's OpenTelemetry bridge."],
+  });
+  await run();
+  expect(core.setFailed).not.toHaveBeenCalled();
+  expect(core.warning).toHaveBeenCalledWith(
+    "Before you deploy fundtransfer: This service bundles Micrometer's OpenTelemetry bridge.");
+});
+
 it('warns about nothing when the analysis left nothing out', async () => {
-  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [] });
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [], warnings: [] });
   await run();
   expect(core.warning).not.toHaveBeenCalledWith(expect.stringContaining('The analysis left part of'));
+  expect(core.warning).not.toHaveBeenCalledWith(expect.stringContaining('Before you deploy'));
 });
 
 describe('the deploy-run reports the post step relies on', () => {
   const reports = () => (reportDeployRun as jest.Mock).mock.calls.map((c) => [c[2], c[3], c[4]]);
 
   beforeEach(() => {
-    (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [] });
+    (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [], warnings: [] });
   });
 
   it('opens the run before uploading and completes it as a success', async () => {
