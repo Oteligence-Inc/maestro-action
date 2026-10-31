@@ -41,7 +41,7 @@ it('reports each note as a notice on its file and line, never with a value', () 
   const notes: AotNote[] = [{ path: 'Dockerfile', line: 2, flags: ['-XX:AOTMode', '-XX:AOTCache'] }];
   report([], [], notes);
   expect(core.notice).toHaveBeenCalledWith(
-    'AOT cache: -XX:AOTMode -XX:AOTCache. Retrain the cache whenever the agent or its extension is rebuilt.',
+    'AOT cache: -XX:AOTMode -XX:AOTCache. Train the cache with the -javaagent flags it runs with: one trained without the agent is rejected when the agent is attached.',
     { file: 'Dockerfile', startLine: 2, title: 'Maestro: JDK AOT cache' },
   );
   expect(core.warning).not.toHaveBeenCalled();

@@ -287,6 +287,18 @@ describe('logPolicyCheck', () => {
     expect(core.setOutput).toHaveBeenCalledWith('log-policy-check', 'off');
   });
 
+  it('still notes a JDK AOT cache when the environment turns the log policy check off', async () => {
+    nock(BASE).get(RULES).query(true).reply(200, served('OFF'));
+    const root = repo({ Dockerfile: 'CMD ["java", "-XX:AOTCache=/a.aot", "-jar", "a.jar"]\n' });
+    expect(await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root)).toBeNull();
+    expect(core.setOutput).toHaveBeenCalledWith('log-policy-check', 'off');
+    expect(core.notice).toHaveBeenCalledWith(expect.stringMatching(/^AOT cache: -XX:AOTCache\./), {
+      file: 'Dockerfile',
+      startLine: 1,
+      title: 'Maestro: JDK AOT cache',
+    });
+  });
+
   it('is not run, with a warning, outside a git checkout where the mode accepts a build with no check', async () => {
     for (const mode of ['WARN', 'FAIL_ON_NEW']) {
       nock(BASE).get(RULES).query(true).reply(200, served(mode));

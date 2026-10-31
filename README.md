@@ -303,9 +303,10 @@ every file the same way: the two hold copies of one set of extraction cases
 (`tests/fixtures/ci-rules/extraction-cases.json`) and report the same findings on each.
 
 A line in those files that starts the JVM with a JDK AOT cache (`-XX:AOTCache=`, `-XX:AOTCacheOutput=` or
-`-XX:AOTMode=` other than `off`, outside a comment) gets a notice on that line naming the flag, never its value: the
-cache holds classes as the agent and its extension transformed them, so retrain it whenever either is rebuilt. A
-notice is not a finding: it never changes the check's outcome. `maestro check` prints the same notes; the two hold
+`-XX:AOTMode=` other than `off`, outside a comment) gets a notice on that line naming the flag, never its value: train
+the cache with the `-javaagent` flags the service runs with, since a cache trained without the agent is rejected when
+the agent is attached. A
+notice is not a finding: it never changes the check's outcome, and an environment whose check is off still gets it. `maestro check` prints the same notes; the two hold
 copies of one case file (`tests/fixtures/ci-rules/aot-cases.json`).
 
 The rules come from the environment's lock: a level below the lock's floor, a lowered floor, a logs exporter other

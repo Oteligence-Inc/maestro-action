@@ -31926,7 +31926,7 @@ function report(findings, problems, aot = []) {
         core.warning(`Log policy check could not read ${p.path} line ${p.line}: ${p.reason}`, { file: p.path, startLine: p.line });
     }
     for (const n of aot) {
-        core.notice(`AOT cache: ${n.flags.join(' ')}. Retrain the cache whenever the agent or its extension is rebuilt.`, {
+        core.notice(`AOT cache: ${n.flags.join(' ')}. Train the cache with the -javaagent flags it runs with: one trained without the agent is rejected when the agent is attached.`, {
             file: n.path,
             startLine: n.line,
             title: 'Maestro: JDK AOT cache',
@@ -31972,6 +31972,9 @@ async function runCheck(api, projectUid, environment, service, root, repo, opts)
     const mode = served.ruleSet.mode;
     if (mode === 'OFF') {
         core.info(`Log policy check: off for ${printable(environment)}.`);
+        // The AOT cache notes are not log policy findings, so an environment that turns the check off still gets them.
+        if (repo.files !== null)
+            report([], [], scan(root, repo.files, false).aot);
         return { outcome: 'off', result: null, reason: null };
     }
     if (served.casesDigest && ciRules_1.CASES_DIGEST && served.casesDigest !== ciRules_1.CASES_DIGEST) {

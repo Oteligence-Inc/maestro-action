@@ -1,9 +1,9 @@
 import { kindOf } from './extract';
 
 /**
- * A line of a deployment file that starts the JVM with a JDK AOT cache. The cache holds classes as the agent and its
- * extension transformed them, so it is retrained whenever either is rebuilt. The CLI's `AOTNotes` reads the same lines
- * (tests/fixtures/ci-rules/aot-cases.json).
+ * A line of a deployment file that starts the JVM with a JDK AOT cache, which is trained with the same -javaagent flags
+ * the service runs with: a cache trained without the agent is rejected when the agent is attached. The CLI's `AOTNotes`
+ * reads the same lines (tests/fixtures/ci-rules/aot-cases.json).
  */
 export interface AotNote {
   path: string;
