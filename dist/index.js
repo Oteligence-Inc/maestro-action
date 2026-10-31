@@ -30219,6 +30219,40 @@ function trustedHostname(raw) {
 
 /***/ }),
 
+/***/ 7600:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.aotNotes = aotNotes;
+const extract_1 = __nccwpck_require__(821);
+// An AOT cache flag standing as its own token; -XX:AOTConfiguration only ever appears beside -XX:AOTMode.
+const AOT_FLAG = /(?:^|[\s"'[,=])(-XX:(?:AOTCacheOutput|AOTCache|AOTMode))=([^\s"',\]]*)/g;
+/** The lines of one file's text that set an AOT cache flag, one note per line, skipping comments and -XX:AOTMode=off. */
+function aotNotes(path, text) {
+    const out = [];
+    const properties = (0, extract_1.kindOf)(path) === 'properties';
+    text.split('\n').forEach((line, i) => {
+        const trimmed = line.replace(/\r$/, '').replace(/^[ \t]+/, '');
+        if (trimmed.startsWith('#') || (properties && trimmed.startsWith('!')))
+            return;
+        const flags = [];
+        for (const m of line.matchAll(AOT_FLAG)) {
+            if (m[1] === '-XX:AOTMode' && m[2].toLowerCase() === 'off')
+                continue;
+            if (!flags.includes(m[1]))
+                flags.push(m[1]);
+        }
+        if (flags.length > 0)
+            out.push({ path, line: i + 1, flags });
+    });
+    return out;
+}
+
+
+/***/ }),
+
 /***/ 821:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -31533,6 +31567,7 @@ const minimatch_1 = __nccwpck_require__(6507);
 const yaml_1 = __nccwpck_require__(8815);
 const api_1 = __nccwpck_require__(6879);
 const ciRules_1 = __nccwpck_require__(7944);
+const aot_1 = __nccwpck_require__(7600);
 const extract_1 = __nccwpck_require__(821);
 const errors_1 = __nccwpck_require__(17);
 const resolveConfig_1 = __nccwpck_require__(749);
@@ -31765,7 +31800,7 @@ function filesFor(files, mapping, service, environment) {
 }
 /** Reads the deployment files among `files`: regular files only, inside the root, never a link. */
 function scan(root, files, mapped = false) {
-    const result = { settings: [], problems: [], read: 0, leftOut: 0 };
+    const result = { settings: [], problems: [], aot: [], read: 0, leftOut: 0 };
     const realRoot = fs.realpathSync(root);
     let origins = 0;
     for (const rel of files) {
@@ -31803,6 +31838,7 @@ function scan(root, files, mapped = false) {
             result.problems.push({ path: rel, line: 1, reason: problem });
         if (text === null)
             continue;
+        result.aot.push(...(0, aot_1.aotNotes)(rel, text));
         const found = (0, extract_1.extract)(rel, text, kind);
         result.read++;
         for (const s of found.settings)
@@ -31876,8 +31912,8 @@ function verdict(mode, findings, total, baseline) {
     }
     return { outcome: 'warned', newFindings: null, reason: null };
 }
-/** One log line per finding: its rule, the setting's name, and where. Never a value. */
-function report(findings, problems) {
+/** One log line per finding: its rule, the setting's name, and where; and a notice per AOT cache line. Never a value. */
+function report(findings, problems, aot = []) {
     for (const f of findings) {
         const message = `${f.rule}: ${f.name}`;
         const where = { file: f.path, startLine: f.line, title: `Maestro log policy: ${f.rule}` };
@@ -31888,6 +31924,13 @@ function report(findings, problems) {
     }
     for (const p of problems) {
         core.warning(`Log policy check could not read ${p.path} line ${p.line}: ${p.reason}`, { file: p.path, startLine: p.line });
+    }
+    for (const n of aot) {
+        core.notice(`AOT cache: ${n.flags.join(' ')}. Retrain the cache whenever the agent or its extension is rebuilt.`, {
+            file: n.path,
+            startLine: n.line,
+            title: 'Maestro: JDK AOT cache',
+        });
     }
 }
 /** Writes the job summary's table: rule, setting, file and line. */
@@ -31968,7 +32011,7 @@ async function runCheck(api, projectUid, environment, service, root, repo, opts)
     const findings = findingsOf(served.ruleSet, read.settings);
     const result = checkResult(service, served.ruleSet, findings);
     const decided = verdict(mode, findings, result.total, served.baseline);
-    report(findings, read.problems);
+    report(findings, read.problems, read.aot);
     const errors = findings.filter((f) => f.severity === 'error').length;
     const scope = repo.mapping ? ` (the files ${exports.MAPPING_FILE} maps to ${who})` : '';
     const line = `Log policy check for ${who}: ${read.read} deployment file(s) read${scope}, ` +

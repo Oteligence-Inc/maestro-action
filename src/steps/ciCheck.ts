@@ -7,6 +7,7 @@ import { Minimatch } from 'minimatch';
 import { parseAllDocuments } from 'yaml';
 import { MaestroApi, expectOk } from '../api';
 import { CASES_DIGEST, Finding, RuleSet, VERSION, evaluate, unreadable } from '../ciRules';
+import { AotNote, aotNotes } from '../logPolicy/aot';
 import { Problem, SourcedSetting, decode, extract, kindOf, trimSpace, withoutYamlVersion } from '../logPolicy/extract';
 import { UserError } from '../util/errors';
 import { envPath } from './resolveConfig';
@@ -90,6 +91,7 @@ function enforcing(mode: string): boolean {
 export interface Scan {
   settings: SourcedSetting[];
   problems: Problem[];
+  aot: AotNote[];
   read: number;
   leftOut: number;
 }
@@ -289,7 +291,7 @@ export function filesFor(files: string[], mapping: MappingEntry[] | null, servic
 
 /** Reads the deployment files among `files`: regular files only, inside the root, never a link. */
 export function scan(root: string, files: string[], mapped = false): Scan {
-  const result: Scan = { settings: [], problems: [], read: 0, leftOut: 0 };
+  const result: Scan = { settings: [], problems: [], aot: [], read: 0, leftOut: 0 };
   const realRoot = fs.realpathSync(root);
   let origins = 0;
   for (const rel of files) {
@@ -321,6 +323,7 @@ export function scan(root: string, files: string[], mapped = false): Scan {
     const { text, problem } = decode(bytes, kind);
     if (problem) result.problems.push({ path: rel, line: 1, reason: problem });
     if (text === null) continue;
+    result.aot.push(...aotNotes(rel, text));
     const found = extract(rel, text, kind);
     result.read++;
     for (const s of found.settings) result.settings.push({ ...s, origin: origins + s.origin });
@@ -395,8 +398,8 @@ export function verdict(mode: string, findings: Finding[], total: number, baseli
   return { outcome: 'warned', newFindings: null, reason: null };
 }
 
-/** One log line per finding: its rule, the setting's name, and where. Never a value. */
-export function report(findings: Finding[], problems: Problem[]): void {
+/** One log line per finding: its rule, the setting's name, and where; and a notice per AOT cache line. Never a value. */
+export function report(findings: Finding[], problems: Problem[], aot: AotNote[] = []): void {
   for (const f of findings) {
     const message = `${f.rule}: ${f.name}`;
     const where = { file: f.path, startLine: f.line, title: `Maestro log policy: ${f.rule}` };
@@ -405,6 +408,13 @@ export function report(findings: Finding[], problems: Problem[]): void {
   }
   for (const p of problems) {
     core.warning(`Log policy check could not read ${p.path} line ${p.line}: ${p.reason}`, { file: p.path, startLine: p.line });
+  }
+  for (const n of aot) {
+    core.notice(`AOT cache: ${n.flags.join(' ')}. Retrain the cache whenever the agent or its extension is rebuilt.`, {
+      file: n.path,
+      startLine: n.line,
+      title: 'Maestro: JDK AOT cache',
+    });
   }
 }
 
@@ -495,7 +505,7 @@ export async function runCheck(
   const findings = findingsOf(served.ruleSet, read.settings);
   const result = checkResult(service, served.ruleSet, findings);
   const decided = verdict(mode, findings, result.total, served.baseline);
-  report(findings, read.problems);
+  report(findings, read.problems, read.aot);
   const errors = findings.filter((f) => f.severity === 'error').length;
   const scope = repo.mapping ? ` (the files ${MAPPING_FILE} maps to ${who})` : '';
   const line =

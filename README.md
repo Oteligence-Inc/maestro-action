@@ -302,6 +302,12 @@ repository's own git config cannot run an fsmonitor command during the read. The
 every file the same way: the two hold copies of one set of extraction cases
 (`tests/fixtures/ci-rules/extraction-cases.json`) and report the same findings on each.
 
+A line in those files that starts the JVM with a JDK AOT cache (`-XX:AOTCache=`, `-XX:AOTCacheOutput=` or
+`-XX:AOTMode=` other than `off`, outside a comment) gets a notice on that line naming the flag, never its value: the
+cache holds classes as the agent and its extension transformed them, so retrain it whenever either is rebuilt. A
+notice is not a finding: it never changes the check's outcome. `maestro check` prints the same notes; the two hold
+copies of one case file (`tests/fixtures/ci-rules/aot-cases.json`).
+
 The rules come from the environment's lock: a level below the lock's floor, a lowered floor, a logs exporter other
 than the lock's, debug switches (Spring's and the agent's), a logging file chosen at deploy, the loggers endpoint
 exposed, a logs endpoint or a declarative config file set, SQL sanitization off or query parameters captured,

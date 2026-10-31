@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "exec-form entrypoint with a cache",
+      "path": "Dockerfile",
+      "text": "FROM eclipse-temurin:25\nENTRYPOINT [\"java\", \"-javaagent:/otel/agent.jar\", \"-XX:AOTCache=app.aot\", \"-jar\", \"app.jar\"]\n",
+      "notes": [
+        {
+          "line": 2,
+          "flags": [
+            "-XX:AOTCache"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "shell-form training run",
+      "path": "Dockerfile",
+      "text": "RUN java -XX:AOTMode=record -XX:AOTConfiguration=app.aotconf -jar app.jar\nRUN java -XX:AOTMode=create -XX:AOTConfiguration=app.aotconf -XX:AOTCache=app.aot -jar app.jar\n",
+      "notes": [
+        {
+          "line": 1,
+          "flags": [
+            "-XX:AOTMode"
+          ]
+        },
+        {
+          "line": 2,
+          "flags": [
+            "-XX:AOTMode",
+            "-XX:AOTCache"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "one-step output in JAVA_TOOL_OPTIONS",
+      "path": "deploy/prod.env",
+      "text": "JAVA_TOOL_OPTIONS=-XX:AOTCacheOutput=/cache/app.aot -javaagent:/otel/agent.jar\n",
+      "notes": [
+        {
+          "line": 1,
+          "flags": [
+            "-XX:AOTCacheOutput"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "helm values env and args",
+      "path": "helm/values.yaml",
+      "text": "env:\n  - name: JDK_JAVA_OPTIONS\n    value: \"-XX:AOTCache=/cache/app.aot\"\nargs: [\"-XX:AOTCache=/cache/app.aot\", \"-jar\", \"/app.jar\"]\n",
+      "notes": [
+        {
+          "line": 3,
+          "flags": [
+            "-XX:AOTCache"
+          ]
+        },
+        {
+          "line": 4,
+          "flags": [
+            "-XX:AOTCache"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AOTMode off turns the cache off",
+      "path": "Dockerfile",
+      "text": "ENTRYPOINT [\"java\", \"-XX:AOTMode=off\", \"-jar\", \"app.jar\"]\n",
+      "notes": []
+    },
+    {
+      "name": "commented lines are not read",
+      "path": "deploy/.env",
+      "text": "# JAVA_TOOL_OPTIONS=-XX:AOTCache=app.aot\n  # -XX:AOTCacheOutput=app.aot\n",
+      "notes": []
+    },
+    {
+      "name": "a properties comment starting with !",
+      "path": "jvm.properties",
+      "text": "! -XX:AOTCache=app.aot\nopts=-XX:AOTCache=app.aot\n",
+      "notes": [
+        {
+          "line": 2,
+          "flags": [
+            "-XX:AOTCache"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a flag inside a longer word is not one",
+      "path": "Dockerfile",
+      "text": "LABEL note=\"set-XX:AOTCache=x is not a flag\"\nENV OPTS=foo-XX:AOTCache=x\n",
+      "notes": []
+    },
+    {
+      "name": "the class data sharing flags are not AOT cache flags",
+      "path": "Dockerfile",
+      "text": "ENTRYPOINT [\"java\", \"-XX:SharedArchiveFile=app.jsa\", \"-XX:+AutoCreateSharedArchive\", \"-jar\", \"app.jar\"]\n",
+      "notes": []
+    },
+    {
+      "name": "CRLF line endings and a quoted single-quote form",
+      "path": "compose.yaml",
+      "text": "services:\r\n  app:\r\n    command: java '-XX:AOTCache=/c/app.aot' -jar app.jar\r\n",
+      "notes": [
+        {
+          "line": 3,
+          "flags": [
+            "-XX:AOTCache"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "the same flag twice on one line is one note",
+      "path": "Dockerfile",
+      "text": "CMD java -XX:AOTCache=a.aot -XX:AOTCache=b.aot -jar app.jar\n",
+      "notes": [
+        {
+          "line": 1,
+          "flags": [
+            "-XX:AOTCache"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a templated value still names the flag",
+      "path": "helm/templates/deploy.yaml",
+      "text": "        - \"-XX:AOTCache={{ .Values.aotCache }}\"\n",
+      "notes": [
+        {
+          "line": 1,
+          "flags": [
+            "-XX:AOTCache"
+          ]
+        }
+      ]
+    }
+  ]
+}
