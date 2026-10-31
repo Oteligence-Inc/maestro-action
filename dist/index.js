@@ -30219,6 +30219,41 @@ function trustedHostname(raw) {
 
 /***/ }),
 
+/***/ 7600:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.aotNotes = aotNotes;
+const extract_1 = __nccwpck_require__(821);
+// An AOT cache flag standing as its own token; -XX:AOTConfiguration only ever appears beside -XX:AOTMode. Whitespace
+// is ASCII only, as Go's \s is in the CLI's copy.
+const AOT_FLAG = /(?:^|[ \t\n\f\r"'[,=])(-XX:(?:AOTCacheOutput|AOTCache|AOTMode))=([^ \t\n\f\r"',\]]*)/g;
+/** The lines of one file's text that set an AOT cache flag, one note per line, skipping comments and -XX:AOTMode=off. */
+function aotNotes(path, text) {
+    const out = [];
+    const properties = (0, extract_1.kindOf)(path) === 'properties';
+    text.replace(/^\uFEFF/, '').split('\n').forEach((line, i) => {
+        const trimmed = line.replace(/\r$/, '').replace(/^[ \t]+/, '');
+        if (trimmed.startsWith('#') || (properties && trimmed.startsWith('!')))
+            return;
+        const flags = [];
+        for (const m of line.matchAll(AOT_FLAG)) {
+            if (m[1] === '-XX:AOTMode' && m[2].toLowerCase() === 'off')
+                continue;
+            if (!flags.includes(m[1]))
+                flags.push(m[1]);
+        }
+        if (flags.length > 0)
+            out.push({ path, line: i + 1, flags });
+    });
+    return out;
+}
+
+
+/***/ }),
+
 /***/ 821:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -31533,6 +31568,7 @@ const minimatch_1 = __nccwpck_require__(6507);
 const yaml_1 = __nccwpck_require__(8815);
 const api_1 = __nccwpck_require__(6879);
 const ciRules_1 = __nccwpck_require__(7944);
+const aot_1 = __nccwpck_require__(7600);
 const extract_1 = __nccwpck_require__(821);
 const errors_1 = __nccwpck_require__(17);
 const resolveConfig_1 = __nccwpck_require__(749);
@@ -31754,6 +31790,10 @@ function readRepo(root) {
     const files = trackedFiles(root);
     return { files, mapping: files === null ? null : readMapping(root, files) };
 }
+/** The tracked files the check reads for one service and environment. */
+function mappedFiles(repo, service, environment) {
+    return filesFor(repo.files ?? [], repo.mapping, service, environment);
+}
 /** The files the mapping assigns to one service and environment, or every file when there is no mapping. */
 function filesFor(files, mapping, service, environment) {
     if (!mapping)
@@ -31763,9 +31803,12 @@ function filesFor(files, mapping, service, environment) {
     const matchers = globs.map((g) => new minimatch_1.Minimatch(g, { dot: true }));
     return files.filter((f) => matchers.some((m) => m.match(f)));
 }
-/** Reads the deployment files among `files`: regular files only, inside the root, never a link. */
-function scan(root, files, mapped = false) {
-    const result = { settings: [], problems: [], read: 0, leftOut: 0 };
+/**
+ * Reads the deployment files among `files`: regular files only, inside the root, never a link. With `settings` false
+ * only the AOT cache notes are read, as for an environment whose check is off.
+ */
+function scan(root, files, mapped = false, settings = true) {
+    const result = { settings: [], problems: [], aot: [], read: 0, leftOut: 0 };
     const realRoot = fs.realpathSync(root);
     let origins = 0;
     for (const rel of files) {
@@ -31802,6 +31845,9 @@ function scan(root, files, mapped = false) {
         if (problem)
             result.problems.push({ path: rel, line: 1, reason: problem });
         if (text === null)
+            continue;
+        result.aot.push(...(0, aot_1.aotNotes)(rel, text));
+        if (!settings)
             continue;
         const found = (0, extract_1.extract)(rel, text, kind);
         result.read++;
@@ -31876,8 +31922,8 @@ function verdict(mode, findings, total, baseline) {
     }
     return { outcome: 'warned', newFindings: null, reason: null };
 }
-/** One log line per finding: its rule, the setting's name, and where. Never a value. */
-function report(findings, problems) {
+/** One log line per finding: its rule, the setting's name, and where; and a notice per AOT cache line. Never a value. */
+function report(findings, problems, aot = []) {
     for (const f of findings) {
         const message = `${f.rule}: ${f.name}`;
         const where = { file: f.path, startLine: f.line, title: `Maestro log policy: ${f.rule}` };
@@ -31888,6 +31934,13 @@ function report(findings, problems) {
     }
     for (const p of problems) {
         core.warning(`Log policy check could not read ${p.path} line ${p.line}: ${p.reason}`, { file: p.path, startLine: p.line });
+    }
+    for (const n of aot) {
+        core.notice(`AOT cache: ${n.flags.join(' ')}. Train the cache with the -javaagent flags it runs with: one trained without the agent is rejected when the agent is attached.`, {
+            file: n.path,
+            startLine: n.line,
+            title: 'Maestro: JDK AOT cache',
+        });
     }
 }
 /** Writes the job summary's table: rule, setting, file and line. */
@@ -31929,6 +31982,10 @@ async function runCheck(api, projectUid, environment, service, root, repo, opts)
     const mode = served.ruleSet.mode;
     if (mode === 'OFF') {
         core.info(`Log policy check: off for ${printable(environment)}.`);
+        // The AOT cache notes are not log policy findings, so an environment that turns the check off still gets them,
+        // for the files the check would read.
+        if (repo.files !== null)
+            report([], [], scan(root, mappedFiles(repo, service, environment), repo.mapping !== null, false).aot);
         return { outcome: 'off', result: null, reason: null };
     }
     if (served.casesDigest && ciRules_1.CASES_DIGEST && served.casesDigest !== ciRules_1.CASES_DIGEST) {
@@ -31962,13 +32019,13 @@ async function runCheck(api, projectUid, environment, service, root, repo, opts)
                 return { outcome: 'failed', result: null, reason: empty };
             core.warning(`Log policy check: ${empty}.`);
         }
-        mine = filesFor(repo.files, entries, service, environment);
+        mine = mappedFiles(repo, service, environment);
     }
     const read = scan(root, mine, repo.mapping !== null);
     const findings = findingsOf(served.ruleSet, read.settings);
     const result = checkResult(service, served.ruleSet, findings);
     const decided = verdict(mode, findings, result.total, served.baseline);
-    report(findings, read.problems);
+    report(findings, read.problems, read.aot);
     const errors = findings.filter((f) => f.severity === 'error').length;
     const scope = repo.mapping ? ` (the files ${exports.MAPPING_FILE} maps to ${who})` : '';
     const line = `Log policy check for ${who}: ${read.read} deployment file(s) read${scope}, ` +
@@ -33016,6 +33073,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.uploadJar = uploadJar;
+exports.pickJar = pickJar;
 const core = __importStar(__nccwpck_require__(7484));
 const fs = __importStar(__nccwpck_require__(9896));
 const glob_1 = __nccwpck_require__(1363);
@@ -33031,16 +33089,16 @@ const errors_1 = __nccwpck_require__(17);
  * A peer is named by the artifactUid the lock froze, which file-service resolves in any of the
  * org's projects and refuses with a 404 when it is gone. A lock entry with no uid is matched by
  * its SHA in this project and skipped on a miss.
- * v0: exactly one JAR per invocation (monorepo multi-JAR deferred — Build Spec §12).
+ * One JAR per invocation: see pickJar for a glob that matches several.
  */
 async function uploadJar(api, inputs, cfg) {
-    const matches = await (0, glob_1.glob)(inputs.jarsGlob, { nodir: true, windowsPathsNoEscape: true });
+    const matches = (await (0, glob_1.glob)(inputs.jarsGlob, { nodir: true, windowsPathsNoEscape: true })).sort();
     if (matches.length === 0)
         throw new errors_1.UserError(`No JAR matched "${inputs.jarsGlob}". Did "mvn package" run first?`);
-    if (matches.length > 1) {
-        throw new errors_1.UserError(`"${inputs.jarsGlob}" matched ${matches.length} files. v0 expects exactly one JAR per invocation: ${matches.join(', ')}`);
+    const { jar: jarPath, setAside } = pickJar(matches, inputs.jarsGlob);
+    if (setAside.length > 0) {
+        core.info(`Uploading ${jarPath}; set aside ${setAside.join(', ')}, which a build leaves beside the runnable JAR.`);
     }
-    const jarPath = matches[0];
     const fileName = jarPath.split(/[\\/]/).pop();
     const sizeBytes = fs.statSync(jarPath).size;
     const sha = await (0, sha_1.sha256File)(jarPath);
@@ -33099,6 +33157,26 @@ async function uploadJar(api, inputs, cfg) {
         sizeBytes,
         mustUpload,
     };
+}
+/** File names a build leaves beside the runnable JAR or WAR: Maven shade's original, Gradle Boot's plain archive, and
+ * the sources, javadoc and test JARs. */
+const BESIDE_THE_JAR_NAMES = 'original-*, *-plain, *-sources, *-javadoc and *-tests files';
+const BESIDE_THE_JAR = [/^original-.+\.(jar|war)$/, /-plain\.(jar|war)$/, /-sources\.jar$/, /-javadoc\.jar$/, /-tests\.jar$/];
+/**
+ * The one file to upload from the glob's matches. A single match is uploaded whatever its name; of several, the files a
+ * build leaves beside the runnable JAR are set aside, and exactly one must remain.
+ */
+function pickJar(matches, jarsGlob = 'jars') {
+    if (matches.length === 1)
+        return { jar: matches[0], setAside: [] };
+    const name = (p) => p.split(/[\\/]/).pop();
+    const setAside = matches.filter((m) => BESIDE_THE_JAR.some((re) => re.test(name(m))));
+    const left = matches.filter((m) => !setAside.includes(m));
+    if (left.length !== 1) {
+        throw new errors_1.UserError(`"${jarsGlob}" matched ${matches.length} files and ${left.length === 0 ? 'none is a runnable JAR' : `${left.length} are runnable JARs`} ` +
+            `once ${BESIDE_THE_JAR_NAMES} are set aside: ${matches.join(', ')}. Narrow the glob to one file.`);
+    }
+    return { jar: left[0], setAside };
 }
 
 

@@ -67,7 +67,7 @@ the app image.
 | `org-id` | no | none | The id of the organization to act for (`org_...` on hosted SaaS, a UUID on a private-cloud VM). Needed only when the API key is not scoped to a project and its owner belongs to several organizations; the token exchange refuses such a key without it. |
 | `service` | yes, except for `check-only` with a `.maestro/check.yml` | none | The name the environment registers this service under: the analysis's name for the JAR (its `spring.application.name`, else the JAR's file name without its version), or, for one of two JARs that share that name, the file-derived name the wizard registered it under. A run whose input the environment's latest lock does not register fails and lists the names it does. A run warns when the analysis keys the JAR differently from the key the lock recorded for the registration (the build may then carry none of its locked methods), or, under a lock that recorded none, when the analysis names it differently. |
 | `environment` | yes, except for `check-only` with a `.maestro/check.yml` | none | Target env: `dev` / `staging` / `prod` / custom. |
-| `jars` | yes, except for `check-only` | none | Glob to the JAR (e.g. `target/*.jar`). v0 expects exactly one match. |
+| `jars` | yes, except for `check-only` | none | Glob to the JAR or WAR (e.g. `target/*.jar`). When it matches several files, those a build leaves beside the runnable JAR (`original-*` from Maven shade, `*-plain` from Gradle Boot, and `*-sources`, `*-javadoc` and `*-tests` JARs) are set aside and named in the log; exactly one file must remain. |
 | `api-url` | yes | | The Maestro API this run talks to: `https://prod.api.oteligence.com` for hosted Maestro, or your private-cloud install's address. It must be `https://` in every case; a private-cloud install serves plain HTTP out of the box, so put a TLS terminator in front of it. The storage URLs it signs for uploads and downloads must be `https://` too. A host outside `*.oteligence.com` must also be named in `trusted-api-host`. |
 | `trusted-api-host` | no | | A private-cloud install's API hostname, such as `maestro.example.internal`: no scheme, port or path. The Action then accepts `api-url` on that host and refuses every other, an `*.oteligence.com` host included. Leave it unset for hosted Maestro. |
 | `timeout-seconds` | no | `300` | Max wait for each Maestro job. |
@@ -100,7 +100,7 @@ the app image.
    project, runs the log policy check for each service and environment, and stops here.
 2. Resolve the project UID + the env's **locked config** and locked-version UID, then run the environment's
    **log policy check** over the repository's deployment files (below), before anything is uploaded.
-3 to 5. Upload the changed JAR (referencing the env's other services by the artifact the lock recorded for each,
+3 to 5. Pick the JAR (`pickJar`: of several matches, set aside the files a build leaves beside it), upload it (referencing the env's other services by the artifact the lock recorded for each,
    or by SHA for a lock entry that recorded none) and confirm.
 6. Submit `MULTI_JAR_ANALYSIS` (re-applies locked rules; refreshes the cross-service
    staleness signatures), then `MULTI_JAR_EXPLORER_BUILD` (generates the extension from
@@ -302,6 +302,13 @@ repository's own git config cannot run an fsmonitor command during the read. The
 every file the same way: the two hold copies of one set of extraction cases
 (`tests/fixtures/ci-rules/extraction-cases.json`) and report the same findings on each.
 
+A line in those files that starts the JVM with a JDK AOT cache (`-XX:AOTCache=`, `-XX:AOTCacheOutput=` or
+`-XX:AOTMode=` other than `off`, outside a comment) gets a notice on that line naming the flag, never its value: train
+the cache with the `-javaagent` flags the service runs with, since a cache trained without the agent is rejected when
+the agent is attached. A notice is not a finding: it never changes the check's outcome, and an environment whose
+check is off still gets it for the files the check would read. `maestro check` prints the same notes; the two hold
+copies of one case file (`tests/fixtures/ci-rules/aot-cases.json`).
+
 The rules come from the environment's lock: a level below the lock's floor, a lowered floor, a logs exporter other
 than the lock's, debug switches (Spring's and the agent's), a logging file chosen at deploy, the loggers endpoint
 exposed, a logs endpoint or a declarative config file set, SQL sanitization off or query parameters captured,
@@ -383,7 +390,7 @@ mode is Fail or production's default, and is `not-run` otherwise.
 | `No single javaagent.config for service "X"` | The build has no config for this service: the lock selects none of its methods, or its name matches more than one service. `config-path` is empty. |
 | `Service "X" is not part of "env"'s locked config` | The environment's latest lock registers no service by that name. Set `service` to one of the names the message lists, or add the service in the wizard and lock again. |
 | `The analysis names this JAR "Y", the name its lock entries and build use` | The lock and build know the service as `Y`. Register it as `Y` in the wizard and set `service: Y`. |
-| `matched N files` | v0 expects one JAR; narrow the `jars` glob. |
+| `matched N files and ... runnable JAR` | Two or more matches remain once the files a build leaves beside the JAR are set aside, or none does; narrow the `jars` glob to one file. |
 | `BUILD_LOCK_SUPERSEDED: production environment 'X' builds only from its current lock` | The environment was locked again while the run was in progress, so the build named an older version. Re-run the workflow; it reads the newest lock. |
 | `No uploaded artifact ... to reference for <service>.jar` | A JAR the environment's lock recorded is no longer stored, or its stored bytes differ from the lock's SHA-256 ("... with that SHA-256"). Upload that service again in the wizard and re-lock the environment. |
 | `Log policy check failed for X in Y` | The environment's CI mode fails a build on the findings printed above it; each names its rule, file and line. Fix the setting, or change the environment's CI mode in Maestro. The same message names the other causes: the workspace is not a git checkout (add `actions/checkout` before the step), or `.maestro/check.yml` maps no tracked file to the service and environment. |

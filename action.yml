@@ -25,7 +25,7 @@ inputs:
     description: 'Target env: dev / staging / prod / <custom>. Required except for a check-only run whose repository has a .maestro/check.yml'
     required: false
   jars:
-    description: 'Glob path to the service JAR (e.g. target/*.jar). v0 expects exactly one match. Not read by a check-only run'
+    description: 'Glob path to the service JAR or WAR (e.g. target/*.jar). Of several matches, the files a build leaves beside the runnable JAR (original-*, *-plain, *-sources, *-javadoc, *-tests) are set aside and exactly one must remain. Not read by a check-only run'
     required: false
   api-url:
     description: "The Maestro API this run talks to: https://prod.api.oteligence.com for hosted Maestro, your platform's own address for a private-cloud install. Must be https://"

@@ -7,6 +7,7 @@ import { Minimatch } from 'minimatch';
 import { parseAllDocuments } from 'yaml';
 import { MaestroApi, expectOk } from '../api';
 import { CASES_DIGEST, Finding, RuleSet, VERSION, evaluate, unreadable } from '../ciRules';
+import { AotNote, aotNotes } from '../logPolicy/aot';
 import { Problem, SourcedSetting, decode, extract, kindOf, trimSpace, withoutYamlVersion } from '../logPolicy/extract';
 import { UserError } from '../util/errors';
 import { envPath } from './resolveConfig';
@@ -90,6 +91,7 @@ function enforcing(mode: string): boolean {
 export interface Scan {
   settings: SourcedSetting[];
   problems: Problem[];
+  aot: AotNote[];
   read: number;
   leftOut: number;
 }
@@ -278,6 +280,11 @@ export function readRepo(root: string): Repo {
   return { files, mapping: files === null ? null : readMapping(root, files) };
 }
 
+/** The tracked files the check reads for one service and environment. */
+function mappedFiles(repo: Repo, service: string, environment: string): string[] {
+  return filesFor(repo.files ?? [], repo.mapping, service, environment);
+}
+
 /** The files the mapping assigns to one service and environment, or every file when there is no mapping. */
 export function filesFor(files: string[], mapping: MappingEntry[] | null, service: string, environment: string): string[] {
   if (!mapping) return files;
@@ -287,9 +294,12 @@ export function filesFor(files: string[], mapping: MappingEntry[] | null, servic
   return files.filter((f) => matchers.some((m) => m.match(f)));
 }
 
-/** Reads the deployment files among `files`: regular files only, inside the root, never a link. */
-export function scan(root: string, files: string[], mapped = false): Scan {
-  const result: Scan = { settings: [], problems: [], read: 0, leftOut: 0 };
+/**
+ * Reads the deployment files among `files`: regular files only, inside the root, never a link. With `settings` false
+ * only the AOT cache notes are read, as for an environment whose check is off.
+ */
+export function scan(root: string, files: string[], mapped = false, settings = true): Scan {
+  const result: Scan = { settings: [], problems: [], aot: [], read: 0, leftOut: 0 };
   const realRoot = fs.realpathSync(root);
   let origins = 0;
   for (const rel of files) {
@@ -321,6 +331,8 @@ export function scan(root: string, files: string[], mapped = false): Scan {
     const { text, problem } = decode(bytes, kind);
     if (problem) result.problems.push({ path: rel, line: 1, reason: problem });
     if (text === null) continue;
+    result.aot.push(...aotNotes(rel, text));
+    if (!settings) continue;
     const found = extract(rel, text, kind);
     result.read++;
     for (const s of found.settings) result.settings.push({ ...s, origin: origins + s.origin });
@@ -395,8 +407,8 @@ export function verdict(mode: string, findings: Finding[], total: number, baseli
   return { outcome: 'warned', newFindings: null, reason: null };
 }
 
-/** One log line per finding: its rule, the setting's name, and where. Never a value. */
-export function report(findings: Finding[], problems: Problem[]): void {
+/** One log line per finding: its rule, the setting's name, and where; and a notice per AOT cache line. Never a value. */
+export function report(findings: Finding[], problems: Problem[], aot: AotNote[] = []): void {
   for (const f of findings) {
     const message = `${f.rule}: ${f.name}`;
     const where = { file: f.path, startLine: f.line, title: `Maestro log policy: ${f.rule}` };
@@ -405,6 +417,13 @@ export function report(findings: Finding[], problems: Problem[]): void {
   }
   for (const p of problems) {
     core.warning(`Log policy check could not read ${p.path} line ${p.line}: ${p.reason}`, { file: p.path, startLine: p.line });
+  }
+  for (const n of aot) {
+    core.notice(`AOT cache: ${n.flags.join(' ')}. Train the cache with the -javaagent flags it runs with: one trained without the agent is rejected when the agent is attached.`, {
+      file: n.path,
+      startLine: n.line,
+      title: 'Maestro: JDK AOT cache',
+    });
   }
 }
 
@@ -455,6 +474,9 @@ export async function runCheck(
   const mode = served.ruleSet.mode;
   if (mode === 'OFF') {
     core.info(`Log policy check: off for ${printable(environment)}.`);
+    // The AOT cache notes are not log policy findings, so an environment that turns the check off still gets them,
+    // for the files the check would read.
+    if (repo.files !== null) report([], [], scan(root, mappedFiles(repo, service, environment), repo.mapping !== null, false).aot);
     return { outcome: 'off', result: null, reason: null };
   }
   if (served.casesDigest && CASES_DIGEST && served.casesDigest !== CASES_DIGEST) {
@@ -489,13 +511,13 @@ export async function runCheck(
       if (enforcing(mode)) return { outcome: 'failed', result: null, reason: empty };
       core.warning(`Log policy check: ${empty}.`);
     }
-    mine = filesFor(repo.files, entries, service, environment);
+    mine = mappedFiles(repo, service, environment);
   }
   const read = scan(root, mine, repo.mapping !== null);
   const findings = findingsOf(served.ruleSet, read.settings);
   const result = checkResult(service, served.ruleSet, findings);
   const decided = verdict(mode, findings, result.total, served.baseline);
-  report(findings, read.problems);
+  report(findings, read.problems, read.aot);
   const errors = findings.filter((f) => f.severity === 'error').length;
   const scope = repo.mapping ? ` (the files ${MAPPING_FILE} maps to ${who})` : '';
   const line =

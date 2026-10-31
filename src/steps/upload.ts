@@ -15,17 +15,15 @@ import { UserError } from '../util/errors';
  * A peer is named by the artifactUid the lock froze, which file-service resolves in any of the
  * org's projects and refuses with a 404 when it is gone. A lock entry with no uid is matched by
  * its SHA in this project and skipped on a miss.
- * v0: exactly one JAR per invocation (monorepo multi-JAR deferred — Build Spec §12).
+ * One JAR per invocation: see pickJar for a glob that matches several.
  */
 export async function uploadJar(api: MaestroApi, inputs: Inputs, cfg: ResolvedConfig): Promise<UploadResult> {
-  const matches = await glob(inputs.jarsGlob, { nodir: true, windowsPathsNoEscape: true });
+  const matches = (await glob(inputs.jarsGlob, { nodir: true, windowsPathsNoEscape: true })).sort();
   if (matches.length === 0) throw new UserError(`No JAR matched "${inputs.jarsGlob}". Did "mvn package" run first?`);
-  if (matches.length > 1) {
-    throw new UserError(
-      `"${inputs.jarsGlob}" matched ${matches.length} files. v0 expects exactly one JAR per invocation: ${matches.join(', ')}`,
-    );
+  const { jar: jarPath, setAside } = pickJar(matches, inputs.jarsGlob);
+  if (setAside.length > 0) {
+    core.info(`Uploading ${jarPath}; set aside ${setAside.join(', ')}, which a build leaves beside the runnable JAR.`);
   }
-  const jarPath = matches[0];
   const fileName = jarPath.split(/[\\/]/).pop() as string;
   const sizeBytes = fs.statSync(jarPath).size;
   const sha = await sha256File(jarPath);
@@ -92,3 +90,27 @@ export async function uploadJar(api: MaestroApi, inputs: Inputs, cfg: ResolvedCo
     mustUpload,
   };
 }
+
+/** File names a build leaves beside the runnable JAR or WAR: Maven shade's original, Gradle Boot's plain archive, and
+ * the sources, javadoc and test JARs. */
+const BESIDE_THE_JAR_NAMES = 'original-*, *-plain, *-sources, *-javadoc and *-tests files';
+const BESIDE_THE_JAR = [/^original-.+\.(jar|war)$/, /-plain\.(jar|war)$/, /-sources\.jar$/, /-javadoc\.jar$/, /-tests\.jar$/];
+
+/**
+ * The one file to upload from the glob's matches. A single match is uploaded whatever its name; of several, the files a
+ * build leaves beside the runnable JAR are set aside, and exactly one must remain.
+ */
+export function pickJar(matches: string[], jarsGlob = 'jars'): { jar: string; setAside: string[] } {
+  if (matches.length === 1) return { jar: matches[0], setAside: [] };
+  const name = (p: string) => p.split(/[\\/]/).pop() as string;
+  const setAside = matches.filter((m) => BESIDE_THE_JAR.some((re) => re.test(name(m))));
+  const left = matches.filter((m) => !setAside.includes(m));
+  if (left.length !== 1) {
+    throw new UserError(
+      `"${jarsGlob}" matched ${matches.length} files and ${left.length === 0 ? 'none is a runnable JAR' : `${left.length} are runnable JARs`} ` +
+        `once ${BESIDE_THE_JAR_NAMES} are set aside: ${matches.join(', ')}. Narrow the glob to one file.`,
+    );
+  }
+  return { jar: left[0], setAside };
+}
+

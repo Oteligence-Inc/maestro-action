@@ -287,6 +287,45 @@ describe('logPolicyCheck', () => {
     expect(core.setOutput).toHaveBeenCalledWith('log-policy-check', 'off');
   });
 
+  it('still notes a JDK AOT cache when the environment turns the log policy check off', async () => {
+    nock(BASE).get(RULES).query(true).reply(200, served('OFF'));
+    const root = repo({ Dockerfile: 'CMD ["java", "-XX:AOTCache=/a.aot", "-jar", "a.jar"]\n' });
+    expect(await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root)).toBeNull();
+    expect(core.setOutput).toHaveBeenCalledWith('log-policy-check', 'off');
+    expect(core.notice).toHaveBeenCalledWith(expect.stringMatching(/^AOT cache: -XX:AOTCache\./), {
+      file: 'Dockerfile',
+      startLine: 1,
+      title: 'Maestro: JDK AOT cache',
+    });
+  });
+
+  it('notes only the files the mapping gives the service when the check is off', async () => {
+    nock(BASE).get(RULES).query(true).reply(200, served('OFF'));
+    const root = repo({
+      'deploy/orders/Dockerfile': 'CMD ["java", "-XX:AOTCache=/o.aot", "-jar", "o.jar"]\n',
+      'deploy/payments/Dockerfile': 'CMD ["java", "-XX:AOTCache=/p.aot", "-jar", "p.jar"]\n',
+      '.maestro/check.yml': 'services:\n  - service: orders\n    environment: prod\n    paths: ["deploy/orders/**"]\n',
+    });
+    expect(await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root)).toBeNull();
+    const files = jest.mocked(core.notice).mock.calls.map((c) => (c[1] as { file?: string } | undefined)?.file);
+    expect(files).toEqual(['deploy/orders/Dockerfile']);
+  });
+
+  it('notes a JDK AOT cache in an enforcing mode too, and the note changes no outcome', async () => {
+    for (const mode of ['WARN', 'FAIL']) {
+      jest.mocked(core.notice).mockClear();
+      nock(BASE).get(RULES).query(true).reply(200, served(mode));
+      const root = repo({ Dockerfile: 'CMD ["java", "-XX:AOTCache=/a.aot", "-jar", "a.jar"]\n' });
+      const result = await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root);
+      expect(result?.total).toBe(0);
+      expect(core.notice).toHaveBeenCalledWith(expect.stringMatching(/^AOT cache: -XX:AOTCache\./), {
+        file: 'Dockerfile',
+        startLine: 1,
+        title: 'Maestro: JDK AOT cache',
+      });
+    }
+  });
+
   it('is not run, with a warning, outside a git checkout where the mode accepts a build with no check', async () => {
     for (const mode of ['WARN', 'FAIL_ON_NEW']) {
       nock(BASE).get(RULES).query(true).reply(200, served(mode));
