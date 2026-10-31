@@ -11,14 +11,15 @@ export interface AotNote {
   flags: string[];
 }
 
-// An AOT cache flag standing as its own token; -XX:AOTConfiguration only ever appears beside -XX:AOTMode.
-const AOT_FLAG = /(?:^|[\s"'[,=])(-XX:(?:AOTCacheOutput|AOTCache|AOTMode))=([^\s"',\]]*)/g;
+// An AOT cache flag standing as its own token; -XX:AOTConfiguration only ever appears beside -XX:AOTMode. Whitespace
+// is ASCII only, as Go's \s is in the CLI's copy.
+const AOT_FLAG = /(?:^|[ \t\n\f\r"'[,=])(-XX:(?:AOTCacheOutput|AOTCache|AOTMode))=([^ \t\n\f\r"',\]]*)/g;
 
 /** The lines of one file's text that set an AOT cache flag, one note per line, skipping comments and -XX:AOTMode=off. */
 export function aotNotes(path: string, text: string): AotNote[] {
   const out: AotNote[] = [];
   const properties = kindOf(path) === 'properties';
-  text.split('\n').forEach((line, i) => {
+  text.replace(/^\uFEFF/, '').split('\n').forEach((line, i) => {
     const trimmed = line.replace(/\r$/, '').replace(/^[ \t]+/, '');
     if (trimmed.startsWith('#') || (properties && trimmed.startsWith('!'))) return;
     const flags: string[] = [];

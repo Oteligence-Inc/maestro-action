@@ -1,6 +1,6 @@
 # TODO: maestro-action
 
-**Open:** 1 · **Next ID:** 8
+**Open:** 0 · **Next ID:** 8
 
 Open bugs only. Severities reflect verified impact, not the original audit label.
 A ticket is the facet line plus Where, Failure mode (the repro), and Fix. Essays belong in
@@ -34,14 +34,5 @@ in `platform-overview/TODO.md`.
 ---
 
 ## MEDIUM
-
-#### 7. The upload refuses a glob that matches two jars, so the README's own example fails a shade or Gradle Boot build
-
-- **Needs:** capability · **Repos:** maestro-action
-- **Where:** `uploadJar` in `src/steps/upload.ts`; the `jars` example (`target/*.jar`) in `README.md`
-- **Failure mode:** **REASONED**. `uploadJar` throws `UserError` when the glob matches more than one file. A Maven shade build leaves `original-*.jar` beside the shaded jar and a Gradle Boot build leaves `*-plain.jar`, so a customer copying the README fails their first CI run. Source: `platform-overview/documentation/market/research/aspire-java.md`.
-- **Fix:** drop `original-*`, `*-plain`, `*-sources`, `*-javadoc` and `*-tests` jars from the matches before counting, and log the files skipped.
-- **Options:** (a) skip the known side-artefact names: one filter and its tests; (b) prefer the jar whose manifest has `Start-Class` or `Main-Class`: reads each match's manifest, and a library jar has neither; (c) change the README example to an exact file name: docs only, and every customer still has to know their build's output.
-- **Recommendation:** (a), because those names never hold the deployable, and the log line shows what was skipped.
 
 ## LOW

@@ -151,7 +151,9 @@ describe('pickJar: the runnable JAR when the glob matches several', () => {
   });
 
   it('does not set aside a JAR whose name only contains a marker', () => {
-    expect(() => pickJar(at('plain-text-service.jar', 'sources-api.jar'))).toThrow(UserError);
+    expect(() => pickJar(at('plain-text-service.jar', 'sources-api.jar'))).toThrow('2 are runnable JARs');
+    expect(() => pickJar(at('app.jar', 'my-original-app.jar'))).toThrow('2 are runnable JARs');
+    expect(() => pickJar(at('app.jar', 'app-plain-text.jar', 'app-sources-x.jar'))).toThrow('3 are runnable JARs');
   });
 });
 

@@ -30227,13 +30227,14 @@ function trustedHostname(raw) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.aotNotes = aotNotes;
 const extract_1 = __nccwpck_require__(821);
-// An AOT cache flag standing as its own token; -XX:AOTConfiguration only ever appears beside -XX:AOTMode.
-const AOT_FLAG = /(?:^|[\s"'[,=])(-XX:(?:AOTCacheOutput|AOTCache|AOTMode))=([^\s"',\]]*)/g;
+// An AOT cache flag standing as its own token; -XX:AOTConfiguration only ever appears beside -XX:AOTMode. Whitespace
+// is ASCII only, as Go's \s is in the CLI's copy.
+const AOT_FLAG = /(?:^|[ \t\n\f\r"'[,=])(-XX:(?:AOTCacheOutput|AOTCache|AOTMode))=([^ \t\n\f\r"',\]]*)/g;
 /** The lines of one file's text that set an AOT cache flag, one note per line, skipping comments and -XX:AOTMode=off. */
 function aotNotes(path, text) {
     const out = [];
     const properties = (0, extract_1.kindOf)(path) === 'properties';
-    text.split('\n').forEach((line, i) => {
+    text.replace(/^\uFEFF/, '').split('\n').forEach((line, i) => {
         const trimmed = line.replace(/\r$/, '').replace(/^[ \t]+/, '');
         if (trimmed.startsWith('#') || (properties && trimmed.startsWith('!')))
             return;
@@ -31789,6 +31790,10 @@ function readRepo(root) {
     const files = trackedFiles(root);
     return { files, mapping: files === null ? null : readMapping(root, files) };
 }
+/** The tracked files the check reads for one service and environment. */
+function mappedFiles(repo, service, environment) {
+    return filesFor(repo.files ?? [], repo.mapping, service, environment);
+}
 /** The files the mapping assigns to one service and environment, or every file when there is no mapping. */
 function filesFor(files, mapping, service, environment) {
     if (!mapping)
@@ -31798,8 +31803,11 @@ function filesFor(files, mapping, service, environment) {
     const matchers = globs.map((g) => new minimatch_1.Minimatch(g, { dot: true }));
     return files.filter((f) => matchers.some((m) => m.match(f)));
 }
-/** Reads the deployment files among `files`: regular files only, inside the root, never a link. */
-function scan(root, files, mapped = false) {
+/**
+ * Reads the deployment files among `files`: regular files only, inside the root, never a link. With `settings` false
+ * only the AOT cache notes are read, as for an environment whose check is off.
+ */
+function scan(root, files, mapped = false, settings = true) {
     const result = { settings: [], problems: [], aot: [], read: 0, leftOut: 0 };
     const realRoot = fs.realpathSync(root);
     let origins = 0;
@@ -31839,6 +31847,8 @@ function scan(root, files, mapped = false) {
         if (text === null)
             continue;
         result.aot.push(...(0, aot_1.aotNotes)(rel, text));
+        if (!settings)
+            continue;
         const found = (0, extract_1.extract)(rel, text, kind);
         result.read++;
         for (const s of found.settings)
@@ -31972,9 +31982,10 @@ async function runCheck(api, projectUid, environment, service, root, repo, opts)
     const mode = served.ruleSet.mode;
     if (mode === 'OFF') {
         core.info(`Log policy check: off for ${printable(environment)}.`);
-        // The AOT cache notes are not log policy findings, so an environment that turns the check off still gets them.
+        // The AOT cache notes are not log policy findings, so an environment that turns the check off still gets them,
+        // for the files the check would read.
         if (repo.files !== null)
-            report([], [], scan(root, repo.files, false).aot);
+            report([], [], scan(root, mappedFiles(repo, service, environment), repo.mapping !== null, false).aot);
         return { outcome: 'off', result: null, reason: null };
     }
     if (served.casesDigest && ciRules_1.CASES_DIGEST && served.casesDigest !== ciRules_1.CASES_DIGEST) {
@@ -32008,7 +32019,7 @@ async function runCheck(api, projectUid, environment, service, root, repo, opts)
                 return { outcome: 'failed', result: null, reason: empty };
             core.warning(`Log policy check: ${empty}.`);
         }
-        mine = filesFor(repo.files, entries, service, environment);
+        mine = mappedFiles(repo, service, environment);
     }
     const read = scan(root, mine, repo.mapping !== null);
     const findings = findingsOf(served.ruleSet, read.settings);

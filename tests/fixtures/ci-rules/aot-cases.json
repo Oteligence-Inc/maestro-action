@@ -141,6 +141,31 @@
           ]
         }
       ]
+    },
+    {
+      "name": "a non-breaking space is not whitespace before a flag",
+      "path": "helm/values.yaml",
+      "text": "javaOpts: \"-Xmx1g\u00a0-XX:AOTCache=/c.aot\"\n",
+      "notes": []
+    },
+    {
+      "name": "a byte order mark before a commented first line",
+      "path": "Dockerfile",
+      "text": "\ufeff# ENTRYPOINT [\"java\", \"-XX:AOTCache=app.aot\", \"-jar\", \"app.jar\"]\nFROM eclipse-temurin:25\n",
+      "notes": []
+    },
+    {
+      "name": "a byte order mark before a flag on the first line",
+      "path": "jvm.options",
+      "text": "\ufeff-XX:AOTCache=app.aot\n",
+      "notes": [
+        {
+          "line": 1,
+          "flags": [
+            "-XX:AOTCache"
+          ]
+        }
+      ]
     }
   ]
 }
