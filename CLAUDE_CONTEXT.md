@@ -36,7 +36,7 @@ included; non-empty strings; each path through `globRefusal`, one linear pass th
    `GET /api/job-manager/projects/{uid}/envs/{env}/locked`, whose `uid` is the `lockedVersionUid` (read with the selection, so a lock taken between two reads cannot pair one version's selection with the next one's uid; `.../versions`, newest first, only when job-manager returns no `uid`).
    A 404 on `locked` means the environment does not exist; a 200 with `data: null` means it was never locked; an empty
    or unparseable 200 is reported as an empty response.
-2b. `logPolicyCheck`, after the in-progress deploy-run report and before the upload: `off` returns null; outside a git
+2b. `logPolicyCheck`, after the in-progress deploy-run report and before the upload: `off` returns null after emitting the AOT cache notes for the files the mapping gives the service; outside a git
    checkout it warns and returns null (the build then carries no check), except in `FAIL` mode, where it throws
    because job-manager would refuse a build with no check; a mode that fails the findings throws a `UserError`, so
    nothing is uploaded. The result goes on the build submit as `requestJson.ciCheck`. With `check-only` set,
