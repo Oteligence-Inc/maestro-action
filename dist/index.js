@@ -29958,6 +29958,9 @@ async function run() {
         for (const notice of analysis.notices) {
             core.warning(`The analysis left part of ${inputs.service} out: ${notice}`);
         }
+        for (const warning of analysis.warnings) {
+            core.warning(`Before you deploy ${inputs.service}: ${warning}`);
+        }
         const analysisNames = analysis.names;
         const profile = (0, submitJob_1.buildProfileFromLocked)(cfg.locked);
         const build = await (0, submitJob_1.submitBuild)(api, cfg, upload, analysisJobId, profile, inputs.service, ciCheck); // [6b]
@@ -31239,7 +31242,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.readAnalysisOfUpload = readAnalysisOfUpload;
 const core = __importStar(__nccwpck_require__(7484));
-const NOTHING = { names: [], notices: [] };
+const NOTHING = { names: [], notices: [], warnings: [] };
 /**
  * The analysis's names for the uploaded JAR, either of which can key its javaagent.config, and what it left out
  * of it. Empty when the upload has no artifact uid or the preview cannot be read.
@@ -31256,10 +31259,8 @@ async function readAnalysisOfUpload(api, analysisJobId, artifactUid) {
         const mine = (preview.services ?? []).find((s) => s?.jarUid === artifactUid);
         // Uploads sharing a name are keyed name@<8 hex>; a preview from an older engine carries no key.
         const names = [mine?.serviceKey, mine?.name].filter((n) => typeof n === 'string' && n !== '');
-        const notices = Array.isArray(mine?.notices)
-            ? mine.notices.filter((n) => typeof n === 'string' && n !== '')
-            : [];
-        return { names: [...new Set(names)], notices };
+        const lines = (value) => Array.isArray(value) ? value.filter((n) => typeof n === 'string' && n !== '') : [];
+        return { names: [...new Set(names)], notices: lines(mine?.notices), warnings: lines(mine?.warnings) };
     }
     catch (err) {
         core.debug(`Could not read the analysis preview: ${err}`);

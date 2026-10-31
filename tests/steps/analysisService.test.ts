@@ -70,10 +70,23 @@ it("returns what the analysis left out of the uploaded JAR, and nothing of anoth
   await expect(readAnalysisOfUpload(client(), 'an_8', 'art-mine')).resolves.toEqual({
     names: ['orders'],
     notices: ['1 class could not be parsed and is not analysed: A.class.'],
+    warnings: [],
   });
 });
 
 it('returns no notices for a JAR the scan read in full, or a preview from an older engine', async () => {
   stubPreview('an_9', [{ name: 'orders', jarUid: 'art-mine' }]);
-  await expect(readAnalysisOfUpload(client(), 'an_9', 'art-mine')).resolves.toEqual({ names: ['orders'], notices: [] });
+  await expect(readAnalysisOfUpload(client(), 'an_9', 'art-mine')).resolves.toEqual({ names: ['orders'], notices: [], warnings: [] });
+});
+
+it("returns the uploaded JAR's in-app tracer warnings apart from its notices, and nothing of another upload's", async () => {
+  stubPreview('an_10', [
+    { name: 'orders', jarUid: 'art-mine', notices: ['n'], warnings: ['This service bundles X.', 3, ''] },
+    { name: 'ledger', jarUid: 'art-other', warnings: ['not mine'] },
+  ]);
+  await expect(readAnalysisOfUpload(client(), 'an_10', 'art-mine')).resolves.toEqual({
+    names: ['orders'],
+    notices: ['n'],
+    warnings: ['This service bundles X.'],
+  });
 });
