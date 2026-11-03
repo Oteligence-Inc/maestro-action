@@ -1,8 +1,8 @@
 import { kindOf } from './extract';
 
 /**
- * A line of a deployment file that starts the JVM with a JDK AOT cache, which is trained with the same -javaagent flags
- * the service runs with: a cache trained without the agent is rejected when the agent is attached. The CLI's `AOTNotes`
+ * A line of a deployment file that starts the JVM with a JDK AOT cache, which on JDK 25 does not work with the agent:
+ * training under agent 2.33.1 fails on Linux and a cache trained without it is rejected. The CLI's `AOTNotes`
  * reads the same lines (tests/fixtures/ci-rules/aot-cases.json).
  */
 export interface AotNote {

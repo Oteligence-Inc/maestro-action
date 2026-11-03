@@ -419,7 +419,7 @@ export function report(findings: Finding[], problems: Problem[], aot: AotNote[] 
     core.warning(`Log policy check could not read ${p.path} line ${p.line}: ${p.reason}`, { file: p.path, startLine: p.line });
   }
   for (const n of aot) {
-    core.notice(`AOT cache: ${n.flags.join(' ')}. Train the cache with the -javaagent flags it runs with: one trained without the agent is rejected when the agent is attached.`, {
+    core.notice(`AOT cache: ${n.flags.join(' ')}. On JDK 25 the cache does not work with the agent: a training run with agent 2.33.1 attached fails on Linux, and a cache trained without the agent is rejected when it is attached. Start the service without the cache while the agent is attached.`, {
       file: n.path,
       startLine: n.line,
       title: 'Maestro: JDK AOT cache',
