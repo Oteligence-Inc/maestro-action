@@ -378,6 +378,8 @@ mode is Fail or production's default, and is `not-run` otherwise.
 | Message | Cause / fix |
 |---|---|
 | `API key is invalid or has been revoked` | Create a new key in Maestro and update the `MAESTRO_API_KEY` secret. |
+| `Maestro refused this API key: Your account belongs to no organization` | The key's owner is in no organization (403 `no_organization`). Create or join one in Maestro, create a key there, and update the `MAESTRO_API_KEY` secret. |
+| `Maestro refused this API key: This API key belongs to an organization you are no longer in` | The key's owner left the key's organization (403 `key_org_left`). Rejoin it, or create a key in the organization the owner is in now and update the secret. |
 | `The member who owns MAESTRO_API_KEY has the Reader role` | job-manager and file-service refuse a Reader's writes. An organization admin can make the key's owner a Project Admin, or the secret can hold a key of a member who is one; the next run picks it up. |
 | `Env "X" ... was not found` | Check that `environment` names an environment in the project. |
 | `Env "X" ... has not been locked yet` | Complete Step 5 (Save & Lock) in the wizard before running CI. |
