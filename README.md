@@ -454,4 +454,7 @@ git tag v0.<minor>.<patch> && git push origin v0.<minor>.<patch>   # the next un
 ```
 
 Customers pin `uses: Oteligence-Inc/maestro-action@v0`. The platform's own `maestro-deploy.yml` workflows pin a
-commit SHA instead.
+commit SHA instead, so a release also moves them: in each service repo that has one, set
+`uses: Oteligence-Inc/maestro-action@<the new tag's commit SHA> # v0.<minor>.<patch>` in a PR on `dev`. From the work
+root, `bash platform-overview/scripts/check-shared-pins.sh` prints `behind` for any pin left on an older release, and
+every session start repeats it until the pins move.
