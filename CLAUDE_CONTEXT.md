@@ -98,7 +98,8 @@ included; non-empty strings; each path through `globRefusal`, one linear pass th
    holds the files to the signed record. Without the input, a bundle carrying both files is `not-checked` and any other
    is `unsigned`; nothing is refused for it. The signature covers what the record covers and anchors the lock only
    to the uid the server reported, so it catches tampering after the build, not a platform that builds from inputs
-   it chose. `run` sets `build-signature` to the outcome. Hosted Maestro's production key is published in the
+   it chose. The statement's `organization` is not compared: the Action holds no organization id of its own unless
+   `org-id` is set, and the lock uid already ties the statement to this run's lock. `run` sets `build-signature` to the outcome. Hosted Maestro's production key is published in the
    README (*Hosted Maestro's signing key*), on GitHub rather than on the platform that signs with it; Maestro's Help
    names its fingerprint and links there, so the README section's anchor is a contract with the frontend's
    `ACTION_README_URL`. A private-cloud installation's key comes from its own VM.
