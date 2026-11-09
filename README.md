@@ -162,8 +162,7 @@ every CI run reads `recorded` each time, since its inputs differ.
 A Maestro platform whose job processor holds a signing key (`OTELIGENCE_MAESTRO_BUILD_SIGNING_KEY`) signs every
 Maestro build: the bundle carries `build-statement.json`, which names the key (`signingKey`, `sha256:` and the
 SHA-256 of its X.509 SubjectPublicKeyInfo), the organization the build was made for (`organization`: one key signs
-every organization's builds, so this ties a statement to one; this step does not compare it, and
-`maestro verify --organization` does), the record's inputs digest, the application JARs, the upload bound to each
+every organization's builds, so this ties a statement to one; this step does not compare it), the record's inputs digest, the application JARs, the upload bound to each
 service, the lock version the build was made from and the SHA-256 of every file the record covers, and
 `build-statement.sig`, the raw Ed25519 signature over those exact bytes. A rebuild of one lock under one key states and
 signs the same bytes. The private key is held by the job processor and by the platform's operators and pipelines that
