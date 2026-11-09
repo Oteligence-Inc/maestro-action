@@ -139,10 +139,10 @@ describe('parseInputs — project / project-id', () => {
     expect(i.collectorValidate).toBe(false);
     expect(i.collectorImage).toBe(COLLECTOR_IMAGE);
     process.env['INPUT_COLLECTOR-VALIDATE'] = 'TRUE';
-    process.env['INPUT_COLLECTOR-IMAGE'] = 'otel/opentelemetry-collector-contrib:0.164.0';
+    process.env['INPUT_COLLECTOR-IMAGE'] = 'otel/opentelemetry-collector-contrib:0.165.0';
     i = parseInputs();
     expect(i.collectorValidate).toBe(true);
-    expect(i.collectorImage).toBe('otel/opentelemetry-collector-contrib:0.164.0');
+    expect(i.collectorImage).toBe('otel/opentelemetry-collector-contrib:0.165.0');
     process.env['INPUT_COLLECTOR-IMAGE'] = '--privileged';
     expect(() => parseInputs()).toThrow('collector-image is not an image reference');
   });
