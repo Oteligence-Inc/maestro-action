@@ -1,7 +1,7 @@
 import { isUtf8 } from 'buffer';
-import { LineCounter, isAlias, isCollection, isMap, isScalar, isSeq, parseAllDocuments, visit as visitYaml } from 'yaml';
+import { LineCounter, isAlias, isCollection, isMap, isScalar, isSeq, parseAllDocuments, stringify, visit as visitYaml } from 'yaml';
 import type { Alias, Document, Node, Pair } from 'yaml';
-import { Setting, fold } from '../ciRules';
+import { COLLECTOR_PIPELINES, COLLECTOR_VALIDATE, PLACEHOLDER, Setting, fold, trimAscii } from '../ciRules';
 
 /** A file the check could not read in full: its path and line, never its content. */
 export interface Problem {
@@ -21,6 +21,39 @@ export interface Extracted {
   origins: number;
   /** The YAML nodes read through aliases, counted against ALIAS_NODES_MAX. */
   aliasNodes: number;
+  /** The whole collector configurations found, for validation. */
+  collectors: CollectorConfig[];
+  /** Whether the file holds a Helm template action, which leaves a collector pipeline unreadable. */
+  templated: boolean;
+  /** Set while a file a Secret carries is read: no collector configuration is taken from it. */
+  inSecret: boolean;
+  /** The logs pipeline settings of collector fragments, which the scan widens by directory. */
+  fragments: CollectorFragment[];
+  /** The processors each collector configuration defines, by its directory. */
+  collectorDefined: { dir: string; defined: string[] }[];
+}
+
+/** A logs pipeline setting a collector fragment wrote: its index among the settings, and its processors. */
+export interface CollectorFragment {
+  setting: number;
+  list: string;
+}
+
+/**
+ * A whole collector configuration found in a deployment file: a file of its own, an Operator OpenTelemetryCollector's
+ * spec.config, or a string a ConfigMap carries. A Helm values fragment is not whole: the chart's defaults and the other
+ * values files complete it. `text` is the configuration as the collector would read it.
+ */
+export interface CollectorConfig {
+  path: string;
+  line: number;
+  text: string;
+  /** The environment variables it reads with no default, which validation sets to a stand-in. */
+  env: string[];
+  /** The file_storage directories it names, which validation provides as empty in-memory directories. */
+  dirs: string[];
+  /** Why it is not validated, or ''. */
+  skip: string;
 }
 
 export type FileKind = 'yaml' | 'dockerfile' | 'env' | 'properties';
@@ -103,7 +136,10 @@ const ENV_LINE = new RegExp(`^[${SPACE}]*(?:export[${SPACE}]+)?([A-Za-z_][A-Za-z
 
 /** The settings a deployment file holds, from its text as `decode` gives it. */
 export function extract(path: string, raw: string, kind: FileKind): Extracted {
-  const out: Extracted = { settings: [], problems: [], origins: 0, aliasNodes: 0 };
+  const out: Extracted = {
+    settings: [], problems: [], origins: 0, aliasNodes: 0, collectors: [], templated: templated(raw), inSecret: false,
+    fragments: [], collectorDefined: [],
+  };
   const text = raw.charCodeAt(0) === 0xfeff ? raw.substring(1) : raw;
   const same = (line: number) => line;
   switch (kind) {
@@ -122,6 +158,8 @@ export function extract(path: string, raw: string, kind: FileKind): Extracted {
       propertiesSettings(path, text, out, same);
       break;
   }
+  // In file order: the embedded-file reader finds some during the walk, the string search the rest after it.
+  out.collectors = out.collectors.map((c, i) => [c, i] as const).sort((a, b) => a[0].line - b[0].line || a[1] - b[1]).map(([c]) => c);
   return out;
 }
 
@@ -140,7 +178,7 @@ function add(out: Extracted, path: string, line: number, names: string | string[
   let expanded = false;
   for (const name of Array.isArray(names) ? names : [names]) {
     const folded = fold(name);
-    if (folded) out.settings.push({ name: folded, value, path, line, origin });
+    if (folded && !reserved(folded)) out.settings.push({ name: folded, value, path, line, origin });
     if (expanded) continue;
     if (JVM_OPTIONS.has(folded)) {
       expanded = true;
@@ -509,9 +547,18 @@ function yamlSettings(path: string, text: string, out: Extracted, lineAt: (line:
       };
       const contents = doc.contents as Node | null;
       if (!contents) continue;
-      walkYaml({ path, out, at, aliases, embedded, secret: isSecret(contents) }, contents, [], 0, 0);
+      const w: Walk = { path, out, at, aliases, embedded, secret: isSecret(contents), doc };
+      walkYaml(w, contents, [], 0, 0);
+      collectorFind(w, contents, [], 0, documentKind(contents), part);
     }
   }
+}
+
+/** A Kubernetes document's kind, or ''. */
+function documentKind(root: Node): string {
+  if (!isMap(root)) return '';
+  const pair = (root.items as Pair[]).find((p) => scalarText(p.key) === 'kind');
+  return pair ? scalarText(pair.value) ?? '' : '';
 }
 
 /** Whether a document is a Kubernetes Secret, whose data values are base64. */
@@ -556,6 +603,8 @@ interface Walk {
   aliases: Map<Alias, Node>;
   embedded: boolean;
   secret: boolean;
+  /** The document read, to write a collector configuration it holds as text. */
+  doc?: Document.Parsed;
 }
 
 /**
@@ -658,7 +707,11 @@ function readEmbedded(w: Walk, kind: FileKind, written: Node | null, text: strin
   const literal = !encoded && isScalar(written) && written.type === 'BLOCK_LITERAL';
   const lineAt = literal ? (k: number) => at + k : () => at;
   if (kind === 'properties') propertiesSettings(w.path, body, w.out, lineAt);
-  else yamlSettings(w.path, body.charCodeAt(0) === 0xfeff ? body.substring(1) : body, w.out, lineAt, true);
+  else {
+    w.out.inSecret = w.secret;
+    yamlSettings(w.path, body.charCodeAt(0) === 0xfeff ? body.substring(1) : body, w.out, lineAt, true);
+    w.out.inSecret = false;
+  }
 }
 
 function walkYaml(w: Walk, node: Node, keys: string[], depth: number, aliasLine: number): void {
@@ -939,4 +992,261 @@ function unquote(v: string): string {
     return t.substring(1, t.length - 1);
   }
   return t;
+}
+
+/** The merge keys followed while reading a collector configuration's mappings. */
+const COLLECTOR_MERGE_DEPTH = 8;
+/** Where file_storage keeps its files when its directory is not set (on Linux). */
+const FILE_STORAGE_DEFAULT = '/var/lib/otelcol/file_storage';
+const ENV_REFERENCE = /\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)\}/g;
+/** A ${scheme:...} reference; ${NAME:-default} is an environment variable with a default. */
+const PROVIDER_REFERENCE = /\$\{([A-Za-z][A-Za-z0-9+.-]*):([^-]|$)/g;
+const PLAIN_DIRECTORY = /^\/[A-Za-z0-9._/-]{1,200}$/;
+
+/** Whether a file holds a Helm template action outside a comment, which leaves a collector pipeline unreadable. */
+export function templated(raw: string): boolean {
+  return lines(raw).some((l) => l.includes('{{') && !trimSpace(l).startsWith('#'));
+}
+
+/** Whether a folded name is one the check writes itself. */
+function reserved(folded: string): boolean {
+  return folded === COLLECTOR_VALIDATE || folded.startsWith(COLLECTOR_PIPELINES);
+}
+
+/** A node read through the alias it may be. */
+function resolve(w: Walk, node: unknown): Node | null {
+  const n = (node ?? null) as Node | null;
+  return n && isAlias(n) ? w.aliases.get(n) ?? null : n;
+}
+
+/** The merge sources of a mapping's `<<` entries, each resolved. */
+function mergeSources(w: Walk, src: unknown): unknown[] {
+  const s = resolve(w, src);
+  return s && isSeq(s) ? (s.items as unknown[]) : [s];
+}
+
+/**
+ * A mapping's value for a key, through aliases and merge keys, its own entries first. Each mapping is read once per
+ * lookup, so a mapping that merges itself, however often, costs one visit.
+ */
+function entry(w: Walk, node: unknown, key: string, depth = 0, seen: Set<Node> = new Set()): Node | null {
+  const m = resolve(w, node);
+  if (!m || !isMap(m) || depth > COLLECTOR_MERGE_DEPTH || seen.has(m)) return null;
+  seen.add(m);
+  const merges: unknown[] = [];
+  for (const pair of m.items as Pair[]) {
+    if (isMergeKey(pair.key)) {
+      merges.push(pair.value);
+      continue;
+    }
+    if (scalarText(pair.key) === key) return resolve(w, pair.value);
+  }
+  for (const src of merges) {
+    for (const x of mergeSources(w, src)) {
+      const v = entry(w, x, key, depth + 1, seen);
+      if (v) return v;
+    }
+  }
+  return null;
+}
+
+/** A mapping's keys through merge keys, its own first, each once; [] for anything but a mapping. */
+function mappingKeys(w: Walk, node: unknown): string[] {
+  const out: string[] = [];
+  const seen = new Set<Node>();
+  const read = (n: unknown, depth: number): void => {
+    const m = resolve(w, n);
+    if (!m || !isMap(m) || depth > COLLECTOR_MERGE_DEPTH || seen.has(m)) return;
+    seen.add(m);
+    const merges: unknown[] = [];
+    for (const pair of m.items as Pair[]) {
+      if (isMergeKey(pair.key)) {
+        merges.push(pair.value);
+        continue;
+      }
+      const k = scalarText(pair.key);
+      if (k !== null && !out.includes(k)) out.push(k);
+    }
+    for (const src of merges) for (const x of mergeSources(w, src)) read(x, depth + 1);
+  };
+  read(node, 0);
+  return out;
+}
+
+/**
+ * A collector configuration's service.pipelines mapping, or null when the mapping is not one: it must hold a pipeline
+ * that names receivers, processors or exporters.
+ */
+function collectorPipelinesOf(w: Walk, m: Node): Node | null {
+  const service = entry(w, m, 'service');
+  if (!service || !isMap(service)) return null;
+  const pipelines = entry(w, service, 'pipelines');
+  if (!pipelines || !isMap(pipelines)) return null;
+  for (const pair of pipelines.items as Pair[]) {
+    const p = resolve(w, pair.value);
+    if (!p || !isMap(p)) continue;
+    if (['receivers', 'processors', 'exporters'].some((k) => entry(w, p, k) !== null)) return pipelines;
+  }
+  return null;
+}
+
+/** A mapping as one document: its aliases resolved and its comments dropped, as the CLI writes it; '' when it cannot be. */
+function collectorText(w: Walk, node: Node): string {
+  try {
+    return w.doc ? stringify(node.toJS(w.doc, { maxAliasCount: ALIAS_NODES_MAX })) : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Looks for collector configurations in one YAML document's node tree: a mapping found is read and not searched
+ * further; a string holding one is parsed once, unless the document is a Secret, the string is a file the embedded-file
+ * reader already reads, or the file is one a Secret carries.
+ */
+function collectorFind(w: Walk, node: Node | null, keys: string[], depth: number, kind: string, doc: string): void {
+  if (!node || depth > DEPTH_MAX || w.out.inSecret) return;
+  if (isMap(node)) {
+    if (collectorPipelinesOf(w, node)) {
+      const whole = (keys.length === 0 || (kind === 'OpenTelemetryCollector' && keys.length === 2 && keys[0] === 'spec' && keys[1] === 'config'))
+        && entry(w, node, 'receivers') !== null && entry(w, node, 'exporters') !== null;
+      const text = !whole ? '' : keys.length === 0 ? doc : collectorText(w, node);
+      collectorRead(w, node, whole, text, w.at(node));
+      return;
+    }
+    const parent = keys.length > 0 ? keys[keys.length - 1].toLowerCase() : '';
+    for (const pair of node.items as Pair[]) {
+      const key = scalarText(pair.key);
+      const v = (pair.value ?? null) as Node | null;
+      if (key === null || !v || isAlias(v) || isMergeKey(pair.key)) continue;
+      const path = [...keys, key];
+      if (isScalar(v)) {
+        if (w.embedded || w.secret || (embeddedKind(key) !== null && (parent === 'data' || parent === 'stringdata'))) continue;
+        const text = scalarText(v);
+        if (text !== null && text.includes('pipelines:')) collectorString(w, v, text);
+        continue;
+      }
+      collectorFind(w, v, path, depth + 1, kind, doc);
+    }
+  } else if (isSeq(node)) {
+    for (const item of node.items as Node[]) {
+      if (item && !isAlias(item)) collectorFind(w, item, keys, depth + 1, kind, doc);
+    }
+  }
+}
+
+/**
+ * Reads a collector configuration a string carries, its lines placed as the embedded-file reader places them: a
+ * literal block's line for line, any other value's at its own line. The string is read as a file is.
+ */
+function collectorString(w: Walk, written: Node, text: string): void {
+  const at = w.at(written);
+  const literal = isScalar(written) && written.type === 'BLOCK_LITERAL';
+  const lineAt = literal ? (k: number) => at + k : () => at;
+  const { docs, counter } = parsed(text);
+  for (const [n, doc] of docs.entries()) {
+    const aliases = doc.errors.length > 0 || (n > 0 && !doc.directives?.docStart) ? null : aliasTargets(doc);
+    if (!aliases) {
+      if (text.includes('service:')) w.out.problems.push({ path: w.path, line: at, reason: 'a collector configuration in a string is not valid YAML' });
+      return;
+    }
+    const root = doc.contents as Node | null;
+    const inner: Walk = {
+      path: w.path, out: w.out, aliases, embedded: true, secret: false, doc,
+      at: (node) => {
+        const pos = node?.range?.[0];
+        return lineAt(pos === undefined ? 1 : counter.linePos(pos).line);
+      },
+    };
+    if (!root || !isMap(root) || !collectorPipelinesOf(inner, root)) continue;
+    const whole = entry(inner, root, 'receivers') !== null && entry(inner, root, 'exporters') !== null;
+    collectorRead(inner, root, whole, whole ? text : '', inner.at(root));
+  }
+}
+
+/** Writes one setting per logs pipeline of a collector configuration, and records a whole one for validation. */
+function collectorRead(w: Walk, config: Node, whole: boolean, text: string, line: number): void {
+  const { out, path } = w;
+  const defined = mappingKeys(w, entry(w, config, 'processors'));
+  out.collectorDefined.push({ dir: posixDir(path), defined });
+  const pipelines = collectorPipelinesOf(w, config) as Node;
+  for (const pair of (pipelines as unknown as { items: Pair[] }).items) {
+    const name = scalarText(pair.key);
+    if (name === null || (name !== 'logs' && !name.startsWith('logs/'))) continue;
+    const pipeline = resolve(w, pair.value);
+    if (!pipeline || !isMap(pipeline)) continue;
+    const pline = w.at(pair.key as Node);
+    const notChecked = (why: string): void => {
+      out.problems.push({ path, line: pline, reason: `the collector's ${name} pipeline ${why}, not checked` });
+    };
+    const list = entry(w, pipeline, 'processors');
+    let value: string;
+    if (out.templated) {
+      notChecked('is in a Helm template');
+      continue;
+    } else if (!list && !whole) {
+      continue;
+    } else if (!list) {
+      value = '';
+    } else if (isSeq(list)) {
+      const items = (list.items as unknown[]).map((item) => scalarText(resolve(w, item))).filter((v): v is string => v !== null);
+      value = items.join(',');
+      if (items.some((v) => PLACEHOLDER.test(trimAscii(v)))) notChecked('names a processor through a placeholder');
+    } else {
+      value = scalarText(list) ?? '';
+      if (PLACEHOLDER.test(trimAscii(value))) notChecked('names its processors through a placeholder');
+    }
+    out.settings.push({ name: COLLECTOR_PIPELINES + name, value: `${value}|${defined.join(',')}`, path, line: pline, origin: out.origins++ });
+    if (!whole) out.fragments.push({ setting: out.settings.length - 1, list: value });
+  }
+  if (!whole) return;
+  let skip = '';
+  if (out.templated) skip = 'it is in a Helm template';
+  else if (text === '') skip = 'it cannot be written out as one document';
+  else {
+    for (const m of text.matchAll(PROVIDER_REFERENCE)) {
+      if (m[1] !== 'env') {
+        skip = `it reads a value through \${${m[1]}:...}`;
+        break;
+      }
+    }
+  }
+  const env: string[] = [];
+  for (const m of text.matchAll(ENV_REFERENCE)) if (!env.includes(m[1])) env.push(m[1]);
+  const dirs: string[] = [];
+  const extensions = entry(w, config, 'extensions');
+  for (const k of mappingKeys(w, extensions)) {
+    if (k !== 'file_storage' && !k.startsWith('file_storage/')) continue;
+    const set = scalarText(entry(w, entry(w, extensions, k), 'directory'));
+    const dir = set ? set : FILE_STORAGE_DEFAULT;
+    if (!PLAIN_DIRECTORY.test(dir)) {
+      if (!skip) skip = 'its file_storage directory is not a plain absolute path';
+      continue;
+    }
+    if (!dirs.includes(dir)) dirs.push(dir);
+  }
+  out.collectors.push({ path, line, text, env, dirs, skip });
+}
+
+/** The directory of a repository path, as path.posix.dirname reads it. */
+function posixDir(p: string): string {
+  const i = p.lastIndexOf('/');
+  return i < 0 ? '.' : i === 0 ? '/' : p.substring(0, i);
+}
+
+/**
+ * Gives each fragment's logs pipeline setting the processors every collector configuration in its directory defines,
+ * so a values file layered over another is judged with the processors the other defines.
+ */
+export function widenFragments(settings: SourcedSetting[], fragments: CollectorFragment[], defined: { dir: string; defined: string[] }[]): void {
+  const byDir = new Map<string, string[]>();
+  for (const d of defined) {
+    const all = byDir.get(d.dir) ?? [];
+    for (const p of d.defined) if (!all.includes(p)) all.push(p);
+    byDir.set(d.dir, all);
+  }
+  for (const f of fragments) {
+    const s = settings[f.setting];
+    s.value = `${f.list}|${(byDir.get(posixDir(s.path)) ?? []).join(',')}`;
+  }
 }

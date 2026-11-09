@@ -2,7 +2,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { Finding, RuleSet } from '../../src/ciRules';
+import { Finding, RuleSet, VERSION } from '../../src/ciRules';
 import { Problem } from '../../src/logPolicy/extract';
 import { findingsOf, scan } from '../../src/steps/ciCheck';
 import evaluation from '../fixtures/ci-rules/evaluation-cases.json';
@@ -10,19 +10,20 @@ import evaluation from '../fixtures/ci-rules/evaluation-cases.json';
 // The CLI's suite holds a copy of this file and pins the same digest. Each suite checks only its own copy, so a case
 // is added to both by copying the file and its digest to both repositories.
 const SUITE = path.join(__dirname, '..', 'fixtures', 'ci-rules', 'extraction-cases.json');
-const EXTRACTION_CASES_DIGEST = 'd5dda09b77be17a1a0b3b3411ace5ffa38d72b227747e11f33fd30d0bd5602e8';
+const EXTRACTION_CASES_DIGEST = 'd1b9c5fb2be12971a781390059b1ecbe427ad58c8dbb7f54e255bd43a8520db2';
 
 interface Case {
   name: string;
   files: { path: string; text?: string; base64?: string }[];
   findings: Finding[];
   problems: Problem[];
+  collectors?: { path: string; line: number; env: string[]; dirs: string[]; skip: string }[];
 }
 
 const bytes = fs.readFileSync(SUITE);
 const cases = (JSON.parse(bytes.toString('utf8')) as { cases: Case[] }).cases;
 const lockFree = Object.values((evaluation as unknown as { ruleSets: Record<string, RuleSet> }).ruleSets).find(
-  (s) => s.lockFree,
+  (s) => s.lockFree && s.version === VERSION,
 ) as RuleSet;
 
 it('is the copy of the extraction cases the CLI holds', () => {
@@ -39,9 +40,14 @@ describe.each(cases.map((c) => [c.name, c] as const))('%s', (_name, c) => {
         fs.writeFileSync(abs, file.base64 !== undefined ? Buffer.from(file.base64, 'base64') : Buffer.from(file.text ?? '', 'utf8'));
       }
       const read = scan(root, c.files.map((f) => f.path));
-      expect({ findings: findingsOf(lockFree, read.settings), problems: read.problems }).toEqual({
+      expect({
+        findings: findingsOf(lockFree, read.settings),
+        problems: read.problems,
+        collectors: read.collectors.map(({ path: p, line, env, dirs, skip }) => ({ path: p, line, env, dirs, skip })),
+      }).toEqual({
         findings: c.findings,
         problems: c.problems,
+        collectors: c.collectors ?? [],
       });
     } finally {
       fs.rmSync(root, { recursive: true, force: true });

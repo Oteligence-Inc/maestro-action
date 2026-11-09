@@ -2,13 +2,25 @@
 // discrete-job-functions' djf-core CiRules.evaluate; the shared fixture suite (tests/fixtures/ci-rules) holds the two
 // to the same answers, and CASES_DIGEST pins which copy of that suite this release was tested against.
 
-/** The rule-set version this Action reads. */
-export const VERSION = 1;
+/** The newest rule-set version this Action reads; it reads every version from 1 up and names them all to the platform. */
+export const VERSION = 2;
+
+/** The rule-set versions this Action reads; the platform serves the highest it has. */
+export const VERSIONS = [1, 2];
 
 /** The SHA-256 of the evaluation fixture suite this release was tested against; the server serves its own. */
-export const CASES_DIGEST = 'b2b18f1ba97efadc13c76c13eda51fb550aef35be24be5eeab53a865a31804ae';
+export const CASES_DIGEST = '1779d21a6eb889f5cc59210b80e3ab4ee2f12caf53b9a0e363a8adb12cd3fdf0';
 
-/** Every test a version 1 rule may name; a rule naming another fails loudly. */
+/**
+ * The setting the Action writes for each logs pipeline of a collector configuration it finds, valued
+ * "<the pipeline's processors>|<the processors the configuration defines>"; the files' own settings under it are not read.
+ */
+export const COLLECTOR_PIPELINES = 'collector.pipelines.';
+
+/** The setting the Action writes at a collector configuration's line when the collector's validate refused it. */
+export const COLLECTOR_VALIDATE = 'collector.validate';
+
+/** Every test a rule of a version this Action reads may name; a rule naming another fails loudly. */
 export const TESTS = [
   'any',
   'otel_true',
@@ -18,6 +30,7 @@ export const TESTS = [
   'not_exporter',
   'exposes_loggers',
   'profile_below_floor',
+  'keeps_processors',
 ] as const;
 
 export interface Rule {
@@ -72,7 +85,7 @@ export function findingName(folded: string): string {
 }
 
 /** A template placeholder anywhere, or a value written as $VAR or @name@: it passes no test but any. */
-const PLACEHOLDER = /^(?:[\s\S]*(?:\$\{|\$\(|#\{|\{\{|__TEMPLATE__)[\s\S]*|\$[A-Za-z_][\s\S]*|@[A-Za-z0-9_.-]+@)$/;
+export const PLACEHOLDER = /^(?:[\s\S]*(?:\$\{|\$\(|#\{|\{\{|__TEMPLATE__)[\s\S]*|\$[A-Za-z_][\s\S]*|@[A-Za-z0-9_.-]+@)$/;
 
 /** Java's String.trim: spaces and control characters at either end, and nothing else. */
 export function trimAscii(v: string): string {
@@ -120,6 +133,7 @@ export function passesTest(r: Rule, raw: string | null | undefined, set: RuleSet
   const v = raw === null || raw === undefined ? '' : trimAscii(raw);
   if (!(TESTS as readonly string[]).includes(r.test)) throw new Error(`unknown test ${r.test}`);
   if (r.test === 'any') return true;
+  if (r.test === 'keeps_processors') return dropsProcessor(r.values, v);
   // A list test reads its elements whatever else the list holds: a placeholder element names nothing it looks for.
   if (r.test === 'exposes_loggers') return v.split(',').some((p) => trimAscii(p) === 'loggers' || trimAscii(p) === '*');
   if (r.test === 'profile_below_floor') return v.split(',').some((p) => r.values.includes(trimAscii(p)));
@@ -138,6 +152,45 @@ export function passesTest(r: Rule, raw: string | null | undefined, set: RuleSet
     default:
       throw new Error(`unknown test ${r.test}`);
   }
+}
+
+/**
+ * Whether a logs pipeline of the generated collector configuration lacks a processor it keeps: the pipeline's list is
+ * the value before its first |, the configuration's defined processors after it, and a placeholder in the list passes.
+ * The configuration is the generated one when it defines or names two or more of the unconditional values and the
+ * markers (marked !, never required); a value marked ? is required only where the configuration defines it.
+ */
+export function dropsProcessor(values: string[], value: string): boolean {
+  const bar = value.indexOf('|');
+  const list = bar < 0 ? value : value.slice(0, bar);
+  if (PLACEHOLDER.test(trimAscii(list))) return false;
+  const pipeline = processorNames(list);
+  const defined = processorNames(bar < 0 ? '' : value.slice(bar + 1));
+  let governed = 0;
+  const required: string[] = [];
+  for (const v of values) {
+    if (v.startsWith('?')) {
+      if (defined.has(v.slice(1))) required.push(v.slice(1));
+      continue;
+    }
+    if (v.startsWith('!')) {
+      if (defined.has(v.slice(1)) || pipeline.has(v.slice(1))) governed++;
+      continue;
+    }
+    required.push(v);
+    if (defined.has(v) || pipeline.has(v)) governed++;
+  }
+  if (governed < 2) return false;
+  return required.some((v) => !pipeline.has(v));
+}
+
+function processorNames(csv: string): Set<string> {
+  const out = new Set<string>();
+  for (const part of csv.split(',')) {
+    const n = trimAscii(part);
+    if (n !== '') out.add(n);
+  }
+  return out;
 }
 
 function isLevel(v: string): boolean {
@@ -161,8 +214,8 @@ const RULE_ID = /^[A-Z][A-Z0-9_]{0,63}$/;
 export function unreadable(body: unknown): string | null {
   if (typeof body !== 'object' || body === null) return 'the rule set is empty';
   const set = body as Partial<RuleSet>;
-  if (set.version !== VERSION) {
-    return `the platform serves rule-set version ${String(set.version)} and this Action reads version ${VERSION}`;
+  if (typeof set.version !== 'number' || !VERSIONS.includes(set.version)) {
+    return `the platform serves rule-set version ${String(set.version)} and this Action reads versions 1 to ${VERSION}`;
   }
   if (typeof set.mode !== 'string' || typeof set.floor !== 'string' || typeof set.digest !== 'string') {
     return 'the rule set has no mode, floor or digest';

@@ -61,7 +61,9 @@ export async function run(): Promise<void> {
 
     // [2c] Before the upload, so a build the environment's log policy refuses costs no analysis.
     const root = workspace();
-    const ciCheck = await logPolicyCheck(api, projectUid, inputs.environment, inputs.service, root, cfg.lockedVersionUid);
+    const ciCheck = await logPolicyCheck(api, projectUid, inputs.environment, inputs.service, root, cfg.lockedVersionUid, {
+      validate: inputs.collectorValidate, image: inputs.collectorImage, results: new Map(),
+    });
 
     const upload = await uploadJar(api, inputs, cfg); // [3-5]
 

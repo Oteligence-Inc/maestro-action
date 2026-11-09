@@ -1,9 +1,9 @@
 {
   "version" : 1,
-  "about" : "Each case names its rule set by digest; ruleSets holds each one as the platform serves it. An interpreter evaluates a case's settings against its rule set and must give exactly its findings, in order: for each setting in turn, each rule that holds, in the rule set's order, once per rule, name, path and line. Regenerate ruleSets with -Dci-rules.write=true; findings are written by hand.",
+  "about" : "Each case names its rule set by digest; ruleSets holds each one as the platform serves it, at the case's version (the newest where it names none). An interpreter evaluates a case's settings against its rule set and must give exactly its findings, in order: for each setting in turn, each rule that holds, in the rule set's order, once per rule, name, path and line. Regenerate ruleSets with -Dci-rules.write=true; findings are written by hand.",
   "ruleSets" : {
-    "2c0620d76e6184a24747ed11ba9ee3262566a8027dbb29f8dd3fa9aa64f41d74" : {
-      "version" : 1,
+    "1b10366f1368f5603f445b7c5ab47b0d6f4317e5f69b48d2e75265648de9c6ce" : {
+      "version" : 2,
       "mode" : "WARN",
       "floor" : "INFO",
       "exporter" : "otlp",
@@ -84,7 +84,7 @@
         "exact" : [ ],
         "prefixes" : [ "otel.oteligence." ],
         "suffixes" : [ ],
-        "except" : [ "otel.oteligence.logs.floor" ],
+        "except" : [ "otel.oteligence.logs.floor", "otel.oteligence.logs.state.interval", "otel.oteligence.logs.window.path", "otel.oteligence.resource.attributes", "otel.oteligence.resource.disabled.keys", "otel.oteligence.drop.health.traces", "otel.oteligence.trace.skipped.libraries" ],
         "test" : "any",
         "values" : [ ],
         "since" : 1
@@ -129,6 +129,26 @@
         "values" : [ ],
         "since" : 1
       }, {
+        "id" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+        "severity" : "error",
+        "exact" : [ "collector.pipelines.logs" ],
+        "prefixes" : [ "collector.pipelines.logs/" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "keeps_processors",
+        "values" : [ "redaction", "transform/pii", "transform/exceptions", "?redaction/identifiers", "!redaction/db", "!transform/truncate" ],
+        "since" : 2
+      }, {
+        "id" : "COLLECTOR_CONFIG_INVALID",
+        "severity" : "warning",
+        "exact" : [ "collector.validate" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 2
+      }, {
         "id" : "LOG_LEVEL_BELOW_FLOOR",
         "severity" : "error",
         "exact" : [ ],
@@ -156,6 +176,16 @@
         "suffixes" : [ ],
         "except" : [ ],
         "test" : "not_exporter",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "PACKAGED_LEVEL_VARIABLE",
+        "severity" : "error",
+        "exact" : [ "log.level" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "below_floor",
         "values" : [ ],
         "since" : 1
       }, {
@@ -169,338 +199,10 @@
         "values" : [ "dev" ],
         "since" : 1
       } ],
-      "digest" : "2c0620d76e6184a24747ed11ba9ee3262566a8027dbb29f8dd3fa9aa64f41d74"
+      "digest" : "1b10366f1368f5603f445b7c5ab47b0d6f4317e5f69b48d2e75265648de9c6ce"
     },
-    "3546f12a02d4f0800327c29d2c5ea6b21c08f7d4986d5a098b2f8ecb6333c8d3" : {
-      "version" : 1,
-      "mode" : "WARN",
-      "floor" : "INFO",
-      "exporter" : "otlp",
-      "lockFree" : false,
-      "rules" : [ {
-        "id" : "SPRING_DEBUG",
-        "severity" : "warning",
-        "exact" : [ "debug", "trace" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "spring_set",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGGING_FILE_AT_DEPLOY",
-        "severity" : "warning",
-        "exact" : [ "logging.config", "logback.configurationfile", "log4j2.configurationfile", "log4j.configurationfile", "log4j.configuration" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGGERS_ENDPOINT_EXPOSED",
-        "severity" : "warning",
-        "exact" : [ "management.endpoints.web.exposure.include" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "exposes_loggers",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGS_ENDPOINT_SET",
-        "severity" : "warning",
-        "exact" : [ ],
-        "prefixes" : [ "otel.exporter.otlp.logs." ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "DECLARATIVE_CONFIG",
-        "severity" : "error",
-        "exact" : [ "otel.config.file", "otel.experimental.config.file" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "AGENT_DEBUG",
-        "severity" : "error",
-        "exact" : [ "otel.javaagent.debug" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "otel_true",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "AGENT_V3_PREVIEW",
-        "severity" : "warning",
-        "exact" : [ "otel.instrumentation.common.v3.preview" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "otel_true",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "EXTENSION_POLICY_SET",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ "otel.oteligence." ],
-        "suffixes" : [ ],
-        "except" : [ "otel.oteligence.logs.floor" ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOG_CAPTURE_SETTING",
-        "severity" : "warning",
-        "exact" : [ ],
-        "prefixes" : [ "otel.instrumentation.logback.appender.experimental.capture", "otel.instrumentation.log4j.appender.experimental.capture", "otel.instrumentation.logback.appender.experimental.log.attributes", "otel.instrumentation.log4j.appender.experimental.log.attributes" ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "SQL_SANITIZER_OFF",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ ],
-        "suffixes" : [ ".statement.sanitizer.enabled", ".query.sanitization.enabled" ],
-        "except" : [ ],
-        "test" : "otel_false",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "SQL_PARAMETERS_CAPTURED",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ ],
-        "suffixes" : [ ".experimental.capture.query.parameters" ],
-        "except" : [ ],
-        "test" : "otel_true",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "OVERRIDE_REFUSED",
-        "severity" : "warning",
-        "exact" : [ "otel.experimental.javascript.snippet", "otel.instrumentation.common.db.experimental.sqlcommenter.enabled", "otel.instrumentation.common.default.enabled", "otel.instrumentation.genai.capture.message.content", "otel.instrumentation.http.client.capture.request.headers", "otel.instrumentation.http.client.capture.response.headers", "otel.instrumentation.http.server.capture.request.headers", "otel.instrumentation.http.server.capture.response.headers", "otel.instrumentation.messaging.experimental.capture.headers", "otel.instrumentation.sanitization.url.experimental.sensitive.query.parameters", "otel.java.disabled.resource.providers", "otel.javaagent.enabled", "otel.javaagent.exclude.class.loaders", "otel.javaagent.exclude.classes", "otel.metrics.exporter", "otel.resource.disabled.keys", "otel.sdk.disabled", "otel.traces.exporter", "otel.traces.sampler" ],
-        "prefixes" : [ "otel.exporter.otlp.metrics.", "otel.exporter.otlp.traces.", "otel.exporter.prometheus." ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOG_LEVEL_BELOW_FLOOR",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ "logging.level." ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "below_floor",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "FLOOR_LOWERED",
-        "severity" : "error",
-        "exact" : [ "otel.oteligence.logs.floor" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "below_floor",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGS_EXPORTER_NOT_LOCKED",
-        "severity" : "error",
-        "exact" : [ "otel.logs.exporter" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "not_exporter",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "PROFILE_BELOW_FLOOR",
-        "severity" : "error",
-        "exact" : [ "spring.profiles.active", "spring.profiles.include" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "profile_below_floor",
-        "values" : [ "qa", "staging" ],
-        "since" : 1
-      } ],
-      "digest" : "3546f12a02d4f0800327c29d2c5ea6b21c08f7d4986d5a098b2f8ecb6333c8d3"
-    },
-    "5f461741b15cd18fb550b3577eec20a003f670ae6e9717faefefaab95c6e10ac" : {
-      "version" : 1,
-      "mode" : "WARN",
-      "floor" : "WARN",
-      "exporter" : "otlp",
-      "lockFree" : false,
-      "rules" : [ {
-        "id" : "SPRING_DEBUG",
-        "severity" : "warning",
-        "exact" : [ "debug", "trace" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "spring_set",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGGING_FILE_AT_DEPLOY",
-        "severity" : "warning",
-        "exact" : [ "logging.config", "logback.configurationfile", "log4j2.configurationfile", "log4j.configurationfile", "log4j.configuration" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGGERS_ENDPOINT_EXPOSED",
-        "severity" : "warning",
-        "exact" : [ "management.endpoints.web.exposure.include" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "exposes_loggers",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGS_ENDPOINT_SET",
-        "severity" : "warning",
-        "exact" : [ ],
-        "prefixes" : [ "otel.exporter.otlp.logs." ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "DECLARATIVE_CONFIG",
-        "severity" : "error",
-        "exact" : [ "otel.config.file", "otel.experimental.config.file" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "AGENT_DEBUG",
-        "severity" : "error",
-        "exact" : [ "otel.javaagent.debug" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "otel_true",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "AGENT_V3_PREVIEW",
-        "severity" : "warning",
-        "exact" : [ "otel.instrumentation.common.v3.preview" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "otel_true",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "EXTENSION_POLICY_SET",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ "otel.oteligence." ],
-        "suffixes" : [ ],
-        "except" : [ "otel.oteligence.logs.floor" ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOG_CAPTURE_SETTING",
-        "severity" : "warning",
-        "exact" : [ ],
-        "prefixes" : [ "otel.instrumentation.logback.appender.experimental.capture", "otel.instrumentation.log4j.appender.experimental.capture", "otel.instrumentation.logback.appender.experimental.log.attributes", "otel.instrumentation.log4j.appender.experimental.log.attributes" ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "SQL_SANITIZER_OFF",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ ],
-        "suffixes" : [ ".statement.sanitizer.enabled", ".query.sanitization.enabled" ],
-        "except" : [ ],
-        "test" : "otel_false",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "SQL_PARAMETERS_CAPTURED",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ ],
-        "suffixes" : [ ".experimental.capture.query.parameters" ],
-        "except" : [ ],
-        "test" : "otel_true",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "OVERRIDE_REFUSED",
-        "severity" : "warning",
-        "exact" : [ "otel.experimental.javascript.snippet", "otel.instrumentation.common.db.experimental.sqlcommenter.enabled", "otel.instrumentation.common.default.enabled", "otel.instrumentation.genai.capture.message.content", "otel.instrumentation.http.client.capture.request.headers", "otel.instrumentation.http.client.capture.response.headers", "otel.instrumentation.http.server.capture.request.headers", "otel.instrumentation.http.server.capture.response.headers", "otel.instrumentation.messaging.experimental.capture.headers", "otel.instrumentation.sanitization.url.experimental.sensitive.query.parameters", "otel.java.disabled.resource.providers", "otel.javaagent.enabled", "otel.javaagent.exclude.class.loaders", "otel.javaagent.exclude.classes", "otel.metrics.exporter", "otel.resource.disabled.keys", "otel.sdk.disabled", "otel.traces.exporter", "otel.traces.sampler" ],
-        "prefixes" : [ "otel.exporter.otlp.metrics.", "otel.exporter.otlp.traces.", "otel.exporter.prometheus." ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOG_LEVEL_BELOW_FLOOR",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ "logging.level." ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "below_floor",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "FLOOR_LOWERED",
-        "severity" : "error",
-        "exact" : [ "otel.oteligence.logs.floor" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "below_floor",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGS_EXPORTER_NOT_LOCKED",
-        "severity" : "error",
-        "exact" : [ "otel.logs.exporter" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "not_exporter",
-        "values" : [ ],
-        "since" : 1
-      } ],
-      "digest" : "5f461741b15cd18fb550b3577eec20a003f670ae6e9717faefefaab95c6e10ac"
-    },
-    "6d57be03e144623a795d0400dcd5412b04222ab7359502f1cd3cda147c67c45e" : {
-      "version" : 1,
+    "1ea4ab92c21a54d885d1b6c0929d731c4a8ffbc520570d62b02dcdc00c4fdfa7" : {
+      "version" : 2,
       "mode" : "FAIL_ON_NEW",
       "floor" : "INFO",
       "exporter" : "otlp",
@@ -581,7 +283,7 @@
         "exact" : [ ],
         "prefixes" : [ "otel.oteligence." ],
         "suffixes" : [ ],
-        "except" : [ "otel.oteligence.logs.floor" ],
+        "except" : [ "otel.oteligence.logs.floor", "otel.oteligence.logs.state.interval", "otel.oteligence.logs.window.path", "otel.oteligence.resource.attributes", "otel.oteligence.resource.disabled.keys", "otel.oteligence.drop.health.traces", "otel.oteligence.trace.skipped.libraries" ],
         "test" : "any",
         "values" : [ ],
         "since" : 1
@@ -626,6 +328,26 @@
         "values" : [ ],
         "since" : 1
       }, {
+        "id" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+        "severity" : "error",
+        "exact" : [ "collector.pipelines.logs" ],
+        "prefixes" : [ "collector.pipelines.logs/" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "keeps_processors",
+        "values" : [ "redaction", "transform/pii", "transform/exceptions", "?redaction/identifiers", "!redaction/db", "!transform/truncate" ],
+        "since" : 2
+      }, {
+        "id" : "COLLECTOR_CONFIG_INVALID",
+        "severity" : "warning",
+        "exact" : [ "collector.validate" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 2
+      }, {
         "id" : "LOG_LEVEL_BELOW_FLOOR",
         "severity" : "error",
         "exact" : [ ],
@@ -656,9 +378,904 @@
         "values" : [ ],
         "since" : 1
       } ],
-      "digest" : "6d57be03e144623a795d0400dcd5412b04222ab7359502f1cd3cda147c67c45e"
+      "digest" : "1ea4ab92c21a54d885d1b6c0929d731c4a8ffbc520570d62b02dcdc00c4fdfa7"
     },
-    "ba5e761f504c9d88529b3741abf26e3cd3da10cac121ace9c547a4844a741cae" : {
+    "510f689f873c8ee370839e3b98c341eef6f5a5921afc8f029c7ec82fcb3d17b9" : {
+      "version" : 2,
+      "mode" : "WARN",
+      "floor" : "INFO",
+      "exporter" : null,
+      "lockFree" : true,
+      "rules" : [ {
+        "id" : "SPRING_DEBUG",
+        "severity" : "warning",
+        "exact" : [ "debug", "trace" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "spring_set",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGGING_FILE_AT_DEPLOY",
+        "severity" : "warning",
+        "exact" : [ "logging.config", "logback.configurationfile", "log4j2.configurationfile", "log4j.configurationfile", "log4j.configuration" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGGERS_ENDPOINT_EXPOSED",
+        "severity" : "warning",
+        "exact" : [ "management.endpoints.web.exposure.include" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "exposes_loggers",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGS_ENDPOINT_SET",
+        "severity" : "warning",
+        "exact" : [ ],
+        "prefixes" : [ "otel.exporter.otlp.logs." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "DECLARATIVE_CONFIG",
+        "severity" : "error",
+        "exact" : [ "otel.config.file", "otel.experimental.config.file" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "AGENT_DEBUG",
+        "severity" : "error",
+        "exact" : [ "otel.javaagent.debug" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "AGENT_V3_PREVIEW",
+        "severity" : "warning",
+        "exact" : [ "otel.instrumentation.common.v3.preview" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "EXTENSION_POLICY_SET",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ "otel.oteligence." ],
+        "suffixes" : [ ],
+        "except" : [ "otel.oteligence.logs.floor", "otel.oteligence.logs.state.interval", "otel.oteligence.logs.window.path", "otel.oteligence.resource.attributes", "otel.oteligence.resource.disabled.keys", "otel.oteligence.drop.health.traces", "otel.oteligence.trace.skipped.libraries" ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOG_CAPTURE_SETTING",
+        "severity" : "warning",
+        "exact" : [ ],
+        "prefixes" : [ "otel.instrumentation.logback.appender.experimental.capture", "otel.instrumentation.log4j.appender.experimental.capture", "otel.instrumentation.logback.appender.experimental.log.attributes", "otel.instrumentation.log4j.appender.experimental.log.attributes" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "SQL_SANITIZER_OFF",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ ],
+        "suffixes" : [ ".statement.sanitizer.enabled", ".query.sanitization.enabled" ],
+        "except" : [ ],
+        "test" : "otel_false",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "SQL_PARAMETERS_CAPTURED",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ ],
+        "suffixes" : [ ".experimental.capture.query.parameters" ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "OVERRIDE_REFUSED",
+        "severity" : "warning",
+        "exact" : [ "otel.experimental.javascript.snippet", "otel.instrumentation.common.db.experimental.sqlcommenter.enabled", "otel.instrumentation.common.default.enabled", "otel.instrumentation.genai.capture.message.content", "otel.instrumentation.http.client.capture.request.headers", "otel.instrumentation.http.client.capture.response.headers", "otel.instrumentation.http.server.capture.request.headers", "otel.instrumentation.http.server.capture.response.headers", "otel.instrumentation.messaging.experimental.capture.headers", "otel.instrumentation.sanitization.url.experimental.sensitive.query.parameters", "otel.java.disabled.resource.providers", "otel.javaagent.enabled", "otel.javaagent.exclude.class.loaders", "otel.javaagent.exclude.classes", "otel.metrics.exporter", "otel.resource.disabled.keys", "otel.sdk.disabled", "otel.traces.exporter", "otel.traces.sampler" ],
+        "prefixes" : [ "otel.exporter.otlp.metrics.", "otel.exporter.otlp.traces.", "otel.exporter.prometheus." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+        "severity" : "error",
+        "exact" : [ "collector.pipelines.logs" ],
+        "prefixes" : [ "collector.pipelines.logs/" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "keeps_processors",
+        "values" : [ "redaction", "transform/pii", "transform/exceptions", "?redaction/identifiers", "!redaction/db", "!transform/truncate" ],
+        "since" : 2
+      }, {
+        "id" : "COLLECTOR_CONFIG_INVALID",
+        "severity" : "warning",
+        "exact" : [ "collector.validate" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 2
+      }, {
+        "id" : "LOG_LEVEL_BELOW_FLOOR",
+        "severity" : "warning",
+        "exact" : [ ],
+        "prefixes" : [ "logging.level." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "below_floor",
+        "values" : [ ],
+        "since" : 1
+      } ],
+      "digest" : "510f689f873c8ee370839e3b98c341eef6f5a5921afc8f029c7ec82fcb3d17b9"
+    },
+    "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24" : {
+      "version" : 2,
+      "mode" : "WARN",
+      "floor" : "INFO",
+      "exporter" : "otlp",
+      "lockFree" : false,
+      "rules" : [ {
+        "id" : "SPRING_DEBUG",
+        "severity" : "warning",
+        "exact" : [ "debug", "trace" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "spring_set",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGGING_FILE_AT_DEPLOY",
+        "severity" : "warning",
+        "exact" : [ "logging.config", "logback.configurationfile", "log4j2.configurationfile", "log4j.configurationfile", "log4j.configuration" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGGERS_ENDPOINT_EXPOSED",
+        "severity" : "warning",
+        "exact" : [ "management.endpoints.web.exposure.include" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "exposes_loggers",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGS_ENDPOINT_SET",
+        "severity" : "warning",
+        "exact" : [ ],
+        "prefixes" : [ "otel.exporter.otlp.logs." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "DECLARATIVE_CONFIG",
+        "severity" : "error",
+        "exact" : [ "otel.config.file", "otel.experimental.config.file" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "AGENT_DEBUG",
+        "severity" : "error",
+        "exact" : [ "otel.javaagent.debug" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "AGENT_V3_PREVIEW",
+        "severity" : "warning",
+        "exact" : [ "otel.instrumentation.common.v3.preview" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "EXTENSION_POLICY_SET",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ "otel.oteligence." ],
+        "suffixes" : [ ],
+        "except" : [ "otel.oteligence.logs.floor", "otel.oteligence.logs.state.interval", "otel.oteligence.logs.window.path", "otel.oteligence.resource.attributes", "otel.oteligence.resource.disabled.keys", "otel.oteligence.drop.health.traces", "otel.oteligence.trace.skipped.libraries" ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOG_CAPTURE_SETTING",
+        "severity" : "warning",
+        "exact" : [ ],
+        "prefixes" : [ "otel.instrumentation.logback.appender.experimental.capture", "otel.instrumentation.log4j.appender.experimental.capture", "otel.instrumentation.logback.appender.experimental.log.attributes", "otel.instrumentation.log4j.appender.experimental.log.attributes" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "SQL_SANITIZER_OFF",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ ],
+        "suffixes" : [ ".statement.sanitizer.enabled", ".query.sanitization.enabled" ],
+        "except" : [ ],
+        "test" : "otel_false",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "SQL_PARAMETERS_CAPTURED",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ ],
+        "suffixes" : [ ".experimental.capture.query.parameters" ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "OVERRIDE_REFUSED",
+        "severity" : "warning",
+        "exact" : [ "otel.experimental.javascript.snippet", "otel.instrumentation.common.db.experimental.sqlcommenter.enabled", "otel.instrumentation.common.default.enabled", "otel.instrumentation.genai.capture.message.content", "otel.instrumentation.http.client.capture.request.headers", "otel.instrumentation.http.client.capture.response.headers", "otel.instrumentation.http.server.capture.request.headers", "otel.instrumentation.http.server.capture.response.headers", "otel.instrumentation.messaging.experimental.capture.headers", "otel.instrumentation.sanitization.url.experimental.sensitive.query.parameters", "otel.java.disabled.resource.providers", "otel.javaagent.enabled", "otel.javaagent.exclude.class.loaders", "otel.javaagent.exclude.classes", "otel.metrics.exporter", "otel.resource.disabled.keys", "otel.sdk.disabled", "otel.traces.exporter", "otel.traces.sampler" ],
+        "prefixes" : [ "otel.exporter.otlp.metrics.", "otel.exporter.otlp.traces.", "otel.exporter.prometheus." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+        "severity" : "error",
+        "exact" : [ "collector.pipelines.logs" ],
+        "prefixes" : [ "collector.pipelines.logs/" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "keeps_processors",
+        "values" : [ "redaction", "transform/pii", "transform/exceptions", "?redaction/identifiers", "!redaction/db", "!transform/truncate" ],
+        "since" : 2
+      }, {
+        "id" : "COLLECTOR_CONFIG_INVALID",
+        "severity" : "warning",
+        "exact" : [ "collector.validate" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 2
+      }, {
+        "id" : "LOG_LEVEL_BELOW_FLOOR",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ "logging.level." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "below_floor",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "FLOOR_LOWERED",
+        "severity" : "error",
+        "exact" : [ "otel.oteligence.logs.floor" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "below_floor",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGS_EXPORTER_NOT_LOCKED",
+        "severity" : "error",
+        "exact" : [ "otel.logs.exporter" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "not_exporter",
+        "values" : [ ],
+        "since" : 1
+      } ],
+      "digest" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24"
+    },
+    "766d98cb1051a0d96f42ae6f51ff403210578bb3a224a86673f825740acee2db" : {
+      "version" : 2,
+      "mode" : "WARN",
+      "floor" : "INFO",
+      "exporter" : "otlp",
+      "lockFree" : false,
+      "rules" : [ {
+        "id" : "SPRING_DEBUG",
+        "severity" : "warning",
+        "exact" : [ "debug", "trace" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "spring_set",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGGING_FILE_AT_DEPLOY",
+        "severity" : "warning",
+        "exact" : [ "logging.config", "logback.configurationfile", "log4j2.configurationfile", "log4j.configurationfile", "log4j.configuration" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGGERS_ENDPOINT_EXPOSED",
+        "severity" : "warning",
+        "exact" : [ "management.endpoints.web.exposure.include" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "exposes_loggers",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGS_ENDPOINT_SET",
+        "severity" : "warning",
+        "exact" : [ ],
+        "prefixes" : [ "otel.exporter.otlp.logs." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "DECLARATIVE_CONFIG",
+        "severity" : "error",
+        "exact" : [ "otel.config.file", "otel.experimental.config.file" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "AGENT_DEBUG",
+        "severity" : "error",
+        "exact" : [ "otel.javaagent.debug" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "AGENT_V3_PREVIEW",
+        "severity" : "warning",
+        "exact" : [ "otel.instrumentation.common.v3.preview" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "EXTENSION_POLICY_SET",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ "otel.oteligence." ],
+        "suffixes" : [ ],
+        "except" : [ "otel.oteligence.logs.floor", "otel.oteligence.logs.state.interval", "otel.oteligence.logs.window.path", "otel.oteligence.resource.attributes", "otel.oteligence.resource.disabled.keys", "otel.oteligence.drop.health.traces", "otel.oteligence.trace.skipped.libraries" ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOG_CAPTURE_SETTING",
+        "severity" : "warning",
+        "exact" : [ ],
+        "prefixes" : [ "otel.instrumentation.logback.appender.experimental.capture", "otel.instrumentation.log4j.appender.experimental.capture", "otel.instrumentation.logback.appender.experimental.log.attributes", "otel.instrumentation.log4j.appender.experimental.log.attributes" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "SQL_SANITIZER_OFF",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ ],
+        "suffixes" : [ ".statement.sanitizer.enabled", ".query.sanitization.enabled" ],
+        "except" : [ ],
+        "test" : "otel_false",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "SQL_PARAMETERS_CAPTURED",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ ],
+        "suffixes" : [ ".experimental.capture.query.parameters" ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "OVERRIDE_REFUSED",
+        "severity" : "warning",
+        "exact" : [ "otel.experimental.javascript.snippet", "otel.instrumentation.common.db.experimental.sqlcommenter.enabled", "otel.instrumentation.common.default.enabled", "otel.instrumentation.genai.capture.message.content", "otel.instrumentation.http.client.capture.request.headers", "otel.instrumentation.http.client.capture.response.headers", "otel.instrumentation.http.server.capture.request.headers", "otel.instrumentation.http.server.capture.response.headers", "otel.instrumentation.messaging.experimental.capture.headers", "otel.instrumentation.sanitization.url.experimental.sensitive.query.parameters", "otel.java.disabled.resource.providers", "otel.javaagent.enabled", "otel.javaagent.exclude.class.loaders", "otel.javaagent.exclude.classes", "otel.metrics.exporter", "otel.resource.disabled.keys", "otel.sdk.disabled", "otel.traces.exporter", "otel.traces.sampler" ],
+        "prefixes" : [ "otel.exporter.otlp.metrics.", "otel.exporter.otlp.traces.", "otel.exporter.prometheus." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+        "severity" : "error",
+        "exact" : [ "collector.pipelines.logs" ],
+        "prefixes" : [ "collector.pipelines.logs/" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "keeps_processors",
+        "values" : [ "redaction", "transform/pii", "transform/exceptions", "?redaction/identifiers", "!redaction/db", "!transform/truncate" ],
+        "since" : 2
+      }, {
+        "id" : "COLLECTOR_CONFIG_INVALID",
+        "severity" : "warning",
+        "exact" : [ "collector.validate" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 2
+      }, {
+        "id" : "LOG_LEVEL_BELOW_FLOOR",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ "logging.level." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "below_floor",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "FLOOR_LOWERED",
+        "severity" : "error",
+        "exact" : [ "otel.oteligence.logs.floor" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "below_floor",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGS_EXPORTER_NOT_LOCKED",
+        "severity" : "error",
+        "exact" : [ "otel.logs.exporter" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "not_exporter",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "PROFILE_BELOW_FLOOR",
+        "severity" : "error",
+        "exact" : [ "spring.profiles.active", "spring.profiles.include" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "profile_below_floor",
+        "values" : [ "qa", "staging" ],
+        "since" : 1
+      } ],
+      "digest" : "766d98cb1051a0d96f42ae6f51ff403210578bb3a224a86673f825740acee2db"
+    },
+    "799be90304cfbbfcf40848de949d3aeb00db705765378de00e50f86064ff0e40" : {
+      "version" : 2,
+      "mode" : "WARN",
+      "floor" : "WARN",
+      "exporter" : "otlp",
+      "lockFree" : false,
+      "rules" : [ {
+        "id" : "SPRING_DEBUG",
+        "severity" : "warning",
+        "exact" : [ "debug", "trace" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "spring_set",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGGING_FILE_AT_DEPLOY",
+        "severity" : "warning",
+        "exact" : [ "logging.config", "logback.configurationfile", "log4j2.configurationfile", "log4j.configurationfile", "log4j.configuration" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGGERS_ENDPOINT_EXPOSED",
+        "severity" : "warning",
+        "exact" : [ "management.endpoints.web.exposure.include" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "exposes_loggers",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGS_ENDPOINT_SET",
+        "severity" : "warning",
+        "exact" : [ ],
+        "prefixes" : [ "otel.exporter.otlp.logs." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "DECLARATIVE_CONFIG",
+        "severity" : "error",
+        "exact" : [ "otel.config.file", "otel.experimental.config.file" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "AGENT_DEBUG",
+        "severity" : "error",
+        "exact" : [ "otel.javaagent.debug" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "AGENT_V3_PREVIEW",
+        "severity" : "warning",
+        "exact" : [ "otel.instrumentation.common.v3.preview" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "EXTENSION_POLICY_SET",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ "otel.oteligence." ],
+        "suffixes" : [ ],
+        "except" : [ "otel.oteligence.logs.floor", "otel.oteligence.logs.state.interval", "otel.oteligence.logs.window.path", "otel.oteligence.resource.attributes", "otel.oteligence.resource.disabled.keys", "otel.oteligence.drop.health.traces", "otel.oteligence.trace.skipped.libraries" ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOG_CAPTURE_SETTING",
+        "severity" : "warning",
+        "exact" : [ ],
+        "prefixes" : [ "otel.instrumentation.logback.appender.experimental.capture", "otel.instrumentation.log4j.appender.experimental.capture", "otel.instrumentation.logback.appender.experimental.log.attributes", "otel.instrumentation.log4j.appender.experimental.log.attributes" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "SQL_SANITIZER_OFF",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ ],
+        "suffixes" : [ ".statement.sanitizer.enabled", ".query.sanitization.enabled" ],
+        "except" : [ ],
+        "test" : "otel_false",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "SQL_PARAMETERS_CAPTURED",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ ],
+        "suffixes" : [ ".experimental.capture.query.parameters" ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "OVERRIDE_REFUSED",
+        "severity" : "warning",
+        "exact" : [ "otel.experimental.javascript.snippet", "otel.instrumentation.common.db.experimental.sqlcommenter.enabled", "otel.instrumentation.common.default.enabled", "otel.instrumentation.genai.capture.message.content", "otel.instrumentation.http.client.capture.request.headers", "otel.instrumentation.http.client.capture.response.headers", "otel.instrumentation.http.server.capture.request.headers", "otel.instrumentation.http.server.capture.response.headers", "otel.instrumentation.messaging.experimental.capture.headers", "otel.instrumentation.sanitization.url.experimental.sensitive.query.parameters", "otel.java.disabled.resource.providers", "otel.javaagent.enabled", "otel.javaagent.exclude.class.loaders", "otel.javaagent.exclude.classes", "otel.metrics.exporter", "otel.resource.disabled.keys", "otel.sdk.disabled", "otel.traces.exporter", "otel.traces.sampler" ],
+        "prefixes" : [ "otel.exporter.otlp.metrics.", "otel.exporter.otlp.traces.", "otel.exporter.prometheus." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+        "severity" : "error",
+        "exact" : [ "collector.pipelines.logs" ],
+        "prefixes" : [ "collector.pipelines.logs/" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "keeps_processors",
+        "values" : [ "redaction", "transform/pii", "transform/exceptions", "?redaction/identifiers", "!redaction/db", "!transform/truncate" ],
+        "since" : 2
+      }, {
+        "id" : "COLLECTOR_CONFIG_INVALID",
+        "severity" : "warning",
+        "exact" : [ "collector.validate" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 2
+      }, {
+        "id" : "LOG_LEVEL_BELOW_FLOOR",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ "logging.level." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "below_floor",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "FLOOR_LOWERED",
+        "severity" : "error",
+        "exact" : [ "otel.oteligence.logs.floor" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "below_floor",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGS_EXPORTER_NOT_LOCKED",
+        "severity" : "error",
+        "exact" : [ "otel.logs.exporter" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "not_exporter",
+        "values" : [ ],
+        "since" : 1
+      } ],
+      "digest" : "799be90304cfbbfcf40848de949d3aeb00db705765378de00e50f86064ff0e40"
+    },
+    "7a7fa791ceab6131cd88767829a47be62359b52fa67e4c1c492189f66ea2918e" : {
+      "version" : 2,
+      "mode" : "WARN",
+      "floor" : "INFO",
+      "exporter" : "otlp",
+      "lockFree" : false,
+      "rules" : [ {
+        "id" : "SPRING_DEBUG",
+        "severity" : "warning",
+        "exact" : [ "debug", "trace" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "spring_set",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGGING_FILE_AT_DEPLOY",
+        "severity" : "warning",
+        "exact" : [ "logging.config", "logback.configurationfile", "log4j2.configurationfile", "log4j.configurationfile", "log4j.configuration" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGGERS_ENDPOINT_EXPOSED",
+        "severity" : "warning",
+        "exact" : [ "management.endpoints.web.exposure.include" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "exposes_loggers",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGS_ENDPOINT_SET",
+        "severity" : "warning",
+        "exact" : [ ],
+        "prefixes" : [ "otel.exporter.otlp.logs." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "DECLARATIVE_CONFIG",
+        "severity" : "error",
+        "exact" : [ "otel.config.file", "otel.experimental.config.file" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "AGENT_DEBUG",
+        "severity" : "error",
+        "exact" : [ "otel.javaagent.debug" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "AGENT_V3_PREVIEW",
+        "severity" : "warning",
+        "exact" : [ "otel.instrumentation.common.v3.preview" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "EXTENSION_POLICY_SET",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ "otel.oteligence." ],
+        "suffixes" : [ ],
+        "except" : [ "otel.oteligence.logs.floor", "otel.oteligence.logs.state.interval", "otel.oteligence.logs.window.path", "otel.oteligence.resource.attributes", "otel.oteligence.resource.disabled.keys", "otel.oteligence.drop.health.traces", "otel.oteligence.trace.skipped.libraries" ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOG_CAPTURE_SETTING",
+        "severity" : "warning",
+        "exact" : [ ],
+        "prefixes" : [ "otel.instrumentation.logback.appender.experimental.capture", "otel.instrumentation.log4j.appender.experimental.capture", "otel.instrumentation.logback.appender.experimental.log.attributes", "otel.instrumentation.log4j.appender.experimental.log.attributes" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "SQL_SANITIZER_OFF",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ ],
+        "suffixes" : [ ".statement.sanitizer.enabled", ".query.sanitization.enabled" ],
+        "except" : [ ],
+        "test" : "otel_false",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "SQL_PARAMETERS_CAPTURED",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ ],
+        "suffixes" : [ ".experimental.capture.query.parameters" ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "OVERRIDE_REFUSED",
+        "severity" : "warning",
+        "exact" : [ "otel.experimental.javascript.snippet", "otel.instrumentation.common.db.experimental.sqlcommenter.enabled", "otel.instrumentation.common.default.enabled", "otel.instrumentation.genai.capture.message.content", "otel.instrumentation.http.client.capture.request.headers", "otel.instrumentation.http.client.capture.response.headers", "otel.instrumentation.http.server.capture.request.headers", "otel.instrumentation.http.server.capture.response.headers", "otel.instrumentation.messaging.experimental.capture.headers", "otel.instrumentation.sanitization.url.experimental.sensitive.query.parameters", "otel.java.disabled.resource.providers", "otel.javaagent.enabled", "otel.javaagent.exclude.class.loaders", "otel.javaagent.exclude.classes", "otel.metrics.exporter", "otel.resource.disabled.keys", "otel.sdk.disabled", "otel.traces.exporter", "otel.traces.sampler" ],
+        "prefixes" : [ "otel.exporter.otlp.metrics.", "otel.exporter.otlp.traces.", "otel.exporter.prometheus." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+        "severity" : "error",
+        "exact" : [ "collector.pipelines.logs" ],
+        "prefixes" : [ "collector.pipelines.logs/" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "keeps_processors",
+        "values" : [ "redaction", "transform/pii", "transform/exceptions", "?redaction/identifiers", "!redaction/db", "!transform/truncate" ],
+        "since" : 2
+      }, {
+        "id" : "COLLECTOR_CONFIG_INVALID",
+        "severity" : "warning",
+        "exact" : [ "collector.validate" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 2
+      }, {
+        "id" : "LOG_LEVEL_BELOW_FLOOR",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ "logging.level." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "below_floor",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "FLOOR_LOWERED",
+        "severity" : "error",
+        "exact" : [ "otel.oteligence.logs.floor" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "below_floor",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGS_EXPORTER_NOT_LOCKED",
+        "severity" : "error",
+        "exact" : [ "otel.logs.exporter" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "not_exporter",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "PROFILE_BELOW_FLOOR",
+        "severity" : "error",
+        "exact" : [ "spring.profiles.active", "spring.profiles.include" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "profile_below_floor",
+        "values" : [ "qa" ],
+        "since" : 1
+      } ],
+      "digest" : "7a7fa791ceab6131cd88767829a47be62359b52fa67e4c1c492189f66ea2918e"
+    },
+    "932d31ce298789f219265b073c799464a3afee517553757fb90fb8d36105f84d" : {
       "version" : 1,
       "mode" : "WARN",
       "floor" : "INFO",
@@ -740,7 +1357,7 @@
         "exact" : [ ],
         "prefixes" : [ "otel.oteligence." ],
         "suffixes" : [ ],
-        "except" : [ "otel.oteligence.logs.floor" ],
+        "except" : [ "otel.oteligence.logs.floor", "otel.oteligence.logs.state.interval", "otel.oteligence.logs.window.path", "otel.oteligence.resource.attributes", "otel.oteligence.resource.disabled.keys", "otel.oteligence.drop.health.traces", "otel.oteligence.trace.skipped.libraries" ],
         "test" : "any",
         "values" : [ ],
         "since" : 1
@@ -795,517 +1412,10 @@
         "values" : [ ],
         "since" : 1
       } ],
-      "digest" : "ba5e761f504c9d88529b3741abf26e3cd3da10cac121ace9c547a4844a741cae"
+      "digest" : "932d31ce298789f219265b073c799464a3afee517553757fb90fb8d36105f84d"
     },
-    "bfd13a413ce8b61023d2f91869de1cec41f8a8ba527fb96b40e530c6e0d58a7a" : {
-      "version" : 1,
-      "mode" : "WARN",
-      "floor" : "INFO",
-      "exporter" : "otlp",
-      "lockFree" : false,
-      "rules" : [ {
-        "id" : "SPRING_DEBUG",
-        "severity" : "warning",
-        "exact" : [ "debug", "trace" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "spring_set",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGGING_FILE_AT_DEPLOY",
-        "severity" : "warning",
-        "exact" : [ "logging.config", "logback.configurationfile", "log4j2.configurationfile", "log4j.configurationfile", "log4j.configuration" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGGERS_ENDPOINT_EXPOSED",
-        "severity" : "warning",
-        "exact" : [ "management.endpoints.web.exposure.include" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "exposes_loggers",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGS_ENDPOINT_SET",
-        "severity" : "warning",
-        "exact" : [ ],
-        "prefixes" : [ "otel.exporter.otlp.logs." ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "DECLARATIVE_CONFIG",
-        "severity" : "error",
-        "exact" : [ "otel.config.file", "otel.experimental.config.file" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "AGENT_DEBUG",
-        "severity" : "error",
-        "exact" : [ "otel.javaagent.debug" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "otel_true",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "AGENT_V3_PREVIEW",
-        "severity" : "warning",
-        "exact" : [ "otel.instrumentation.common.v3.preview" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "otel_true",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "EXTENSION_POLICY_SET",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ "otel.oteligence." ],
-        "suffixes" : [ ],
-        "except" : [ "otel.oteligence.logs.floor" ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOG_CAPTURE_SETTING",
-        "severity" : "warning",
-        "exact" : [ ],
-        "prefixes" : [ "otel.instrumentation.logback.appender.experimental.capture", "otel.instrumentation.log4j.appender.experimental.capture", "otel.instrumentation.logback.appender.experimental.log.attributes", "otel.instrumentation.log4j.appender.experimental.log.attributes" ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "SQL_SANITIZER_OFF",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ ],
-        "suffixes" : [ ".statement.sanitizer.enabled", ".query.sanitization.enabled" ],
-        "except" : [ ],
-        "test" : "otel_false",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "SQL_PARAMETERS_CAPTURED",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ ],
-        "suffixes" : [ ".experimental.capture.query.parameters" ],
-        "except" : [ ],
-        "test" : "otel_true",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "OVERRIDE_REFUSED",
-        "severity" : "warning",
-        "exact" : [ "otel.experimental.javascript.snippet", "otel.instrumentation.common.db.experimental.sqlcommenter.enabled", "otel.instrumentation.common.default.enabled", "otel.instrumentation.genai.capture.message.content", "otel.instrumentation.http.client.capture.request.headers", "otel.instrumentation.http.client.capture.response.headers", "otel.instrumentation.http.server.capture.request.headers", "otel.instrumentation.http.server.capture.response.headers", "otel.instrumentation.messaging.experimental.capture.headers", "otel.instrumentation.sanitization.url.experimental.sensitive.query.parameters", "otel.java.disabled.resource.providers", "otel.javaagent.enabled", "otel.javaagent.exclude.class.loaders", "otel.javaagent.exclude.classes", "otel.metrics.exporter", "otel.resource.disabled.keys", "otel.sdk.disabled", "otel.traces.exporter", "otel.traces.sampler" ],
-        "prefixes" : [ "otel.exporter.otlp.metrics.", "otel.exporter.otlp.traces.", "otel.exporter.prometheus." ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOG_LEVEL_BELOW_FLOOR",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ "logging.level." ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "below_floor",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "FLOOR_LOWERED",
-        "severity" : "error",
-        "exact" : [ "otel.oteligence.logs.floor" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "below_floor",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGS_EXPORTER_NOT_LOCKED",
-        "severity" : "error",
-        "exact" : [ "otel.logs.exporter" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "not_exporter",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "PACKAGED_LEVEL_VARIABLE",
-        "severity" : "error",
-        "exact" : [ "log.level", "app.log.level", "app.loglevel" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "below_floor",
-        "values" : [ ],
-        "since" : 1
-      } ],
-      "digest" : "bfd13a413ce8b61023d2f91869de1cec41f8a8ba527fb96b40e530c6e0d58a7a"
-    },
-    "c02fb422e512a5ee9beac686d07bcb6d9180b269b9d7b0eee43af9008ea2ebaa" : {
-      "version" : 1,
-      "mode" : "WARN",
-      "floor" : "INFO",
-      "exporter" : "otlp",
-      "lockFree" : false,
-      "rules" : [ {
-        "id" : "SPRING_DEBUG",
-        "severity" : "warning",
-        "exact" : [ "debug", "trace" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "spring_set",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGGING_FILE_AT_DEPLOY",
-        "severity" : "warning",
-        "exact" : [ "logging.config", "logback.configurationfile", "log4j2.configurationfile", "log4j.configurationfile", "log4j.configuration" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGGERS_ENDPOINT_EXPOSED",
-        "severity" : "warning",
-        "exact" : [ "management.endpoints.web.exposure.include" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "exposes_loggers",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGS_ENDPOINT_SET",
-        "severity" : "warning",
-        "exact" : [ ],
-        "prefixes" : [ "otel.exporter.otlp.logs." ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "DECLARATIVE_CONFIG",
-        "severity" : "error",
-        "exact" : [ "otel.config.file", "otel.experimental.config.file" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "AGENT_DEBUG",
-        "severity" : "error",
-        "exact" : [ "otel.javaagent.debug" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "otel_true",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "AGENT_V3_PREVIEW",
-        "severity" : "warning",
-        "exact" : [ "otel.instrumentation.common.v3.preview" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "otel_true",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "EXTENSION_POLICY_SET",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ "otel.oteligence." ],
-        "suffixes" : [ ],
-        "except" : [ "otel.oteligence.logs.floor" ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOG_CAPTURE_SETTING",
-        "severity" : "warning",
-        "exact" : [ ],
-        "prefixes" : [ "otel.instrumentation.logback.appender.experimental.capture", "otel.instrumentation.log4j.appender.experimental.capture", "otel.instrumentation.logback.appender.experimental.log.attributes", "otel.instrumentation.log4j.appender.experimental.log.attributes" ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "SQL_SANITIZER_OFF",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ ],
-        "suffixes" : [ ".statement.sanitizer.enabled", ".query.sanitization.enabled" ],
-        "except" : [ ],
-        "test" : "otel_false",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "SQL_PARAMETERS_CAPTURED",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ ],
-        "suffixes" : [ ".experimental.capture.query.parameters" ],
-        "except" : [ ],
-        "test" : "otel_true",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "OVERRIDE_REFUSED",
-        "severity" : "warning",
-        "exact" : [ "otel.experimental.javascript.snippet", "otel.instrumentation.common.db.experimental.sqlcommenter.enabled", "otel.instrumentation.common.default.enabled", "otel.instrumentation.genai.capture.message.content", "otel.instrumentation.http.client.capture.request.headers", "otel.instrumentation.http.client.capture.response.headers", "otel.instrumentation.http.server.capture.request.headers", "otel.instrumentation.http.server.capture.response.headers", "otel.instrumentation.messaging.experimental.capture.headers", "otel.instrumentation.sanitization.url.experimental.sensitive.query.parameters", "otel.java.disabled.resource.providers", "otel.javaagent.enabled", "otel.javaagent.exclude.class.loaders", "otel.javaagent.exclude.classes", "otel.metrics.exporter", "otel.resource.disabled.keys", "otel.sdk.disabled", "otel.traces.exporter", "otel.traces.sampler" ],
-        "prefixes" : [ "otel.exporter.otlp.metrics.", "otel.exporter.otlp.traces.", "otel.exporter.prometheus." ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOG_LEVEL_BELOW_FLOOR",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ "logging.level." ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "below_floor",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "FLOOR_LOWERED",
-        "severity" : "error",
-        "exact" : [ "otel.oteligence.logs.floor" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "below_floor",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGS_EXPORTER_NOT_LOCKED",
-        "severity" : "error",
-        "exact" : [ "otel.logs.exporter" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "not_exporter",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "PACKAGED_LEVEL_VARIABLE",
-        "severity" : "error",
-        "exact" : [ "log.level" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "below_floor",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "PROFILE_BELOW_FLOOR",
-        "severity" : "error",
-        "exact" : [ "spring.profiles.active", "spring.profiles.include" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "profile_below_floor",
-        "values" : [ "dev" ],
-        "since" : 1
-      } ],
-      "digest" : "c02fb422e512a5ee9beac686d07bcb6d9180b269b9d7b0eee43af9008ea2ebaa"
-    },
-    "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8" : {
-      "version" : 1,
-      "mode" : "WARN",
-      "floor" : "INFO",
-      "exporter" : "otlp",
-      "lockFree" : false,
-      "rules" : [ {
-        "id" : "SPRING_DEBUG",
-        "severity" : "warning",
-        "exact" : [ "debug", "trace" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "spring_set",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGGING_FILE_AT_DEPLOY",
-        "severity" : "warning",
-        "exact" : [ "logging.config", "logback.configurationfile", "log4j2.configurationfile", "log4j.configurationfile", "log4j.configuration" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGGERS_ENDPOINT_EXPOSED",
-        "severity" : "warning",
-        "exact" : [ "management.endpoints.web.exposure.include" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "exposes_loggers",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGS_ENDPOINT_SET",
-        "severity" : "warning",
-        "exact" : [ ],
-        "prefixes" : [ "otel.exporter.otlp.logs." ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "DECLARATIVE_CONFIG",
-        "severity" : "error",
-        "exact" : [ "otel.config.file", "otel.experimental.config.file" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "AGENT_DEBUG",
-        "severity" : "error",
-        "exact" : [ "otel.javaagent.debug" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "otel_true",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "AGENT_V3_PREVIEW",
-        "severity" : "warning",
-        "exact" : [ "otel.instrumentation.common.v3.preview" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "otel_true",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "EXTENSION_POLICY_SET",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ "otel.oteligence." ],
-        "suffixes" : [ ],
-        "except" : [ "otel.oteligence.logs.floor" ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOG_CAPTURE_SETTING",
-        "severity" : "warning",
-        "exact" : [ ],
-        "prefixes" : [ "otel.instrumentation.logback.appender.experimental.capture", "otel.instrumentation.log4j.appender.experimental.capture", "otel.instrumentation.logback.appender.experimental.log.attributes", "otel.instrumentation.log4j.appender.experimental.log.attributes" ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "SQL_SANITIZER_OFF",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ ],
-        "suffixes" : [ ".statement.sanitizer.enabled", ".query.sanitization.enabled" ],
-        "except" : [ ],
-        "test" : "otel_false",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "SQL_PARAMETERS_CAPTURED",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ ],
-        "suffixes" : [ ".experimental.capture.query.parameters" ],
-        "except" : [ ],
-        "test" : "otel_true",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "OVERRIDE_REFUSED",
-        "severity" : "warning",
-        "exact" : [ "otel.experimental.javascript.snippet", "otel.instrumentation.common.db.experimental.sqlcommenter.enabled", "otel.instrumentation.common.default.enabled", "otel.instrumentation.genai.capture.message.content", "otel.instrumentation.http.client.capture.request.headers", "otel.instrumentation.http.client.capture.response.headers", "otel.instrumentation.http.server.capture.request.headers", "otel.instrumentation.http.server.capture.response.headers", "otel.instrumentation.messaging.experimental.capture.headers", "otel.instrumentation.sanitization.url.experimental.sensitive.query.parameters", "otel.java.disabled.resource.providers", "otel.javaagent.enabled", "otel.javaagent.exclude.class.loaders", "otel.javaagent.exclude.classes", "otel.metrics.exporter", "otel.resource.disabled.keys", "otel.sdk.disabled", "otel.traces.exporter", "otel.traces.sampler" ],
-        "prefixes" : [ "otel.exporter.otlp.metrics.", "otel.exporter.otlp.traces.", "otel.exporter.prometheus." ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "any",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOG_LEVEL_BELOW_FLOOR",
-        "severity" : "error",
-        "exact" : [ ],
-        "prefixes" : [ "logging.level." ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "below_floor",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "FLOOR_LOWERED",
-        "severity" : "error",
-        "exact" : [ "otel.oteligence.logs.floor" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "below_floor",
-        "values" : [ ],
-        "since" : 1
-      }, {
-        "id" : "LOGS_EXPORTER_NOT_LOCKED",
-        "severity" : "error",
-        "exact" : [ "otel.logs.exporter" ],
-        "prefixes" : [ ],
-        "suffixes" : [ ],
-        "except" : [ ],
-        "test" : "not_exporter",
-        "values" : [ ],
-        "since" : 1
-      } ],
-      "digest" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8"
-    },
-    "dfeadb36c5328445630c6e92446bb5bdd2928dfebd7bef021c45ee26211b2840" : {
-      "version" : 1,
+    "aa88b61ec2fbccdacb55f7ae8b2ff63a09240b89f314e4a02e011859ac7b5bca" : {
+      "version" : 2,
       "mode" : "WARN",
       "floor" : "INFO",
       "exporter" : "none",
@@ -1386,7 +1496,7 @@
         "exact" : [ ],
         "prefixes" : [ "otel.oteligence." ],
         "suffixes" : [ ],
-        "except" : [ "otel.oteligence.logs.floor" ],
+        "except" : [ "otel.oteligence.logs.floor", "otel.oteligence.logs.state.interval", "otel.oteligence.logs.window.path", "otel.oteligence.resource.attributes", "otel.oteligence.resource.disabled.keys", "otel.oteligence.drop.health.traces", "otel.oteligence.trace.skipped.libraries" ],
         "test" : "any",
         "values" : [ ],
         "since" : 1
@@ -1431,6 +1541,26 @@
         "values" : [ ],
         "since" : 1
       }, {
+        "id" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+        "severity" : "error",
+        "exact" : [ "collector.pipelines.logs" ],
+        "prefixes" : [ "collector.pipelines.logs/" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "keeps_processors",
+        "values" : [ "redaction", "transform/pii", "transform/exceptions", "?redaction/identifiers", "!redaction/db", "!transform/truncate" ],
+        "since" : 2
+      }, {
+        "id" : "COLLECTOR_CONFIG_INVALID",
+        "severity" : "warning",
+        "exact" : [ "collector.validate" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 2
+      }, {
         "id" : "LOG_LEVEL_BELOW_FLOOR",
         "severity" : "error",
         "exact" : [ ],
@@ -1461,10 +1591,10 @@
         "values" : [ ],
         "since" : 1
       } ],
-      "digest" : "dfeadb36c5328445630c6e92446bb5bdd2928dfebd7bef021c45ee26211b2840"
+      "digest" : "aa88b61ec2fbccdacb55f7ae8b2ff63a09240b89f314e4a02e011859ac7b5bca"
     },
-    "e0bb0d0d33be5af372f7fac5287c0c7fb236736d3fd0c972ea0ee01e4bb04e37" : {
-      "version" : 1,
+    "adbf875417156a794e9c3e21b7904ccadcdcea72c83649db2472e7338ccd500a" : {
+      "version" : 2,
       "mode" : "WARN",
       "floor" : "INFO",
       "exporter" : "otlp",
@@ -1545,7 +1675,7 @@
         "exact" : [ ],
         "prefixes" : [ "otel.oteligence." ],
         "suffixes" : [ ],
-        "except" : [ "otel.oteligence.logs.floor" ],
+        "except" : [ "otel.oteligence.logs.floor", "otel.oteligence.logs.state.interval", "otel.oteligence.logs.window.path", "otel.oteligence.resource.attributes", "otel.oteligence.resource.disabled.keys", "otel.oteligence.drop.health.traces", "otel.oteligence.trace.skipped.libraries" ],
         "test" : "any",
         "values" : [ ],
         "since" : 1
@@ -1590,6 +1720,215 @@
         "values" : [ ],
         "since" : 1
       }, {
+        "id" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+        "severity" : "error",
+        "exact" : [ "collector.pipelines.logs" ],
+        "prefixes" : [ "collector.pipelines.logs/" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "keeps_processors",
+        "values" : [ "redaction", "transform/pii", "transform/exceptions", "?redaction/identifiers", "!redaction/db", "!transform/truncate" ],
+        "since" : 2
+      }, {
+        "id" : "COLLECTOR_CONFIG_INVALID",
+        "severity" : "warning",
+        "exact" : [ "collector.validate" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 2
+      }, {
+        "id" : "LOG_LEVEL_BELOW_FLOOR",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ "logging.level." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "below_floor",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "FLOOR_LOWERED",
+        "severity" : "error",
+        "exact" : [ "otel.oteligence.logs.floor" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "below_floor",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGS_EXPORTER_NOT_LOCKED",
+        "severity" : "error",
+        "exact" : [ "otel.logs.exporter" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "not_exporter",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "PACKAGED_LEVEL_VARIABLE",
+        "severity" : "error",
+        "exact" : [ "log.level", "app.log.level", "app.loglevel" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "below_floor",
+        "values" : [ ],
+        "since" : 1
+      } ],
+      "digest" : "adbf875417156a794e9c3e21b7904ccadcdcea72c83649db2472e7338ccd500a"
+    },
+    "b94dc5a073e162ec0f46aa722ce0b75cd4c83f15591c02c0c5e5b0f0ffe54fbc" : {
+      "version" : 2,
+      "mode" : "WARN",
+      "floor" : "INFO",
+      "exporter" : "otlp",
+      "lockFree" : false,
+      "rules" : [ {
+        "id" : "SPRING_DEBUG",
+        "severity" : "warning",
+        "exact" : [ "debug", "trace" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "spring_set",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGGING_FILE_AT_DEPLOY",
+        "severity" : "warning",
+        "exact" : [ "logging.config", "logback.configurationfile", "log4j2.configurationfile", "log4j.configurationfile", "log4j.configuration" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGGERS_ENDPOINT_EXPOSED",
+        "severity" : "warning",
+        "exact" : [ "management.endpoints.web.exposure.include" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "exposes_loggers",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOGS_ENDPOINT_SET",
+        "severity" : "warning",
+        "exact" : [ ],
+        "prefixes" : [ "otel.exporter.otlp.logs." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "DECLARATIVE_CONFIG",
+        "severity" : "error",
+        "exact" : [ "otel.config.file", "otel.experimental.config.file" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "AGENT_DEBUG",
+        "severity" : "error",
+        "exact" : [ "otel.javaagent.debug" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "AGENT_V3_PREVIEW",
+        "severity" : "warning",
+        "exact" : [ "otel.instrumentation.common.v3.preview" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "EXTENSION_POLICY_SET",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ "otel.oteligence." ],
+        "suffixes" : [ ],
+        "except" : [ "otel.oteligence.logs.floor", "otel.oteligence.logs.state.interval", "otel.oteligence.logs.window.path", "otel.oteligence.resource.attributes", "otel.oteligence.resource.disabled.keys", "otel.oteligence.drop.health.traces", "otel.oteligence.trace.skipped.libraries" ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "LOG_CAPTURE_SETTING",
+        "severity" : "warning",
+        "exact" : [ ],
+        "prefixes" : [ "otel.instrumentation.logback.appender.experimental.capture", "otel.instrumentation.log4j.appender.experimental.capture", "otel.instrumentation.logback.appender.experimental.log.attributes", "otel.instrumentation.log4j.appender.experimental.log.attributes" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "SQL_SANITIZER_OFF",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ ],
+        "suffixes" : [ ".statement.sanitizer.enabled", ".query.sanitization.enabled" ],
+        "except" : [ ],
+        "test" : "otel_false",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "SQL_PARAMETERS_CAPTURED",
+        "severity" : "error",
+        "exact" : [ ],
+        "prefixes" : [ ],
+        "suffixes" : [ ".experimental.capture.query.parameters" ],
+        "except" : [ ],
+        "test" : "otel_true",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "OVERRIDE_REFUSED",
+        "severity" : "warning",
+        "exact" : [ "otel.experimental.javascript.snippet", "otel.instrumentation.common.db.experimental.sqlcommenter.enabled", "otel.instrumentation.common.default.enabled", "otel.instrumentation.genai.capture.message.content", "otel.instrumentation.http.client.capture.request.headers", "otel.instrumentation.http.client.capture.response.headers", "otel.instrumentation.http.server.capture.request.headers", "otel.instrumentation.http.server.capture.response.headers", "otel.instrumentation.messaging.experimental.capture.headers", "otel.instrumentation.sanitization.url.experimental.sensitive.query.parameters", "otel.java.disabled.resource.providers", "otel.javaagent.enabled", "otel.javaagent.exclude.class.loaders", "otel.javaagent.exclude.classes", "otel.metrics.exporter", "otel.resource.disabled.keys", "otel.sdk.disabled", "otel.traces.exporter", "otel.traces.sampler" ],
+        "prefixes" : [ "otel.exporter.otlp.metrics.", "otel.exporter.otlp.traces.", "otel.exporter.prometheus." ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 1
+      }, {
+        "id" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+        "severity" : "error",
+        "exact" : [ "collector.pipelines.logs" ],
+        "prefixes" : [ "collector.pipelines.logs/" ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "keeps_processors",
+        "values" : [ "redaction", "transform/pii", "transform/exceptions", "?redaction/identifiers", "!redaction/db", "!transform/truncate" ],
+        "since" : 2
+      }, {
+        "id" : "COLLECTOR_CONFIG_INVALID",
+        "severity" : "warning",
+        "exact" : [ "collector.validate" ],
+        "prefixes" : [ ],
+        "suffixes" : [ ],
+        "except" : [ ],
+        "test" : "any",
+        "values" : [ ],
+        "since" : 2
+      }, {
         "id" : "LOG_LEVEL_BELOW_FLOOR",
         "severity" : "error",
         "exact" : [ ],
@@ -1627,15 +1966,15 @@
         "suffixes" : [ ],
         "except" : [ ],
         "test" : "profile_below_floor",
-        "values" : [ "qa" ],
+        "values" : [ "dev" ],
         "since" : 1
       } ],
-      "digest" : "e0bb0d0d33be5af372f7fac5287c0c7fb236736d3fd0c972ea0ee01e4bb04e37"
+      "digest" : "b94dc5a073e162ec0f46aa722ce0b75cd4c83f15591c02c0c5e5b0f0ffe54fbc"
     }
   },
   "cases" : [ {
     "name" : "root at DEBUG under an INFO floor is a finding; a logger at INFO is not",
-    "ruleSet" : "6d57be03e144623a795d0400dcd5412b04222ab7359502f1cd3cda147c67c45e",
+    "ruleSet" : "1ea4ab92c21a54d885d1b6c0929d731c4a8ffbc520570d62b02dcdc00c4fdfa7",
     "lock" : {
       "floor" : "INFO",
       "production" : true
@@ -1660,7 +1999,7 @@
     } ]
   }, {
     "name" : "the bundle's own start command and identity settings are clean",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -1698,7 +2037,7 @@
     "findings" : [ ]
   }, {
     "name" : "a deployment may raise the floor and may not lower it or set the extension's own policy",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -1733,7 +2072,7 @@
     } ]
   }, {
     "name" : "debug switches: Spring's, a bare flag, and the agent's",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -1779,7 +2118,7 @@
     } ]
   }, {
     "name" : "a declarative config file, a logging file chosen at deploy and a logs endpoint",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -1820,7 +2159,7 @@
     } ]
   }, {
     "name" : "a logs exporter other than the lock's; none is the safe direction",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -1849,7 +2188,7 @@
     } ]
   }, {
     "name" : "the loggers endpoint exposed",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -1873,7 +2212,7 @@
     } ]
   }, {
     "name" : "SQL sanitization off and query parameters captured",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -1908,7 +2247,7 @@
     } ]
   }, {
     "name" : "settings the overrides refuse, set at deploy",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -1938,7 +2277,7 @@
     } ]
   }, {
     "name" : "a variable a packaged file reads its level from, and an active profile whose packaged level is below the floor",
-    "ruleSet" : "c02fb422e512a5ee9beac686d07bcb6d9180b269b9d7b0eee43af9008ea2ebaa",
+    "ruleSet" : "1b10366f1368f5603f445b7c5ab47b0d6f4317e5f69b48d2e75265648de9c6ce",
     "lock" : {
       "floor" : "INFO"
     },
@@ -1986,7 +2325,7 @@
     } ]
   }, {
     "name" : "log capture settings; the structured attributes setting is not one",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2010,7 +2349,7 @@
     } ]
   }, {
     "name" : "a level written as a variable is not a level",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2023,7 +2362,7 @@
     "findings" : [ ]
   }, {
     "name" : "a negated or combined profile gives no profile rule; a list of profiles does",
-    "ruleSet" : "3546f12a02d4f0800327c29d2c5ea6b21c08f7d4986d5a098b2f8ecb6333c8d3",
+    "ruleSet" : "766d98cb1051a0d96f42ae6f51ff403210578bb3a224a86673f825740acee2db",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2081,7 +2420,7 @@
     } ]
   }, {
     "name" : "booleans read as the agent and Spring Boot read them",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2168,7 +2507,7 @@
     } ]
   }, {
     "name" : "a placeholder passes no test but presence",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2212,7 +2551,7 @@
     } ]
   }, {
     "name" : "the loggers endpoint exposed by a wildcard or in a spaced list",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2247,7 +2586,7 @@
     } ]
   }, {
     "name" : "levels in any case; WARNING is WARN; OFF is above every floor and ALL below it",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2303,7 +2642,7 @@
     } ]
   }, {
     "name" : "an included profile, the agent preview switch, the other logging files and the experimental config file",
-    "ruleSet" : "2c0620d76e6184a24747ed11ba9ee3262566a8027dbb29f8dd3fa9aa64f41d74",
+    "ruleSet" : "b94dc5a073e162ec0f46aa722ce0b75cd4c83f15591c02c0c5e5b0f0ffe54fbc",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2396,7 +2735,7 @@
     } ]
   }, {
     "name" : "the URL redaction a deployment may not loosen",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2415,7 +2754,7 @@
     } ]
   }, {
     "name" : "one setting read twice at one place is one finding",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2450,7 +2789,7 @@
     } ]
   }, {
     "name" : "a WARN floor: INFO is below it, and a deployment may not lower the floor to INFO",
-    "ruleSet" : "5f461741b15cd18fb550b3577eec20a003f670ae6e9717faefefaab95c6e10ac",
+    "ruleSet" : "799be90304cfbbfcf40848de949d3aeb00db705765378de00e50f86064ff0e40",
     "lock" : {
       "floor" : "WARN"
     },
@@ -2490,7 +2829,7 @@
     } ]
   }, {
     "name" : "export none: the otlp exporter is not the lock's, and none is",
-    "ruleSet" : "dfeadb36c5328445630c6e92446bb5bdd2928dfebd7bef021c45ee26211b2840",
+    "ruleSet" : "aa88b61ec2fbccdacb55f7ae8b2ff63a09240b89f314e4a02e011859ac7b5bca",
     "lock" : {
       "floor" : "INFO",
       "export" : "none"
@@ -2515,7 +2854,7 @@
     } ]
   }, {
     "name" : "every template syntax is a placeholder; a list test reads the elements of a list holding one",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2559,7 +2898,7 @@
     } ]
   }, {
     "name" : "a profile list holding a placeholder is read for its other profiles",
-    "ruleSet" : "2c0620d76e6184a24747ed11ba9ee3262566a8027dbb29f8dd3fa9aa64f41d74",
+    "ruleSet" : "b94dc5a073e162ec0f46aa722ce0b75cd4c83f15591c02c0c5e5b0f0ffe54fbc",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2591,7 +2930,7 @@
     } ]
   }, {
     "name" : "a name outside the finding shape is still judged, under a name a finding can carry",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2632,7 +2971,7 @@
     } ]
   }, {
     "name" : "a packaged variable with a dash is matched in Spring's environment form too",
-    "ruleSet" : "bfd13a413ce8b61023d2f91869de1cec41f8a8ba527fb96b40e530c6e0d58a7a",
+    "ruleSet" : "adbf875417156a794e9c3e21b7904ccadcdcea72c83649db2472e7338ccd500a",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2681,7 +3020,7 @@
     } ]
   }, {
     "name" : "Log4j2's attribute capture and the query sanitizer's other spelling",
-    "ruleSet" : "c07ab8dc2d61aaee5b2a5d1cd5952f483c6061d2de8f3bd1d6f66288c5ebb7b8",
+    "ruleSet" : "5d8be5005346200e2df4d3c24091e9f9ee1f15ab83024c3acb248c59d5ccab24",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2722,7 +3061,7 @@
     } ]
   }, {
     "name" : "a cloud-platform gate on a packaged level names no profile",
-    "ruleSet" : "e0bb0d0d33be5af372f7fac5287c0c7fb236736d3fd0c972ea0ee01e4bb04e37",
+    "ruleSet" : "7a7fa791ceab6131cd88767829a47be62359b52fa67e4c1c492189f66ea2918e",
     "lock" : {
       "floor" : "INFO"
     },
@@ -2759,7 +3098,7 @@
     } ]
   }, {
     "name" : "lock-free: a level below INFO warns and the floor itself is not a finding",
-    "ruleSet" : "ba5e761f504c9d88529b3741abf26e3cd3da10cac121ace9c547a4844a741cae",
+    "ruleSet" : "510f689f873c8ee370839e3b98c341eef6f5a5921afc8f029c7ec82fcb3d17b9",
     "lockFree" : true,
     "settings" : [ {
       "name" : "LOGGING_LEVEL_ROOT",
@@ -2778,6 +3117,278 @@
       "name" : "logging.level.root",
       "path" : "values.yaml",
       "line" : 2
+    } ]
+  }, {
+    "name" : "collector: the generated logs pipeline keeps its processors; without redaction it is an error",
+    "ruleSet" : "510f689f873c8ee370839e3b98c341eef6f5a5921afc8f029c7ec82fcb3d17b9",
+    "lockFree" : true,
+    "settings" : [ {
+      "name" : "collector.pipelines.logs",
+      "value" : "memory_limiter,resource,attributes,redaction/identifiers,redaction,transform/pii,transform/exceptions,batch|memory_limiter,resource,attributes,redaction/identifiers,redaction,redaction/db,transform/truncate,transform/pii,transform/exceptions,tail_sampling,batch",
+      "path" : "deploy/collector-config.yaml",
+      "line" : 398
+    }, {
+      "name" : "collector.pipelines.logs",
+      "value" : "memory_limiter,resource,attributes,redaction/identifiers,transform/pii,transform/exceptions,batch|memory_limiter,resource,attributes,redaction/identifiers,redaction,redaction/db,transform/truncate,transform/pii,transform/exceptions,tail_sampling,batch",
+      "path" : "deploy/collector-dropped.yaml",
+      "line" : 398
+    } ],
+    "findings" : [ {
+      "rule" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+      "severity" : "error",
+      "name" : "collector.pipelines.logs",
+      "path" : "deploy/collector-dropped.yaml",
+      "line" : 398
+    } ]
+  }, {
+    "name" : "collector: each kept processor missing alone is a finding, and redaction gone from the definitions too",
+    "ruleSet" : "510f689f873c8ee370839e3b98c341eef6f5a5921afc8f029c7ec82fcb3d17b9",
+    "lockFree" : true,
+    "settings" : [ {
+      "name" : "collector.pipelines.logs",
+      "value" : "memory_limiter,resource,attributes,redaction/identifiers,redaction,transform/exceptions,batch|memory_limiter,resource,attributes,redaction/identifiers,redaction,redaction/db,transform/truncate,transform/pii,transform/exceptions,tail_sampling,batch",
+      "path" : "a.yaml",
+      "line" : 1
+    }, {
+      "name" : "collector.pipelines.logs",
+      "value" : "memory_limiter,resource,attributes,redaction/identifiers,redaction,transform/pii,batch|memory_limiter,resource,attributes,redaction/identifiers,redaction,redaction/db,transform/truncate,transform/pii,transform/exceptions,tail_sampling,batch",
+      "path" : "a.yaml",
+      "line" : 2
+    }, {
+      "name" : "collector.pipelines.logs",
+      "value" : "memory_limiter,resource,attributes,redaction/identifiers,transform/pii,transform/exceptions,batch|memory_limiter,resource,attributes,redaction/identifiers,redaction/db,transform/truncate,transform/pii,transform/exceptions,tail_sampling,batch",
+      "path" : "a.yaml",
+      "line" : 3
+    } ],
+    "findings" : [ {
+      "rule" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+      "severity" : "error",
+      "name" : "collector.pipelines.logs",
+      "path" : "a.yaml",
+      "line" : 1
+    }, {
+      "rule" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+      "severity" : "error",
+      "name" : "collector.pipelines.logs",
+      "path" : "a.yaml",
+      "line" : 2
+    }, {
+      "rule" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+      "severity" : "error",
+      "name" : "collector.pipelines.logs",
+      "path" : "a.yaml",
+      "line" : 3
+    } ]
+  }, {
+    "name" : "collector: identifier hashing is kept only where the configuration defines it",
+    "ruleSet" : "510f689f873c8ee370839e3b98c341eef6f5a5921afc8f029c7ec82fcb3d17b9",
+    "lockFree" : true,
+    "settings" : [ {
+      "name" : "collector.pipelines.logs",
+      "value" : "memory_limiter,resource,attributes,redaction,transform/pii,transform/exceptions,batch|memory_limiter,resource,attributes,redaction,redaction/db,transform/truncate,transform/pii,transform/exceptions,tail_sampling,batch",
+      "path" : "a.yaml",
+      "line" : 1
+    }, {
+      "name" : "collector.pipelines.logs",
+      "value" : "memory_limiter,resource,attributes,redaction,transform/pii,transform/exceptions,batch|memory_limiter,resource,attributes,redaction/identifiers,redaction,redaction/db,transform/truncate,transform/pii,transform/exceptions,tail_sampling,batch",
+      "path" : "a.yaml",
+      "line" : 2
+    } ],
+    "findings" : [ {
+      "rule" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+      "severity" : "error",
+      "name" : "collector.pipelines.logs",
+      "path" : "a.yaml",
+      "line" : 2
+    } ]
+  }, {
+    "name" : "collector: the front tier, a collector of the customer's own and one governed name alone pass",
+    "ruleSet" : "510f689f873c8ee370839e3b98c341eef6f5a5921afc8f029c7ec82fcb3d17b9",
+    "lockFree" : true,
+    "settings" : [ {
+      "name" : "collector.pipelines.logs",
+      "value" : "memory_limiter|memory_limiter",
+      "path" : "collector-loadbalancer.yaml",
+      "line" : 30
+    }, {
+      "name" : "collector.pipelines.logs",
+      "value" : "memory_limiter,k8s_attributes|memory_limiter,k8s_attributes",
+      "path" : "collector-loadbalancer.yaml",
+      "line" : 31
+    }, {
+      "name" : "collector.pipelines.logs",
+      "value" : "batch|batch,memory_limiter",
+      "path" : "config/otel-collector-config.yaml",
+      "line" : 65
+    }, {
+      "name" : "collector.pipelines.logs",
+      "value" : "batch|batch,redaction",
+      "path" : "config/otel-collector-config.yaml",
+      "line" : 66
+    } ],
+    "findings" : [ ]
+  }, {
+    "name" : "collector: a placeholder pipeline list passes; a named pipeline is read and named with its slash as _; a traces pipeline is not read",
+    "ruleSet" : "510f689f873c8ee370839e3b98c341eef6f5a5921afc8f029c7ec82fcb3d17b9",
+    "lockFree" : true,
+    "settings" : [ {
+      "name" : "collector.pipelines.logs",
+      "value" : "${LOG_PROCESSORS}|memory_limiter,resource,attributes,redaction/identifiers,redaction,redaction/db,transform/truncate,transform/pii,transform/exceptions,tail_sampling,batch",
+      "path" : "a.yaml",
+      "line" : 1
+    }, {
+      "name" : "collector.pipelines.logs/app",
+      "value" : "batch,transform/pii,transform/exceptions|",
+      "path" : "a.yaml",
+      "line" : 2
+    }, {
+      "name" : "collector.pipelines.traces",
+      "value" : "batch|memory_limiter,resource,attributes,redaction/identifiers,redaction,redaction/db,transform/truncate,transform/pii,transform/exceptions,tail_sampling,batch",
+      "path" : "a.yaml",
+      "line" : 3
+    }, {
+      "name" : "collector.pipelines.LOGS",
+      "value" : " memory_limiter , transform/pii , transform/exceptions |",
+      "path" : "a.yaml",
+      "line" : 4
+    } ],
+    "findings" : [ {
+      "rule" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+      "severity" : "error",
+      "name" : "collector.pipelines.logs_app",
+      "path" : "a.yaml",
+      "line" : 2
+    }, {
+      "rule" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+      "severity" : "error",
+      "name" : "collector.pipelines.logs",
+      "path" : "a.yaml",
+      "line" : 4
+    } ]
+  }, {
+    "name" : "collector: a refusal by the collector's validate is a warning",
+    "ruleSet" : "510f689f873c8ee370839e3b98c341eef6f5a5921afc8f029c7ec82fcb3d17b9",
+    "lockFree" : true,
+    "settings" : [ {
+      "name" : "collector.validate",
+      "value" : "",
+      "path" : "deploy/collector-config.yaml",
+      "line" : 1
+    } ],
+    "findings" : [ {
+      "rule" : "COLLECTOR_CONFIG_INVALID",
+      "severity" : "warning",
+      "name" : "collector.validate",
+      "path" : "deploy/collector-config.yaml",
+      "line" : 1
+    } ]
+  }, {
+    "name" : "version 1: no collector rule",
+    "ruleSet" : "932d31ce298789f219265b073c799464a3afee517553757fb90fb8d36105f84d",
+    "version" : 1,
+    "lockFree" : true,
+    "settings" : [ {
+      "name" : "collector.pipelines.logs",
+      "value" : "batch,transform/pii,transform/exceptions|",
+      "path" : "a.yaml",
+      "line" : 1
+    }, {
+      "name" : "collector.validate",
+      "value" : "",
+      "path" : "a.yaml",
+      "line" : 1
+    } ],
+    "findings" : [ ]
+  }, {
+    "name" : "the settings the bundle's agent config writes or invites are not the extension's policy; the policy is",
+    "ruleSet" : "510f689f873c8ee370839e3b98c341eef6f5a5921afc8f029c7ec82fcb3d17b9",
+    "lockFree" : true,
+    "settings" : [ {
+      "name" : "otel.oteligence.resource-attributes",
+      "value" : "service.namespace=x",
+      "path" : "deploy/agent.properties",
+      "line" : 1
+    }, {
+      "name" : "OTEL_OTELIGENCE_RESOURCE_DISABLED_KEYS",
+      "value" : "process.command_args",
+      "path" : "deploy/.env",
+      "line" : 1
+    }, {
+      "name" : "otel.oteligence.drop-health-traces",
+      "value" : "false",
+      "path" : "deploy/agent.properties",
+      "line" : 2
+    }, {
+      "name" : "otel.oteligence.trace-skipped-libraries",
+      "value" : "true",
+      "path" : "deploy/agent.properties",
+      "line" : 3
+    }, {
+      "name" : "otel.oteligence.logs.state.interval",
+      "value" : "30",
+      "path" : "deploy/agent.properties",
+      "line" : 4
+    }, {
+      "name" : "otel.oteligence.logs.window.path",
+      "value" : "/var/run/window",
+      "path" : "deploy/agent.properties",
+      "line" : 5
+    }, {
+      "name" : "otel.oteligence.logs.export",
+      "value" : "none",
+      "path" : "deploy/agent.properties",
+      "line" : 6
+    } ],
+    "findings" : [ {
+      "rule" : "EXTENSION_POLICY_SET",
+      "severity" : "error",
+      "name" : "otel.oteligence.logs.export",
+      "path" : "deploy/agent.properties",
+      "line" : 6
+    } ]
+  }, {
+    "name" : "collector: a pipeline stripped of every kept processor, one naming none, and one whose config lost redaction and transform/pii everywhere are flagged; one marker alone is not",
+    "ruleSet" : "510f689f873c8ee370839e3b98c341eef6f5a5921afc8f029c7ec82fcb3d17b9",
+    "lockFree" : true,
+    "settings" : [ {
+      "name" : "collector.pipelines.logs",
+      "value" : "memory_limiter,batch|memory_limiter,resource,attributes,redaction/identifiers,redaction,redaction/db,transform/truncate,transform/pii,transform/exceptions,tail_sampling,batch",
+      "path" : "a.yaml",
+      "line" : 1
+    }, {
+      "name" : "collector.pipelines.logs",
+      "value" : "|memory_limiter,resource,attributes,redaction/identifiers,redaction,redaction/db,transform/truncate,transform/pii,transform/exceptions,tail_sampling,batch",
+      "path" : "a.yaml",
+      "line" : 2
+    }, {
+      "name" : "collector.pipelines.logs",
+      "value" : "memory_limiter,transform/exceptions,batch|memory_limiter,transform/exceptions,redaction/db,transform/truncate,batch",
+      "path" : "a.yaml",
+      "line" : 3
+    }, {
+      "name" : "collector.pipelines.logs",
+      "value" : "batch|batch,redaction/db",
+      "path" : "a.yaml",
+      "line" : 4
+    } ],
+    "findings" : [ {
+      "rule" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+      "severity" : "error",
+      "name" : "collector.pipelines.logs",
+      "path" : "a.yaml",
+      "line" : 1
+    }, {
+      "rule" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+      "severity" : "error",
+      "name" : "collector.pipelines.logs",
+      "path" : "a.yaml",
+      "line" : 2
+    }, {
+      "rule" : "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+      "severity" : "error",
+      "name" : "collector.pipelines.logs",
+      "path" : "a.yaml",
+      "line" : 3
     } ]
   } ]
 }

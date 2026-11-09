@@ -68,6 +68,20 @@ inputs:
       .maestro/check.yml, each service and environment it lists is checked against its own files. Default 'false'.
     required: false
     default: 'false'
+  collector-validate:
+    description: >-
+      'true' runs the collector's own validate, check-only, on each whole collector configuration the log policy check
+      finds (a collector file, an OpenTelemetryCollector resource, a ConfigMap string; not a Helm values fragment),
+      through docker: in a container with no network, no capabilities and a read-only filesystem, given only the
+      configuration and a fake Kubernetes service account. A refused configuration is a COLLECTOR_CONFIG_INVALID warning; the collector's own output
+      is never logged. The runner needs docker. Default 'false'.
+    required: false
+    default: 'false'
+  collector-image:
+    description: >-
+      The collector image collector-validate runs. Default the collector-contrib release the platform validates every
+      generated configuration for, pinned by digest.
+    required: false
   require-signed-build:
     description: >-
       'true' fails the step when signing-public-key is empty, so a workflow variable that is missing in a repository or

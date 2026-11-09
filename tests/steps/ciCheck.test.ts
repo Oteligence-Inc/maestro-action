@@ -79,15 +79,15 @@ afterEach(() => {
 });
 
 describe('fetchRules', () => {
-  it('asks for one service at the version this Action reads', async () => {
-    nock(BASE).get(RULES).query({ service: 'orders', versions: '1' }).reply(200, served('WARN', { baseline: ['x'] }));
+  it('asks for one service, naming every version this Action reads', async () => {
+    nock(BASE).get(RULES).query({ service: 'orders', versions: '1,2' }).reply(200, served('WARN', { baseline: ['x'] }));
     const got = await fetchRules(client(), 'proj_1', 'prod', 'orders');
     expect(got.ruleSet.mode).toBe('WARN');
     expect(got.baseline).toEqual(['x']);
   });
 
   it.each([
-    ['another version', { version: 2 }, 'version 2'],
+    ['another version', { version: 3 }, 'version 3'],
     ['an unknown test', { rules: [rule('NEW', 'error', { test: 'regex' })] }, 'NEW uses a test this Action does not know'],
     ['no digest', { digest: undefined }, 'no mode, floor or digest'],
     ['an unknown mode', { mode: 'FAIL_LOUDLY' }, 'a mode this Action does not know'],
@@ -101,7 +101,7 @@ describe('fetchRules', () => {
   });
 
   it('asks for the rules of the lock the build names', async () => {
-    nock(BASE).get(RULES).query({ service: 'orders', versions: '1', lockedVersionUid: 'lv_4' }).reply(200, served('FAIL'));
+    nock(BASE).get(RULES).query({ service: 'orders', versions: '1,2', lockedVersionUid: 'lv_4' }).reply(200, served('FAIL'));
     expect((await fetchRules(client(), 'proj_1', 'prod', 'orders', 'lv_4')).ruleSet.mode).toBe('FAIL');
   });
 
@@ -351,6 +351,65 @@ describe('logPolicyCheck', () => {
       const run = await runCheck(client(), 'proj_1', 'prod', 'orders', dir, repoOf, { checkOnly: true });
       expect(run.outcome).toBe(outcome);
     }
+  });
+
+  it('flags a collector that drops redaction, notes validation when off, and validates when on', async () => {
+    const collectorRules = [
+      ...ruleSet('WARN').rules,
+      rule('COLLECTOR_LOGS_PROCESSOR_DROPPED', 'error', {
+        exact: ['collector.pipelines.logs'], prefixes: ['collector.pipelines.logs/'], test: 'keeps_processors',
+        values: ['redaction', 'transform/pii', 'transform/exceptions', '?redaction/identifiers'], since: 2,
+      }),
+      rule('COLLECTOR_CONFIG_INVALID', 'warning', { exact: ['collector.validate'], since: 2 }),
+    ];
+    const root = repo({
+      'deploy/collector.yaml': 'processors:\n  redaction: {}\n  transform/pii: {}\n  transform/exceptions: {}\n' +
+        'receivers:\n  otlp: {}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n' +
+        '      processors: [transform/pii, transform/exceptions]\n      exporters: [debug]\n',
+    });
+    nock(BASE).get(RULES).query(true).reply(200, served('WARN', { version: 2, rules: collectorRules }));
+    await runCheck(client(), 'proj_1', 'prod', 'orders', root, readRepo(root), { checkOnly: true });
+    expect(core.error).toHaveBeenCalledWith('COLLECTOR_LOGS_PROCESSOR_DROPPED: collector.pipelines.logs',
+      expect.objectContaining({ file: 'deploy/collector.yaml', startLine: 11 }));
+    expect(core.info).toHaveBeenCalledWith(expect.stringContaining("1 collector configuration(s) found; collector-validate: 'true'"));
+
+    jest.clearAllMocks();
+    const calls: string[][] = [];
+    nock(BASE).get(RULES).query(true).reply(200, served('WARN', { version: 2, rules: collectorRules }));
+    const run = await runCheck(client(), 'proj_1', 'prod', 'orders', root, readRepo(root), {
+      checkOnly: true,
+      collectors: {
+        validate: true, image: 'otel/x:1', docker: '/usr/bin/docker', results: new Map(),
+        run: async (args) => {
+          calls.push(args);
+          return { code: args[0] === 'run' && calls.filter((c) => c[0] === 'run').length > 1 ? 1 : 0, timedOut: false };
+        },
+      },
+    });
+    expect(run.result?.total).toBe(2);
+    expect(core.warning).toHaveBeenCalledWith('COLLECTOR_CONFIG_INVALID: collector.validate',
+      expect.objectContaining({ file: 'deploy/collector.yaml', startLine: 1 }));
+    expect(calls.filter((c) => c[0] === 'run')).toHaveLength(2);
+
+    jest.clearAllMocks();
+    nock(BASE).get(RULES).query(true).reply(200, served('WARN', { version: 2, rules: collectorRules }));
+    await runCheck(client(), 'proj_1', 'prod', 'orders', root, readRepo(root), {
+      checkOnly: true, collectors: { validate: true, image: 'otel/x:1', docker: null, results: new Map() },
+    });
+    expect(core.warning).toHaveBeenCalledWith(
+      'Log policy check could not read deploy/collector.yaml line 1: collector configurations not validated: docker is not on PATH',
+      expect.anything());
+  });
+
+  it('validates nothing for a version 1 rule set, which holds no collector rule', async () => {
+    const root = repo({ 'deploy/collector.yaml': 'service:\n  pipelines:\n    logs:\n      receivers: [otlp]\n' });
+    nock(BASE).get(RULES).query(true).reply(200, served('WARN'));
+    const run = jest.fn();
+    await runCheck(client(), 'proj_1', 'prod', 'orders', root, readRepo(root), {
+      checkOnly: true, collectors: { validate: true, image: 'otel/x:1', docker: '/usr/bin/docker', run, results: new Map() },
+    });
+    expect(run).not.toHaveBeenCalled();
+    expect(core.info).not.toHaveBeenCalledWith(expect.stringContaining('collector configuration'));
   });
 
   it('prints a service and environment with their control characters shown as ?', () => {

@@ -12,7 +12,9 @@ import { readRepo, runCheck } from '../../src/steps/ciCheck';
 import { Inputs } from '../../src/types';
 
 const api = new MaestroApi('https://api.oteligence.com');
-const inputs = { service: 'orders', environment: 'prod', project: 'shop', projectId: '' } as Inputs;
+const inputs = {
+  service: 'orders', environment: 'prod', project: 'shop', projectId: '', collectorValidate: true, collectorImage: 'otel/x:1',
+} as Inputs;
 const clean = { service: 'orders', ruleSetDigest: 'd'.repeat(64), total: 0, findings: [] };
 const passed = { outcome: 'passed', result: clean, reason: null };
 
@@ -25,7 +27,7 @@ beforeEach(() => {
 it('checks the service and environment inputs when there is no mapping', async () => {
   await checkOnly(api, inputs, '/repo');
   expect((runCheck as jest.Mock).mock.calls.map((c) => [c[1], c[2], c[3], c[6]])).toEqual([
-    ['proj_1', 'prod', 'orders', { checkOnly: true }],
+    ['proj_1', 'prod', 'orders', { checkOnly: true, collectors: { validate: true, image: 'otel/x:1', results: new Map() } }],
   ]);
   expect(core.setOutput).toHaveBeenCalledWith('log-policy-check', 'passed');
   expect(core.setOutput).toHaveBeenCalledWith('generated', 'false');

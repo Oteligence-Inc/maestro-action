@@ -1,5 +1,6 @@
 import * as core from '@actions/core';
 import * as crypto from 'crypto';
+import { COLLECTOR_IMAGE, IMAGE_SHAPE } from './logPolicy/validate';
 import { Inputs } from './types';
 import { UserError } from './util/errors';
 
@@ -51,9 +52,16 @@ export function parseInputs(): Inputs {
     );
   }
 
+  const collectorValidate = (core.getInput('collector-validate') || 'false').toLowerCase() === 'true';
+  const collectorImage = core.getInput('collector-image').trim() || COLLECTOR_IMAGE;
+  if (!IMAGE_SHAPE.test(collectorImage)) {
+    throw new UserError('collector-image is not an image reference.');
+  }
+
   return {
     apiKey, project, projectId, orgId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
-    failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey, checkOnly,
+    failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey, checkOnly, collectorValidate,
+    collectorImage,
   };
 }
 
