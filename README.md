@@ -335,8 +335,9 @@ placeholder, is named as not checked. With `collector-validate: 'true'`, the col
 configuration (not a values fragment) through `docker` on the runner: in a container with no network, no capabilities,
 a read-only filesystem, a fake Kubernetes service account and only the configuration mounted, under `collector-image`.
 A stand-in value is set for each `${env:NAME}` it reads with no default, and an empty in-memory directory is given for
-each `file_storage` directory it names; one reading through another provider (`${file:...}`) is not validated. Docker
-runs with a `PATH` holding no directory inside the workspace and none of the runner's other environment. A configuration it refuses is a `COLLECTOR_CONFIG_INVALID` warning; one it could not
+each `file_storage` directory it names; one reading through another provider (`${file:...}`) is not validated. The
+`docker` client is the first one on an absolute `PATH` entry outside the workspace, run with that `PATH` filtered the same way and only
+the variables the client reads (`HOME`, `DOCKER_HOST` and the like), none of the runner's other environment. A configuration it refuses is a `COLLECTOR_CONFIG_INVALID` warning; one it could not
 run (no docker, an image that cannot be pulled, a known-good configuration refused, a timeout) is named. The
 collector's output is never logged: run `otelcol-contrib validate --config=<file>` yourself to see why. Without the
 input, a check that finds collector configurations says how to validate them.
