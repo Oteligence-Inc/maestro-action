@@ -123,7 +123,7 @@ it('shares results across checks of one run, and stops past the cap', async () =
 });
 
 it('takes an image reference and never an option', () => {
-  for (const ok of [COLLECTOR_IMAGE, 'otel/opentelemetry-collector-contrib:0.164.0', 'registry.example.com:5000/otel/contrib:1.2']) {
+  for (const ok of [COLLECTOR_IMAGE, 'otel/opentelemetry-collector-contrib:0.165.0', 'registry.example.com:5000/otel/contrib:1.2']) {
     expect(IMAGE_SHAPE.test(ok)).toBe(true);
   }
   for (const bad of ['', '-v', '--privileged', 'otel/x:1 --privileged', 'Otel/x', 'x:', 'x@sha256:abc']) {
