@@ -29,13 +29,14 @@ export async function checkOnly(api: MaestroApi, inputs: Inputs, root: string): 
     }
     pairs.push({ service: inputs.service, environment: inputs.environment });
   }
+  const collectors = { validate: inputs.collectorValidate, image: inputs.collectorImage, results: new Map() };
   const failed: string[] = [];
   const outcomes = new Set<string>();
   let findings = 0;
   for (const p of pairs) {
     const who = `${printable(p.service)} in ${printable(p.environment)}`;
     try {
-      const run = await runCheck(api, projectUid, p.environment, p.service, root, repo, { checkOnly: true });
+      const run = await runCheck(api, projectUid, p.environment, p.service, root, repo, { checkOnly: true, collectors });
       outcomes.add(run.outcome);
       findings += run.result?.total ?? 0;
       if (run.outcome === 'failed') {

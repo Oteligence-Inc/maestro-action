@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "Cases of deployment files in and findings out, held by the GitHub Action's and the CLI's suites alike. A runner writes each case's files (text as UTF-8, or base64 as bytes) to an empty directory, scans them in the order listed, and evaluates the settings against the lock-free rule set of evaluation-cases.json; it must give exactly the case's findings, in order, and its problems. The two copies are byte-identical: each suite pins this file's SHA-256.",
+  "about": "Cases of deployment files in and findings out, held by the GitHub Action's and the CLI's suites alike. A runner writes each case's files (text as UTF-8, or base64 as bytes) to an empty directory, scans them in the order listed, and evaluates the settings against the lock-free rule set of evaluation-cases.json; it must give exactly the case's findings, in order, its problems, and the whole collector configurations it found for validation (collectors: path, line, the environment variables read with no default, and why one is not validated), in order; a case naming no collectors found none. The two copies are byte-identical: each suite pins this file's SHA-256.",
   "cases": [
     {
       "name": "a block mapping indented between two levels is not valid YAML",
@@ -996,6 +996,595 @@
         }
       ],
       "problems": []
+    },
+    {
+      "name": "collector file: the generated logs pipeline passes; without redaction it is flagged at the pipeline",
+      "files": [
+        {
+          "path": "deploy/otel/collector.yaml",
+          "text": "processors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\n  redaction/identifiers: {allow_all_keys: true}\n  redaction: {allow_all_keys: true}\n  transform/pii: {error_mode: ignore}\n  transform/exceptions: {error_mode: ignore}\n  batch: {}\nreceivers:\n  otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, redaction/identifiers, redaction, transform/pii, transform/exceptions, batch]\n      exporters: [debug]\n"
+        },
+        {
+          "path": "deploy/otel/collector-dropped.yaml",
+          "text": "processors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\n  redaction/identifiers: {allow_all_keys: true}\n  redaction: {allow_all_keys: true}\n  transform/pii: {error_mode: ignore}\n  transform/exceptions: {error_mode: ignore}\n  batch: {}\nreceivers:\n  otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, redaction/identifiers, transform/pii, transform/exceptions, batch]\n      exporters: [debug]\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+          "severity": "error",
+          "name": "collector.pipelines.logs",
+          "path": "deploy/otel/collector-dropped.yaml",
+          "line": 14
+        }
+      ],
+      "problems": [],
+      "collectors": [
+        {
+          "path": "deploy/otel/collector.yaml",
+          "line": 1,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        },
+        {
+          "path": "deploy/otel/collector-dropped.yaml",
+          "line": 1,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        }
+      ]
+    },
+    {
+      "name": "Helm values config: flagged without redaction, clean passes, an overlay naming no processors is not read, and no values file is validated",
+      "files": [
+        {
+          "path": "chart/values.yaml",
+          "text": "mode: deployment\nconfig:\n  processors:\n    memory_limiter: {check_interval: 1s, limit_mib: 512}\n    redaction/identifiers: {allow_all_keys: true}\n    redaction: {allow_all_keys: true}\n    transform/pii: {error_mode: ignore}\n    transform/exceptions: {error_mode: ignore}\n    batch: {}\n  receivers:\n    otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\n  exporters:\n    debug: {}\n  service:\n    pipelines:\n      logs:\n        receivers: [otlp]\n        processors: [memory_limiter, redaction/identifiers, redaction, transform/pii, transform/exceptions, batch]\n        exporters: [debug]\n"
+        },
+        {
+          "path": "chart/values-dropped.yaml",
+          "text": "mode: deployment\nconfig:\n  processors:\n    memory_limiter: {check_interval: 1s, limit_mib: 512}\n    redaction/identifiers: {allow_all_keys: true}\n    redaction: {allow_all_keys: true}\n    transform/pii: {error_mode: ignore}\n    transform/exceptions: {error_mode: ignore}\n    batch: {}\n  receivers:\n    otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\n  exporters:\n    debug: {}\n  service:\n    pipelines:\n      logs:\n        receivers: [otlp]\n        processors: [memory_limiter, redaction/identifiers, transform/pii, transform/exceptions, batch]\n        exporters: [debug]\n"
+        },
+        {
+          "path": "chart/values-prod.yaml",
+          "text": "config:\n  service:\n    pipelines:\n      logs:\n        exporters: [otlp]\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+          "severity": "error",
+          "name": "collector.pipelines.logs",
+          "path": "chart/values-dropped.yaml",
+          "line": 16
+        }
+      ],
+      "problems": [],
+      "collectors": []
+    },
+    {
+      "name": "Operator: a v1beta1 spec.config mapping and a v1alpha1 spec.config string are each flagged without redaction; a clean one passes",
+      "files": [
+        {
+          "path": "k8s/collector-v1beta1.yaml",
+          "text": "apiVersion: opentelemetry.io/v1beta1\nkind: OpenTelemetryCollector\nmetadata:\n  name: governed\nspec:\n  mode: deployment\n  config:\n    processors:\n      memory_limiter: {check_interval: 1s, limit_mib: 512}\n      redaction/identifiers: {allow_all_keys: true}\n      redaction: {allow_all_keys: true}\n      transform/pii: {error_mode: ignore}\n      transform/exceptions: {error_mode: ignore}\n      batch: {}\n    receivers:\n      otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\n    exporters:\n      debug: {}\n    service:\n      pipelines:\n        logs:\n          receivers: [otlp]\n          processors: [memory_limiter, redaction/identifiers, transform/pii, transform/exceptions, batch]\n          exporters: [debug]\n"
+        },
+        {
+          "path": "k8s/collector-v1alpha1.yaml",
+          "text": "apiVersion: opentelemetry.io/v1alpha1\nkind: OpenTelemetryCollector\nmetadata:\n  name: governed\nspec:\n  config: |\n    processors:\n      memory_limiter: {check_interval: 1s, limit_mib: 512}\n      redaction/identifiers: {allow_all_keys: true}\n      redaction: {allow_all_keys: true}\n      transform/pii: {error_mode: ignore}\n      transform/exceptions: {error_mode: ignore}\n      batch: {}\n    receivers:\n      otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\n    exporters:\n      debug: {}\n    service:\n      pipelines:\n        logs:\n          receivers: [otlp]\n          processors: [memory_limiter, redaction/identifiers, transform/pii, transform/exceptions, batch]\n          exporters: [debug]\n"
+        },
+        {
+          "path": "k8s/collector-clean.yaml",
+          "text": "apiVersion: opentelemetry.io/v1alpha1\nkind: OpenTelemetryCollector\nmetadata:\n  name: governed\nspec:\n  config: |\n    processors:\n      memory_limiter: {check_interval: 1s, limit_mib: 512}\n      redaction/identifiers: {allow_all_keys: true}\n      redaction: {allow_all_keys: true}\n      transform/pii: {error_mode: ignore}\n      transform/exceptions: {error_mode: ignore}\n      batch: {}\n    receivers:\n      otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\n    exporters:\n      debug: {}\n    service:\n      pipelines:\n        logs:\n          receivers: [otlp]\n          processors: [memory_limiter, redaction/identifiers, redaction, transform/pii, transform/exceptions, batch]\n          exporters: [debug]\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+          "severity": "error",
+          "name": "collector.pipelines.logs",
+          "path": "k8s/collector-v1alpha1.yaml",
+          "line": 20
+        },
+        {
+          "rule": "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+          "severity": "error",
+          "name": "collector.pipelines.logs",
+          "path": "k8s/collector-v1beta1.yaml",
+          "line": 21
+        }
+      ],
+      "problems": [],
+      "collectors": [
+        {
+          "path": "k8s/collector-v1beta1.yaml",
+          "line": 8,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        },
+        {
+          "path": "k8s/collector-v1alpha1.yaml",
+          "line": 7,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        },
+        {
+          "path": "k8s/collector-clean.yaml",
+          "line": 7,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        }
+      ]
+    },
+    {
+      "name": "ConfigMap: a relay string and a collector.yaml file are each flagged once without redaction, at the pipeline's line",
+      "files": [
+        {
+          "path": "k8s/configmap.yaml",
+          "text": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: otel-collector\ndata:\n  relay: |\n    processors:\n      memory_limiter: {check_interval: 1s, limit_mib: 512}\n      redaction/identifiers: {allow_all_keys: true}\n      redaction: {allow_all_keys: true}\n      transform/pii: {error_mode: ignore}\n      transform/exceptions: {error_mode: ignore}\n      batch: {}\n    receivers:\n      otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\n    exporters:\n      debug: {}\n    service:\n      pipelines:\n        logs:\n          receivers: [otlp]\n          processors: [memory_limiter, redaction/identifiers, transform/pii, transform/exceptions, batch]\n          exporters: [debug]\n  collector.yaml: |\n    processors:\n      memory_limiter: {check_interval: 1s, limit_mib: 512}\n      redaction/identifiers: {allow_all_keys: true}\n      redaction: {allow_all_keys: true}\n      transform/pii: {error_mode: ignore}\n      transform/exceptions: {error_mode: ignore}\n      batch: {}\n    receivers:\n      otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\n    exporters:\n      debug: {}\n    service:\n      pipelines:\n        logs:\n          receivers: [otlp]\n          processors: [memory_limiter, redaction/identifiers, transform/pii, transform/exceptions, batch]\n          exporters: [debug]\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+          "severity": "error",
+          "name": "collector.pipelines.logs",
+          "path": "k8s/configmap.yaml",
+          "line": 20
+        },
+        {
+          "rule": "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+          "severity": "error",
+          "name": "collector.pipelines.logs",
+          "path": "k8s/configmap.yaml",
+          "line": 38
+        }
+      ],
+      "problems": [],
+      "collectors": [
+        {
+          "path": "k8s/configmap.yaml",
+          "line": 7,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        },
+        {
+          "path": "k8s/configmap.yaml",
+          "line": 25,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        }
+      ]
+    },
+    {
+      "name": "the front tier and a collector of the customer's own, which define one governed processor at most, pass",
+      "files": [
+        {
+          "path": "deploy/collector-loadbalancer.yaml",
+          "text": "receivers:\n  otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\nprocessors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\nexporters:\n  load_balancing/logs: {routing_key: traceID}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: [memory_limiter]\n      exporters: [load_balancing/logs]\n"
+        },
+        {
+          "path": "config/otel-collector-config.yaml",
+          "text": "receivers:\n  otlp: {}\nprocessors:\n  batch: {}\n  redaction: {allow_all_keys: true}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: [batch]\n      exporters: [debug]\n"
+        }
+      ],
+      "findings": [],
+      "problems": [],
+      "collectors": [
+        {
+          "path": "deploy/collector-loadbalancer.yaml",
+          "line": 1,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        },
+        {
+          "path": "config/otel-collector-config.yaml",
+          "line": 1,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        }
+      ]
+    },
+    {
+      "name": "a collector in a Helm template, and one whose processors are a placeholder, are named as not checked",
+      "files": [
+        {
+          "path": "chart/templates/configmap.yaml",
+          "text": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ .Release.Name }}-collector\ndata:\n  relay: |\n    processors:\n      memory_limiter: {check_interval: 1s, limit_mib: 512}\n      redaction/identifiers: {allow_all_keys: true}\n      redaction: {allow_all_keys: true}\n      transform/pii: {error_mode: ignore}\n      transform/exceptions: {error_mode: ignore}\n      batch: {}\n    receivers:\n      otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\n    exporters:\n      debug: {}\n    service:\n      pipelines:\n        logs:\n          receivers: [otlp]\n          processors: [memory_limiter, redaction/identifiers, transform/pii, transform/exceptions, batch]\n          exporters: [debug]\n"
+        },
+        {
+          "path": "deploy/placeholder.yaml",
+          "text": "processors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\n  redaction/identifiers: {allow_all_keys: true}\n  redaction: {allow_all_keys: true}\n  transform/pii: {error_mode: ignore}\n  transform/exceptions: {error_mode: ignore}\n  batch: {}\nreceivers:\n  otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: ${env:LOG_PROCESSORS}\n      exporters: [debug]\n"
+        }
+      ],
+      "findings": [],
+      "problems": [
+        {
+          "path": "chart/templates/configmap.yaml",
+          "line": 20,
+          "reason": "the collector's logs pipeline is in a Helm template, not checked"
+        },
+        {
+          "path": "deploy/placeholder.yaml",
+          "line": 14,
+          "reason": "the collector's logs pipeline names its processors through a placeholder, not checked"
+        }
+      ],
+      "collectors": [
+        {
+          "path": "chart/templates/configmap.yaml",
+          "line": 7,
+          "env": [],
+          "dirs": [],
+          "skip": "it is in a Helm template"
+        },
+        {
+          "path": "deploy/placeholder.yaml",
+          "line": 1,
+          "env": [
+            "LOG_PROCESSORS"
+          ],
+          "dirs": [],
+          "skip": ""
+        }
+      ]
+    },
+    {
+      "name": "a logs/app pipeline is read and named with its slash as _, a traces pipeline is not, anchors and merges are followed, and each document of a stream is read",
+      "files": [
+        {
+          "path": "deploy/named.yaml",
+          "text": "processors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\n  redaction/identifiers: {allow_all_keys: true}\n  redaction: {allow_all_keys: true}\n  transform/pii: {error_mode: ignore}\n  transform/exceptions: {error_mode: ignore}\n  batch: {}\nreceivers:\n  otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, redaction/identifiers, redaction, transform/pii, transform/exceptions, batch]\n      exporters: [debug]\n    logs/app:\n      receivers: [otlp]\n      processors: [memory_limiter, transform/pii, transform/exceptions]\n      exporters: [debug]\n    traces:\n      receivers: [otlp]\n      processors: [batch]\n      exporters: [debug]\n"
+        },
+        {
+          "path": "deploy/anchors.yaml",
+          "text": "x-procs: &kept [memory_limiter, redaction/identifiers, redaction, transform/pii, transform/exceptions, batch]\nx-pipe: &pipe\n  receivers: [otlp]\n  exporters: [debug]\nprocessors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\n  redaction/identifiers: {allow_all_keys: true}\n  redaction: {allow_all_keys: true}\n  transform/pii: {error_mode: ignore}\n  transform/exceptions: {error_mode: ignore}\n  batch: {}\nreceivers:\n  otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    logs:\n      <<: *pipe\n      processors: *kept\n"
+        },
+        {
+          "path": "deploy/multi.yaml",
+          "text": "processors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\n  redaction/identifiers: {allow_all_keys: true}\n  redaction: {allow_all_keys: true}\n  transform/pii: {error_mode: ignore}\n  transform/exceptions: {error_mode: ignore}\n  batch: {}\nreceivers:\n  otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, redaction/identifiers, redaction, transform/pii, transform/exceptions, batch]\n      exporters: [debug]\n---\nprocessors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\n  redaction/identifiers: {allow_all_keys: true}\n  redaction: {allow_all_keys: true}\n  transform/pii: {error_mode: ignore}\n  transform/exceptions: {error_mode: ignore}\n  batch: {}\nreceivers:\n  otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, redaction/identifiers, transform/pii, transform/exceptions, batch]\n      exporters: [debug]\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+          "severity": "error",
+          "name": "collector.pipelines.logs",
+          "path": "deploy/multi.yaml",
+          "line": 32
+        },
+        {
+          "rule": "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+          "severity": "error",
+          "name": "collector.pipelines.logs_app",
+          "path": "deploy/named.yaml",
+          "line": 18
+        }
+      ],
+      "problems": [],
+      "collectors": [
+        {
+          "path": "deploy/named.yaml",
+          "line": 1,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        },
+        {
+          "path": "deploy/anchors.yaml",
+          "line": 1,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        },
+        {
+          "path": "deploy/multi.yaml",
+          "line": 1,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        },
+        {
+          "path": "deploy/multi.yaml",
+          "line": 19,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        }
+      ]
+    },
+    {
+      "name": "a Secret's string is not read, nor a collector under .o11y, and a setting the files name under a reserved name is not read",
+      "files": [
+        {
+          "path": "k8s/secret.yaml",
+          "text": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: otel\nstringData:\n  relay: |\n    processors:\n      memory_limiter: {check_interval: 1s, limit_mib: 512}\n      redaction/identifiers: {allow_all_keys: true}\n      redaction: {allow_all_keys: true}\n      transform/pii: {error_mode: ignore}\n      transform/exceptions: {error_mode: ignore}\n      batch: {}\n    receivers:\n      otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\n    exporters:\n      debug: {}\n    service:\n      pipelines:\n        logs:\n          receivers: [otlp]\n          processors: [memory_limiter, redaction/identifiers, transform/pii, transform/exceptions, batch]\n          exporters: [debug]\n"
+        },
+        {
+          "path": ".o11y/collector.yaml",
+          "text": "processors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\n  redaction/identifiers: {allow_all_keys: true}\n  redaction: {allow_all_keys: true}\n  transform/pii: {error_mode: ignore}\n  transform/exceptions: {error_mode: ignore}\n  batch: {}\nreceivers:\n  otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, redaction/identifiers, transform/pii, transform/exceptions, batch]\n      exporters: [debug]\n"
+        },
+        {
+          "path": "deploy/values.yaml",
+          "text": "collector:\n  validate: refused\n  pipelines:\n    logs: transform/pii\n"
+        },
+        {
+          "path": "deploy/.env",
+          "text": "COLLECTOR_VALIDATE=1\n"
+        }
+      ],
+      "findings": [],
+      "problems": [],
+      "collectors": []
+    },
+    {
+      "name": "a whole collector's environment references without a default are listed for validation; one reading through another provider is not validated",
+      "files": [
+        {
+          "path": "deploy/envs.yaml",
+          "text": "processors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\n  redaction/identifiers: {allow_all_keys: true}\n  redaction: {allow_all_keys: true}\n  transform/pii: {error_mode: ignore}\n  transform/exceptions: {error_mode: ignore}\n  batch: {}\nreceivers:\n  otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\nexporters:\n  datadog:\n    api: {key: \"${env:DD_API_KEY}\"}\n  otlphttp:\n    headers: {api-key: \"${NEW_RELIC_LICENSE_KEY}\", x: \"${env:HASH:-default}\"}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, redaction/identifiers, redaction, transform/pii, transform/exceptions, batch]\n      exporters: [debug]\n"
+        },
+        {
+          "path": "deploy/provider.yaml",
+          "text": "processors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\n  redaction/identifiers: {allow_all_keys: true}\n  redaction: {allow_all_keys: true}\n  transform/pii: {error_mode: ignore}\n  transform/exceptions: {error_mode: ignore}\n  batch: {}\nreceivers:\n  otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\nexporters:\n  debug: {}\n  otlp:\n    endpoint: ${file:/etc/endpoint}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, redaction/identifiers, redaction, transform/pii, transform/exceptions, batch]\n      exporters: [debug]\n"
+        }
+      ],
+      "findings": [],
+      "problems": [],
+      "collectors": [
+        {
+          "path": "deploy/envs.yaml",
+          "line": 1,
+          "env": [
+            "DD_API_KEY",
+            "NEW_RELIC_LICENSE_KEY"
+          ],
+          "dirs": [],
+          "skip": ""
+        },
+        {
+          "path": "deploy/provider.yaml",
+          "line": 1,
+          "env": [],
+          "dirs": [],
+          "skip": "it reads a value through ${file:...}"
+        }
+      ]
+    },
+    {
+      "name": "a Helm values file layered over the chart's values is judged with the processors they define: replacing the logs pipeline's list without redaction is flagged",
+      "files": [
+        {
+          "path": "chart/values.yaml",
+          "text": "mode: deployment\nconfig:\n  processors:\n    memory_limiter: {check_interval: 1s, limit_mib: 512}\n    redaction/identifiers: {allow_all_keys: true}\n    redaction: {allow_all_keys: true}\n    transform/pii: {error_mode: ignore}\n    transform/exceptions: {error_mode: ignore}\n    batch: {}\n  receivers:\n    otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\n  exporters:\n    debug: {}\n  service:\n    pipelines:\n      logs:\n        receivers: [otlp]\n        processors: [memory_limiter, redaction/identifiers, redaction, transform/pii, transform/exceptions, batch]\n        exporters: [debug]\n"
+        },
+        {
+          "path": "chart/values-prod.yaml",
+          "text": "config:\n  service:\n    pipelines:\n      logs:\n        processors: [memory_limiter, batch]\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+          "severity": "error",
+          "name": "collector.pipelines.logs",
+          "path": "chart/values-prod.yaml",
+          "line": 4
+        }
+      ],
+      "problems": [],
+      "collectors": []
+    },
+    {
+      "name": "a collector file layered over another with a second --config is a fragment: not validated, judged with its directory's processors",
+      "files": [
+        {
+          "path": "otel/collector.yaml",
+          "text": "processors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\n  redaction/identifiers: {allow_all_keys: true}\n  redaction: {allow_all_keys: true}\n  transform/pii: {error_mode: ignore}\n  transform/exceptions: {error_mode: ignore}\n  batch: {}\nreceivers:\n  otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, redaction/identifiers, redaction, transform/pii, transform/exceptions, batch]\n      exporters: [debug]\n"
+        },
+        {
+          "path": "otel/override.yaml",
+          "text": "service:\n  pipelines:\n    logs:\n      exporters: [debug]\n"
+        },
+        {
+          "path": "otel/override-dropped.yaml",
+          "text": "processors:\n  batch: {}\nservice:\n  pipelines:\n    logs:\n      processors: [memory_limiter, batch]\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+          "severity": "error",
+          "name": "collector.pipelines.logs",
+          "path": "otel/override-dropped.yaml",
+          "line": 5
+        }
+      ],
+      "problems": [],
+      "collectors": [
+        {
+          "path": "otel/collector.yaml",
+          "line": 1,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        }
+      ]
+    },
+    {
+      "name": "an Operator spec.config is written out with its aliases resolved and its comments dropped: a commented provider reference does not keep it from validation",
+      "files": [
+        {
+          "path": "k8s/operator.yaml",
+          "text": "apiVersion: opentelemetry.io/v1beta1\nkind: OpenTelemetryCollector\nmetadata:\n  name: c\nspec:\n  env:\n    - name: X\n      value: &ep \"0.0.0.0:4317\"\n  config:\n    processors:\n      memory_limiter: {check_interval: 1s, limit_mib: 512}\n      redaction/identifiers: {allow_all_keys: true}\n      redaction: {allow_all_keys: true}\n      transform/pii: {error_mode: ignore}\n      transform/exceptions: {error_mode: ignore}\n      batch: {}\n    receivers:\n      otlp: {protocols: {grpc: {endpoint: *ep}}}\n    exporters:\n      # endpoint: ${file:/etc/x}\n      debug: {}\n    service:\n      pipelines:\n        logs:\n          receivers: [otlp]\n          processors: [memory_limiter, redaction/identifiers, redaction, transform/pii, transform/exceptions, batch]\n          exporters: [debug]\n"
+        }
+      ],
+      "findings": [],
+      "problems": [],
+      "collectors": [
+        {
+          "path": "k8s/operator.yaml",
+          "line": 10,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        }
+      ]
+    },
+    {
+      "name": "a ConfigMap string whose flow list continues at its key's indentation is read as the file reader reads it, and flagged",
+      "files": [
+        {
+          "path": "k8s/wrapped.yaml",
+          "text": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\ndata:\n  relay: |\n    processors:\n      memory_limiter: {check_interval: 1s, limit_mib: 512}\n      redaction/identifiers: {allow_all_keys: true}\n      redaction: {allow_all_keys: true}\n      transform/pii: {error_mode: ignore}\n      transform/exceptions: {error_mode: ignore}\n      batch: {}\n    receivers:\n      otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\n    exporters:\n      debug: {}\n    service:\n      pipelines:\n        logs:\n          receivers: [otlp]\n          processors: [memory_limiter, redaction/identifiers,\n          transform/pii, transform/exceptions, batch]\n          exporters: [debug]\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+          "severity": "error",
+          "name": "collector.pipelines.logs",
+          "path": "k8s/wrapped.yaml",
+          "line": 20
+        }
+      ],
+      "problems": [],
+      "collectors": [
+        {
+          "path": "k8s/wrapped.yaml",
+          "line": 7,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        }
+      ]
+    },
+    {
+      "name": "a template action in a comment does not silence a dropped redaction; a placeholder inside the list is named as not checked",
+      "files": [
+        {
+          "path": "otel/commented.yaml",
+          "text": "# {{ not a template }}\nprocessors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\n  redaction/identifiers: {allow_all_keys: true}\n  redaction: {allow_all_keys: true}\n  transform/pii: {error_mode: ignore}\n  transform/exceptions: {error_mode: ignore}\n  batch: {}\nreceivers:\n  otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, redaction/identifiers, transform/pii, transform/exceptions, batch]\n      exporters: [debug]\n"
+        },
+        {
+          "path": "otel/listed.yaml",
+          "text": "processors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\n  redaction/identifiers: {allow_all_keys: true}\n  redaction: {allow_all_keys: true}\n  transform/pii: {error_mode: ignore}\n  transform/exceptions: {error_mode: ignore}\n  batch: {}\nreceivers:\n  otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, \"${env:P}\", transform/pii, transform/exceptions, batch]\n      exporters: [debug]\n"
+        }
+      ],
+      "findings": [
+        {
+          "rule": "COLLECTOR_LOGS_PROCESSOR_DROPPED",
+          "severity": "error",
+          "name": "collector.pipelines.logs",
+          "path": "otel/commented.yaml",
+          "line": 15
+        }
+      ],
+      "problems": [
+        {
+          "path": "otel/listed.yaml",
+          "line": 14,
+          "reason": "the collector's logs pipeline names a processor through a placeholder, not checked"
+        }
+      ],
+      "collectors": [
+        {
+          "path": "otel/commented.yaml",
+          "line": 2,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        },
+        {
+          "path": "otel/listed.yaml",
+          "line": 1,
+          "env": [
+            "P"
+          ],
+          "dirs": [],
+          "skip": ""
+        }
+      ]
+    },
+    {
+      "name": "a collector file a Secret carries is not read for collectors",
+      "files": [
+        {
+          "path": "k8s/secret-file.yaml",
+          "text": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: c\nstringData:\n  collector.yaml: |\n    processors:\n      memory_limiter: {check_interval: 1s, limit_mib: 512}\n      redaction/identifiers: {allow_all_keys: true}\n      redaction: {allow_all_keys: true}\n      transform/pii: {error_mode: ignore}\n      transform/exceptions: {error_mode: ignore}\n      batch: {}\n    receivers:\n      otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\n    exporters:\n      debug: {}\n    service:\n      pipelines:\n        logs:\n          receivers: [otlp]\n          processors: [memory_limiter, redaction/identifiers, transform/pii, transform/exceptions, batch]\n          exporters: [debug]\n"
+        }
+      ],
+      "findings": [],
+      "problems": [],
+      "collectors": []
+    },
+    {
+      "name": "file_storage directories are listed for validation, a default when none is set; one named through a placeholder keeps it from validation; ${NAME:-default} is no provider",
+      "files": [
+        {
+          "path": "otel/storage.yaml",
+          "text": "processors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\n  redaction/identifiers: {allow_all_keys: true}\n  redaction: {allow_all_keys: true}\n  transform/pii: {error_mode: ignore}\n  transform/exceptions: {error_mode: ignore}\n  batch: {}\nreceivers:\n  otlp: {protocols: {grpc: {endpoint: \"0.0.0.0:4317\"}}}\nexporters:\n  debug: {}\nextensions:\n  file_storage: {}\n  file_storage/q:\n    directory: /var/lib/otelcol/q\n  file_storage/r:\n    directory: ${env:DIR}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, redaction/identifiers, redaction, transform/pii, transform/exceptions, batch]\n      exporters: [debug]\n"
+        },
+        {
+          "path": "otel/defaulted.yaml",
+          "text": "processors:\n  memory_limiter: {check_interval: 1s, limit_mib: 512}\n  redaction/identifiers: {allow_all_keys: true}\n  redaction: {allow_all_keys: true}\n  transform/pii: {error_mode: ignore}\n  transform/exceptions: {error_mode: ignore}\n  batch: {}\nreceivers:\n  otlp: {protocols: {grpc: {endpoint: \"${HOST:-0.0.0.0}:4317\"}}}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, redaction/identifiers, redaction, transform/pii, transform/exceptions, batch]\n      exporters: [debug]\n"
+        }
+      ],
+      "findings": [],
+      "problems": [],
+      "collectors": [
+        {
+          "path": "otel/storage.yaml",
+          "line": 1,
+          "env": [
+            "DIR"
+          ],
+          "dirs": [
+            "/var/lib/otelcol/file_storage",
+            "/var/lib/otelcol/q"
+          ],
+          "skip": "its file_storage directory is not a plain absolute path"
+        },
+        {
+          "path": "otel/defaulted.yaml",
+          "line": 1,
+          "env": [],
+          "dirs": [],
+          "skip": ""
+        }
+      ]
+    },
+    {
+      "name": "a mapping that merges itself many times is read once per lookup",
+      "files": [
+        {
+          "path": "deploy/merge.yaml",
+          "text": "a: &a\n  <<: [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a]\n"
+        }
+      ],
+      "findings": [],
+      "problems": [
+        {
+          "path": "deploy/merge.yaml",
+          "line": 2,
+          "reason": "nested deeper than 64 levels, not read below"
+        },
+        {
+          "path": "deploy/merge.yaml",
+          "line": 2,
+          "reason": "aliases expand past 10000 nodes, the rest not read"
+        }
+      ],
+      "collectors": []
     }
   ]
 }

@@ -37,6 +37,10 @@ export interface Inputs {
    * nothing; the `jars` input is then not needed.
    */
   checkOnly: boolean;
+  /** Run the collector's own validate on each collector configuration found, through docker. */
+  collectorValidate: boolean;
+  /** The collector image that validate runs. */
+  collectorImage: string;
 }
 
 export interface Session {

@@ -28,8 +28,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # RUN_DOCKER_TESTS runs the collector's validate through the runner's docker, on the image the check pins.
       - name: Unit tests
         run: npm test
+        env:
+          RUN_DOCKER_TESTS: 'true'
 
       - name: Bundle dist/
         run: npm run build

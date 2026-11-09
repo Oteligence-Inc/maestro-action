@@ -31,7 +31,10 @@ import { BuildVerificationError, verifyBuild } from '../src/steps/verify';
 import { logPolicyCheck, readMapping } from '../src/steps/ciCheck';
 import { checkOnly } from '../src/steps/checkOnly';
 
-const inputs = { service: 'fundtransfer', environment: 'dev', apiUrl: 'https://api.oteligence.com' };
+const inputs = {
+  service: 'fundtransfer', environment: 'dev', apiUrl: 'https://api.oteligence.com', collectorValidate: true,
+  collectorImage: 'otel/x:1',
+};
 
 beforeEach(() => {
   (pollJob as jest.Mock).mockReset();
@@ -57,6 +60,9 @@ describe('the log policy check', () => {
     (logPolicyCheck as jest.Mock).mockResolvedValue(result);
     await run();
     expect((logPolicyCheck as jest.Mock).mock.calls[0].slice(0, 4)).toEqual([expect.anything(), 'proj_1', 'dev', 'fundtransfer']);
+    expect((logPolicyCheck as jest.Mock).mock.calls[0][6]).toEqual({
+      validate: inputs.collectorValidate, image: inputs.collectorImage, results: new Map(),
+    });
     expect((logPolicyCheck as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(
       (uploadJar as jest.Mock).mock.invocationCallOrder[0],
     );

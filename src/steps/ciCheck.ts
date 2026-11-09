@@ -6,9 +6,10 @@ import * as path from 'path';
 import { Minimatch } from 'minimatch';
 import { parseAllDocuments } from 'yaml';
 import { MaestroApi, expectOk } from '../api';
-import { CASES_DIGEST, Finding, RuleSet, VERSION, evaluate, unreadable } from '../ciRules';
+import { CASES_DIGEST, COLLECTOR_VALIDATE, Finding, RuleSet, VERSIONS, evaluate, unreadable } from '../ciRules';
+import { Runner, dockerRunner, findDocker, validateCollectors, watches } from '../logPolicy/validate';
 import { AotNote, aotNotes } from '../logPolicy/aot';
-import { Problem, SourcedSetting, decode, extract, kindOf, trimSpace, withoutYamlVersion } from '../logPolicy/extract';
+import { CollectorConfig, CollectorFragment, Problem, SourcedSetting, decode, extract, kindOf, trimSpace, widenFragments, withoutYamlVersion } from '../logPolicy/extract';
 import { UserError } from '../util/errors';
 import { envPath } from './resolveConfig';
 
@@ -88,12 +89,25 @@ function enforcing(mode: string): boolean {
   return mode === 'FAIL' || mode === 'FAIL_ON_NEW';
 }
 
+/** Whether and how the check validates the collector configurations it finds. */
+export interface CollectorValidation {
+  validate: boolean;
+  image: string;
+  /** The docker client; found on PATH when undefined, none when null. */
+  docker?: string | null;
+  run?: Runner;
+  /** Results by configuration, shared by every check of one run. */
+  results: Map<string, { code: number; why: string }>;
+}
+
 export interface Scan {
   settings: SourcedSetting[];
   problems: Problem[];
   aot: AotNote[];
   read: number;
   leftOut: number;
+  /** The whole collector configurations read, for validation. */
+  collectors: CollectorConfig[];
 }
 
 export interface MappingEntry {
@@ -106,7 +120,7 @@ export function fingerprint(f: { rule: string; name: string; path: string }): st
   return `${f.rule}|${f.name}|${f.path}`;
 }
 
-/** GET .../envs/{env}/ci-rules for one service, at the one version this Action reads. */
+/** GET .../envs/{env}/ci-rules for one service, naming every rule-set version this Action reads. */
 export async function fetchRules(
   api: MaestroApi,
   projectUid: string,
@@ -116,7 +130,7 @@ export async function fetchRules(
 ): Promise<ServedRules> {
   const lock = lockedVersionUid ? `&lockedVersionUid=${encodeURIComponent(lockedVersionUid)}` : '';
   const res = await api.get<{ data?: Record<string, unknown> }>(
-    `${envPath(projectUid, environment)}/ci-rules?service=${encodeURIComponent(service)}&versions=${VERSION}${lock}`,
+    `${envPath(projectUid, environment)}/ci-rules?service=${encodeURIComponent(service)}&versions=${VERSIONS.join(',')}${lock}`,
   );
   if (res.statusCode === 404) {
     const code = (res.body as { data?: { code?: unknown } } | undefined)?.data?.code;
@@ -299,9 +313,11 @@ export function filesFor(files: string[], mapping: MappingEntry[] | null, servic
  * only the AOT cache notes are read, as for an environment whose check is off.
  */
 export function scan(root: string, files: string[], mapped = false, settings = true): Scan {
-  const result: Scan = { settings: [], problems: [], aot: [], read: 0, leftOut: 0 };
+  const result: Scan = { settings: [], problems: [], aot: [], read: 0, leftOut: 0, collectors: [] };
   const realRoot = fs.realpathSync(root);
   let origins = 0;
+  const fragments: CollectorFragment[] = [];
+  const defined: { dir: string; defined: string[] }[] = [];
   for (const rel of files) {
     const kind = kindOf(rel);
     if (!kind || NEVER_READ.test(rel) || (!mapped && SKIPPED.some((re) => re.test(rel)))) continue;
@@ -335,10 +351,14 @@ export function scan(root: string, files: string[], mapped = false, settings = t
     if (!settings) continue;
     const found = extract(rel, text, kind);
     result.read++;
+    for (const f of found.fragments) fragments.push({ setting: result.settings.length + f.setting, list: f.list });
+    defined.push(...found.collectorDefined);
     for (const s of found.settings) result.settings.push({ ...s, origin: origins + s.origin });
     origins += found.origins;
     result.problems.push(...found.problems);
+    result.collectors.push(...found.collectors);
   }
+  widenFragments(result.settings, fragments, defined);
   return result;
 }
 
@@ -416,7 +436,7 @@ export function report(findings: Finding[], problems: Problem[], aot: AotNote[] 
     else core.warning(message, where);
   }
   for (const p of problems) {
-    core.warning(`Log policy check could not read ${p.path} line ${p.line}: ${p.reason}`, { file: p.path, startLine: p.line });
+    core.warning(`Log policy check could not read ${printable(p.path)} line ${p.line}: ${printable(p.reason)}`, { file: p.path, startLine: p.line });
   }
   for (const n of aot) {
     core.notice(`AOT cache: ${n.flags.join(' ')}. On JDK 25 the cache does not work with the agent: a training run with agent 2.33.1 attached fails on Linux, and a cache trained without the agent is rejected when it is attached. Start the service without the cache while the agent is attached.`, {
@@ -467,7 +487,7 @@ export async function runCheck(
   service: string,
   root: string,
   repo: Repo,
-  opts: { checkOnly: boolean; lockedVersionUid?: string },
+  opts: { checkOnly: boolean; lockedVersionUid?: string; collectors?: CollectorValidation },
 ): Promise<CheckRun> {
   const who = `${printable(service)} in ${printable(environment)}`;
   const served = await fetchRules(api, projectUid, environment, service, opts.lockedVersionUid);
@@ -514,6 +534,25 @@ export async function runCheck(
     mine = mappedFiles(repo, service, environment);
   }
   const read = scan(root, mine, repo.mapping !== null);
+  if (read.collectors.length > 0 && watches(served.ruleSet, COLLECTOR_VALIDATE)) {
+    const c = opts.collectors;
+    if (c?.validate) {
+      const found = c.docker === undefined ? findDocker(root) : c.docker === null ? null : { docker: c.docker, env: process.env };
+      if (!found) {
+        const first = read.collectors[0];
+        read.problems.push({ path: first.path, line: first.line, reason: 'collector configurations not validated: docker is not on PATH' });
+      } else {
+        const origin = read.settings.reduce((m, s) => Math.max(m, s.origin + 1), 0);
+        const done = await validateCollectors(read.collectors, {
+          image: c.image, run: c.run ?? dockerRunner(found.docker, found.env), timeoutMs: 60_000, pullMs: 300_000,
+        }, origin, c.results);
+        read.settings.push(...done.settings);
+        read.problems.push(...done.problems);
+      }
+    } else {
+      core.info(`Log policy check: ${read.collectors.length} collector configuration(s) found; collector-validate: 'true' runs the collector's own validate on them.`);
+    }
+  }
   const findings = findingsOf(served.ruleSet, read.settings);
   const result = checkResult(service, served.ruleSet, findings);
   const decided = verdict(mode, findings, result.total, served.baseline);
@@ -543,10 +582,12 @@ export async function logPolicyCheck(
   service: string,
   root: string,
   lockedVersionUid?: string,
+  collectors?: CollectorValidation,
 ): Promise<CheckResult | null> {
   const run = await runCheck(api, projectUid, environment, service, root, readRepo(root), {
     checkOnly: false,
     lockedVersionUid,
+    collectors,
   });
   core.setOutput('log-policy-check', run.outcome);
   core.setOutput('log-policy-findings', String(run.result?.total ?? 0));

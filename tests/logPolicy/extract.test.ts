@@ -13,12 +13,12 @@ import {
   replaceTemplates,
   untemplated,
 } from '../../src/logPolicy/extract';
-import { NAME, RuleSet } from '../../src/ciRules';
+import { NAME, RuleSet, VERSION } from '../../src/ciRules';
 import { findingsOf } from '../../src/steps/ciCheck';
 import cases from '../fixtures/ci-rules/evaluation-cases.json';
 
 const lockFreeRules = (): RuleSet =>
-  Object.values((cases as unknown as { ruleSets: Record<string, RuleSet> }).ruleSets).find((s) => s.lockFree) as RuleSet;
+  Object.values((cases as unknown as { ruleSets: Record<string, RuleSet> }).ruleSets).find((s) => s.lockFree && s.version === VERSION) as RuleSet;
 
 const names = (text: string, kind: Parameters<typeof extract>[2], path = 'deploy/x') =>
   extract(path, text, kind).settings.map((s) => `${s.name}=${s.value}@${s.line}`);

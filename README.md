@@ -75,6 +75,8 @@ the app image.
 | `skip-generate-on-inactive` | no | `false` | When the subscription is inactive (402), skip generation, set `generated` to `false` and let the pipeline continue without a new extension, instead of failing the step. |
 | `skip-on-removed-service` | no | `false` | When this service is no longer in the environment's lock, skip generation, set `generated` to `false` and let the pipeline continue, instead of failing the step. Off, a removed or mistyped service fails with a message. |
 | `signing-public-key` | no | | The Ed25519 public key your Maestro platform signs builds with: its PEM, or the base64 of its X.509 SubjectPublicKeyInfo. Set, the step fails unless the build carries a statement this key signed (see *Verifying the download*). Unset, a signed build is reported as `not-checked` and an unsigned one as `unsigned`. Take it from your own records, for example a repository variable, never from the Maestro server; a private key is refused. |
+| `collector-validate` | no | `false` | `true` runs the collector's own `validate`, check-only, on each whole collector configuration the log policy check finds (a collector file, an `OpenTelemetryCollector` resource, a ConfigMap string; a Helm values fragment is not whole), through `docker`: in a container with no network, no capabilities and a read-only filesystem, given only the configuration and a fake Kubernetes service account, and a stand-in value for each environment variable it reads with no default. The image is pulled into the runner's Docker if absent. A refused configuration is a `COLLECTOR_CONFIG_INVALID` warning; the collector's output is never logged. The runner needs `docker`. |
+| `collector-image` | no | the collector-contrib release the platform validates generated configurations for, by digest | The collector image `collector-validate` runs; anything that is not an image reference is refused. |
 | `check-only` | no | `false` | `true` runs only the log policy check (below) over the repository's tracked deployment files and stops: nothing is uploaded, analysed or built, and `generated` is `false`. With a `.maestro/check.yml`, every service and environment it lists is checked against the files it maps to them. |
 | `require-signed-build` | no | `false` | `true` fails the step when `signing-public-key` is empty. A workflow variable that is missing in a repository, fork or environment reads as empty, which would otherwise switch the signature check off. |
 
@@ -266,7 +268,8 @@ the step: `fail-on-warnings` applies to peer staleness only, and the build is st
 ## The log policy check
 
 Before it uploads anything, the Action reads the environment's log policy rules from Maestro
-(`GET .../envs/{env}/ci-rules?service=...&versions=1&lockedVersionUid=...`, the lock this run builds) and checks
+(`GET .../envs/{env}/ci-rules?service=...&versions=1,2&lockedVersionUid=...`, the lock this run builds, at the highest
+rule-set version Maestro holds of those this Action reads) and checks
 the repository's tracked deployment files against them: YAML (Helm values, Kubernetes manifests, compose files),
 Dockerfiles, `.env` files and `.properties` files, each split into lines at CRLF, CR or LF. A `.properties` file is
 read as ISO-8859-1, as Java reads it, escapes (`\u0044`) included; any other file is UTF-8, read past a byte order
@@ -315,6 +318,28 @@ exposed, a logs endpoint or a declarative config file set, SQL sanitization off 
 settings the overrides refuse, and, from the analysis of the locked JAR, a variable its packaged logging reads a
 level from and a profile whose packaged level is below the floor. The bundle's own start command and identity
 settings are never findings.
+
+The check also reads collector configurations: a collector file, a Helm chart's `config` values, an Operator
+`OpenTelemetryCollector`'s `spec.config` (a mapping or a string) and a string a ConfigMap carries (a `relay` key, or a
+file key, which is read once). A generated configuration whose logs pipeline (`logs` or `logs/<name>`) drops
+`redaction`, `transform/pii` or `transform/exceptions`, or `redaction/identifiers` where it defines it, is a
+`COLLECTOR_LOGS_PROCESSOR_DROPPED` error at the pipeline's line. A configuration that defines or names fewer than two of
+the first three and the generator's `redaction/db` and `transform/truncate` is not the generated one and passes: the
+front tier (`collector-loadbalancer.yaml`) and, usually, a collector of your own. A Helm values file, or a collector
+file without its own receivers and exporters (one layered over another with a second `--config`), is a fragment: it is
+judged with the processors every collector configuration in its directory defines, so a `values-prod.yaml` that
+replaces the logs pipeline's list without redaction is flagged, and it is not validated. A collector file a Secret
+carries is not read for this. A Helm values file that names a pipeline without its processors is not read for it, since the chart and the other
+values files supply them; a pipeline in a file that holds any Helm template action, or whose processors are or hold a
+placeholder, is named as not checked. With `collector-validate: 'true'`, the collector's own `validate` also runs, check-only, on each whole
+configuration (not a values fragment) through `docker` on the runner: in a container with no network, no capabilities,
+a read-only filesystem, a fake Kubernetes service account and only the configuration mounted, under `collector-image`.
+A stand-in value is set for each `${env:NAME}` it reads with no default, and an empty in-memory directory is given for
+each `file_storage` directory it names; one reading through another provider (`${file:...}`) is not validated. Docker
+runs with a `PATH` holding no directory inside the workspace and none of the runner's other environment. A configuration it refuses is a `COLLECTOR_CONFIG_INVALID` warning; one it could not
+run (no docker, an image that cannot be pulled, a known-good configuration refused, a timeout) is named. The
+collector's output is never logged: run `otelcol-contrib validate --config=<file>` yourself to see why. Without the
+input, a check that finds collector configurations says how to validate them.
 
 Each finding is printed as its rule, the setting's name, and the file and line, as an annotation on that line
 (an `error` for an error-severity rule, else a `warning`), with a table in the job summary. **The Action never

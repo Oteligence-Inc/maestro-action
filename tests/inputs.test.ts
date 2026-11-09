@@ -1,3 +1,4 @@
+import { COLLECTOR_IMAGE } from '../src/logPolicy/validate';
 import * as crypto from 'crypto';
 import { normaliseApiUrl, parseInputs, parseSigningKey } from '../src/inputs';
 import { UserError } from '../src/util/errors';
@@ -127,6 +128,23 @@ describe('parseInputs — project / project-id', () => {
     expect(() => parseInputs()).toThrow(/trusted-api-host/);
     process.env['INPUT_TRUSTED-API-HOST'] = 'maestro.bank.internal';
     expect(parseInputs().apiUrl).toBe('https://maestro.bank.internal');
+  });
+
+  it('reads collector-validate, defaults collector-image to the pinned release, and refuses an image that is not one', () => {
+    seedRequired();
+    process.env['INPUT_PROJECT-ID'] = 'proj_1';
+    delete process.env['INPUT_COLLECTOR-VALIDATE'];
+    delete process.env['INPUT_COLLECTOR-IMAGE'];
+    let i = parseInputs();
+    expect(i.collectorValidate).toBe(false);
+    expect(i.collectorImage).toBe(COLLECTOR_IMAGE);
+    process.env['INPUT_COLLECTOR-VALIDATE'] = 'TRUE';
+    process.env['INPUT_COLLECTOR-IMAGE'] = 'otel/opentelemetry-collector-contrib:0.164.0';
+    i = parseInputs();
+    expect(i.collectorValidate).toBe(true);
+    expect(i.collectorImage).toBe('otel/opentelemetry-collector-contrib:0.164.0');
+    process.env['INPUT_COLLECTOR-IMAGE'] = '--privileged';
+    expect(() => parseInputs()).toThrow('collector-image is not an image reference');
   });
 
   it('throws when neither project nor project-id is provided', () => {

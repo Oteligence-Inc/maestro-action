@@ -29686,19 +29686,29 @@ function namedDowngrade(err) {
 // discrete-job-functions' djf-core CiRules.evaluate; the shared fixture suite (tests/fixtures/ci-rules) holds the two
 // to the same answers, and CASES_DIGEST pins which copy of that suite this release was tested against.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.NAME = exports.TESTS = exports.CASES_DIGEST = exports.VERSION = void 0;
+exports.PLACEHOLDER = exports.NAME = exports.TESTS = exports.COLLECTOR_VALIDATE = exports.COLLECTOR_PIPELINES = exports.CASES_DIGEST = exports.VERSIONS = exports.VERSION = void 0;
 exports.findingName = findingName;
 exports.trimAscii = trimAscii;
 exports.fold = fold;
 exports.evaluate = evaluate;
 exports.matches = matches;
 exports.passesTest = passesTest;
+exports.dropsProcessor = dropsProcessor;
 exports.unreadable = unreadable;
-/** The rule-set version this Action reads. */
-exports.VERSION = 1;
+/** The newest rule-set version this Action reads; it reads every version from 1 up and names them all to the platform. */
+exports.VERSION = 2;
+/** The rule-set versions this Action reads; the platform serves the highest it has. */
+exports.VERSIONS = [1, 2];
 /** The SHA-256 of the evaluation fixture suite this release was tested against; the server serves its own. */
-exports.CASES_DIGEST = 'b2b18f1ba97efadc13c76c13eda51fb550aef35be24be5eeab53a865a31804ae';
-/** Every test a version 1 rule may name; a rule naming another fails loudly. */
+exports.CASES_DIGEST = '1779d21a6eb889f5cc59210b80e3ab4ee2f12caf53b9a0e363a8adb12cd3fdf0';
+/**
+ * The setting the Action writes for each logs pipeline of a collector configuration it finds, valued
+ * "<the pipeline's processors>|<the processors the configuration defines>"; the files' own settings under it are not read.
+ */
+exports.COLLECTOR_PIPELINES = 'collector.pipelines.';
+/** The setting the Action writes at a collector configuration's line when the collector's validate refused it. */
+exports.COLLECTOR_VALIDATE = 'collector.validate';
+/** Every test a rule of a version this Action reads may name; a rule naming another fails loudly. */
 exports.TESTS = [
     'any',
     'otel_true',
@@ -29708,6 +29718,7 @@ exports.TESTS = [
     'not_exporter',
     'exposes_loggers',
     'profile_below_floor',
+    'keeps_processors',
 ];
 const LEVELS = ['ALL', 'TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL', 'OFF'];
 /** The shape of a folded name a finding carries; job-manager lists no other. */
@@ -29720,7 +29731,7 @@ function findingName(folded) {
     return folded.replace(/[^a-z0-9._-]/gu, '_').substring(0, 200);
 }
 /** A template placeholder anywhere, or a value written as $VAR or @name@: it passes no test but any. */
-const PLACEHOLDER = /^(?:[\s\S]*(?:\$\{|\$\(|#\{|\{\{|__TEMPLATE__)[\s\S]*|\$[A-Za-z_][\s\S]*|@[A-Za-z0-9_.-]+@)$/;
+exports.PLACEHOLDER = /^(?:[\s\S]*(?:\$\{|\$\(|#\{|\{\{|__TEMPLATE__)[\s\S]*|\$[A-Za-z_][\s\S]*|@[A-Za-z0-9_.-]+@)$/;
 /** Java's String.trim: spaces and control characters at either end, and nothing else. */
 function trimAscii(v) {
     let start = 0;
@@ -29775,12 +29786,14 @@ function passesTest(r, raw, set) {
         throw new Error(`unknown test ${r.test}`);
     if (r.test === 'any')
         return true;
+    if (r.test === 'keeps_processors')
+        return dropsProcessor(r.values, v);
     // A list test reads its elements whatever else the list holds: a placeholder element names nothing it looks for.
     if (r.test === 'exposes_loggers')
         return v.split(',').some((p) => trimAscii(p) === 'loggers' || trimAscii(p) === '*');
     if (r.test === 'profile_below_floor')
         return v.split(',').some((p) => r.values.includes(trimAscii(p)));
-    if (PLACEHOLDER.test(v))
+    if (exports.PLACEHOLDER.test(v))
         return false;
     switch (r.test) {
         case 'otel_true':
@@ -29796,6 +29809,49 @@ function passesTest(r, raw, set) {
         default:
             throw new Error(`unknown test ${r.test}`);
     }
+}
+/**
+ * Whether a logs pipeline of the generated collector configuration lacks a processor it keeps: the pipeline's list is
+ * the value before its first |, the configuration's defined processors after it, and a placeholder in the list passes.
+ * The configuration is the generated one when it defines or names two or more of the unconditional values and the
+ * markers (marked !, never required); a value marked ? is required only where the configuration defines it.
+ */
+function dropsProcessor(values, value) {
+    const bar = value.indexOf('|');
+    const list = bar < 0 ? value : value.slice(0, bar);
+    if (exports.PLACEHOLDER.test(trimAscii(list)))
+        return false;
+    const pipeline = processorNames(list);
+    const defined = processorNames(bar < 0 ? '' : value.slice(bar + 1));
+    let governed = 0;
+    const required = [];
+    for (const v of values) {
+        if (v.startsWith('?')) {
+            if (defined.has(v.slice(1)))
+                required.push(v.slice(1));
+            continue;
+        }
+        if (v.startsWith('!')) {
+            if (defined.has(v.slice(1)) || pipeline.has(v.slice(1)))
+                governed++;
+            continue;
+        }
+        required.push(v);
+        if (defined.has(v) || pipeline.has(v))
+            governed++;
+    }
+    if (governed < 2)
+        return false;
+    return required.some((v) => !pipeline.has(v));
+}
+function processorNames(csv) {
+    const out = new Set();
+    for (const part of csv.split(',')) {
+        const n = trimAscii(part);
+        if (n !== '')
+            out.add(n);
+    }
+    return out;
 }
 function isLevel(v) {
     const u = v.toUpperCase();
@@ -29816,8 +29872,8 @@ function unreadable(body) {
     if (typeof body !== 'object' || body === null)
         return 'the rule set is empty';
     const set = body;
-    if (set.version !== exports.VERSION) {
-        return `the platform serves rule-set version ${String(set.version)} and this Action reads version ${exports.VERSION}`;
+    if (typeof set.version !== 'number' || !exports.VERSIONS.includes(set.version)) {
+        return `the platform serves rule-set version ${String(set.version)} and this Action reads versions 1 to ${exports.VERSION}`;
     }
     if (typeof set.mode !== 'string' || typeof set.floor !== 'string' || typeof set.digest !== 'string') {
         return 'the rule set has no mode, floor or digest';
@@ -29950,7 +30006,9 @@ async function run() {
         await (0, reportDeployRun_1.reportDeployRun)(api, inputs, projectUid, 'in_progress', null); // deploy-run: start
         // [2c] Before the upload, so a build the environment's log policy refuses costs no analysis.
         const root = workspace();
-        const ciCheck = await (0, ciCheck_1.logPolicyCheck)(api, projectUid, inputs.environment, inputs.service, root, cfg.lockedVersionUid);
+        const ciCheck = await (0, ciCheck_1.logPolicyCheck)(api, projectUid, inputs.environment, inputs.service, root, cfg.lockedVersionUid, {
+            validate: inputs.collectorValidate, image: inputs.collectorImage, results: new Map(),
+        });
         const upload = await (0, upload_1.uploadJar)(api, inputs, cfg); // [3-5]
         const analysisJobId = await (0, submitJob_1.submitAnalysis)(api, cfg, upload); // [6a]
         await (0, poll_1.pollJob)(api, analysisJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7a]
@@ -30096,6 +30154,7 @@ exports.parseSigningKey = parseSigningKey;
 exports.normaliseApiUrl = normaliseApiUrl;
 const core = __importStar(__nccwpck_require__(7484));
 const crypto = __importStar(__nccwpck_require__(6982));
+const validate_1 = __nccwpck_require__(4224);
 const errors_1 = __nccwpck_require__(17);
 /**
  * Parse + validate the action inputs. Masks the API key in logs and holds api-url to https on exactly the
@@ -30132,9 +30191,15 @@ function parseInputs() {
         throw new errors_1.UserError('require-signed-build is set but signing-public-key is empty: an unset variable reads as empty. ' +
             'Supply the platform\'s public key.');
     }
+    const collectorValidate = (core.getInput('collector-validate') || 'false').toLowerCase() === 'true';
+    const collectorImage = core.getInput('collector-image').trim() || validate_1.COLLECTOR_IMAGE;
+    if (!validate_1.IMAGE_SHAPE.test(collectorImage)) {
+        throw new errors_1.UserError('collector-image is not an image reference.');
+    }
     return {
         apiKey, project, projectId, orgId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
-        failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey, checkOnly,
+        failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey, checkOnly, collectorValidate,
+        collectorImage,
     };
 }
 /**
@@ -30275,6 +30340,8 @@ exports.withoutYamlVersion = withoutYamlVersion;
 exports.keyPathNames = keyPathNames;
 exports.property = property;
 exports.envValue = envValue;
+exports.templated = templated;
+exports.widenFragments = widenFragments;
 const buffer_1 = __nccwpck_require__(181);
 const yaml_1 = __nccwpck_require__(8815);
 const ciRules_1 = __nccwpck_require__(7944);
@@ -30356,7 +30423,10 @@ function lines(text) {
 const ENV_LINE = new RegExp(`^[${SPACE}]*(?:export[${SPACE}]+)?([A-Za-z_][A-Za-z0-9_.-]*)[${SPACE}]*=(.*)$`, 's');
 /** The settings a deployment file holds, from its text as `decode` gives it. */
 function extract(path, raw, kind) {
-    const out = { settings: [], problems: [], origins: 0, aliasNodes: 0 };
+    const out = {
+        settings: [], problems: [], origins: 0, aliasNodes: 0, collectors: [], templated: templated(raw), inSecret: false,
+        fragments: [], collectorDefined: [],
+    };
     const text = raw.charCodeAt(0) === 0xfeff ? raw.substring(1) : raw;
     const same = (line) => line;
     switch (kind) {
@@ -30375,6 +30445,8 @@ function extract(path, raw, kind) {
             propertiesSettings(path, text, out, same);
             break;
     }
+    // In file order: the embedded-file reader finds some during the walk, the string search the rest after it.
+    out.collectors = out.collectors.map((c, i) => [c, i]).sort((a, b) => a[0].line - b[0].line || a[1] - b[1]).map(([c]) => c);
     return out;
 }
 /**
@@ -30392,7 +30464,7 @@ function add(out, path, line, names, value) {
     let expanded = false;
     for (const name of Array.isArray(names) ? names : [names]) {
         const folded = (0, ciRules_1.fold)(name);
-        if (folded)
+        if (folded && !reserved(folded))
             out.settings.push({ name: folded, value, path, line, origin });
         if (expanded)
             continue;
@@ -30785,9 +30857,18 @@ function yamlSettings(path, text, out, lineAt, embedded) {
             const contents = doc.contents;
             if (!contents)
                 continue;
-            walkYaml({ path, out, at, aliases, embedded, secret: isSecret(contents) }, contents, [], 0, 0);
+            const w = { path, out, at, aliases, embedded, secret: isSecret(contents), doc };
+            walkYaml(w, contents, [], 0, 0);
+            collectorFind(w, contents, [], 0, documentKind(contents), part);
         }
     }
+}
+/** A Kubernetes document's kind, or ''. */
+function documentKind(root) {
+    if (!(0, yaml_1.isMap)(root))
+        return '';
+    const pair = root.items.find((p) => scalarText(p.key) === 'kind');
+    return pair ? scalarText(pair.value) ?? '' : '';
 }
 /** Whether a document is a Kubernetes Secret, whose data values are base64. */
 function isSecret(root) {
@@ -30923,8 +31004,11 @@ function readEmbedded(w, kind, written, text, encoded) {
     const lineAt = literal ? (k) => at + k : () => at;
     if (kind === 'properties')
         propertiesSettings(w.path, body, w.out, lineAt);
-    else
+    else {
+        w.out.inSecret = w.secret;
         yamlSettings(w.path, body.charCodeAt(0) === 0xfeff ? body.substring(1) : body, w.out, lineAt, true);
+        w.out.inSecret = false;
+    }
 }
 function walkYaml(w, node, keys, depth, aliasLine) {
     const { path, out } = w;
@@ -31232,6 +31316,540 @@ function unquote(v) {
     }
     return t;
 }
+/** The merge keys followed while reading a collector configuration's mappings. */
+const COLLECTOR_MERGE_DEPTH = 8;
+/** Where file_storage keeps its files when its directory is not set (on Linux). */
+const FILE_STORAGE_DEFAULT = '/var/lib/otelcol/file_storage';
+const ENV_REFERENCE = /\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)\}/g;
+/** A ${scheme:...} reference; ${NAME:-default} is an environment variable with a default. */
+const PROVIDER_REFERENCE = /\$\{([A-Za-z][A-Za-z0-9+.-]*):([^-]|$)/g;
+const PLAIN_DIRECTORY = /^\/[A-Za-z0-9._/-]{1,200}$/;
+/** Whether a file holds a Helm template action outside a comment, which leaves a collector pipeline unreadable. */
+function templated(raw) {
+    return lines(raw).some((l) => l.includes('{{') && !trimSpace(l).startsWith('#'));
+}
+/** Whether a folded name is one the check writes itself. */
+function reserved(folded) {
+    return folded === ciRules_1.COLLECTOR_VALIDATE || folded.startsWith(ciRules_1.COLLECTOR_PIPELINES);
+}
+/** A node read through the alias it may be. */
+function resolve(w, node) {
+    const n = (node ?? null);
+    return n && (0, yaml_1.isAlias)(n) ? w.aliases.get(n) ?? null : n;
+}
+/** The merge sources of a mapping's `<<` entries, each resolved. */
+function mergeSources(w, src) {
+    const s = resolve(w, src);
+    return s && (0, yaml_1.isSeq)(s) ? s.items : [s];
+}
+/**
+ * A mapping's value for a key, through aliases and merge keys, its own entries first. Each mapping is read once per
+ * lookup, so a mapping that merges itself, however often, costs one visit.
+ */
+function entry(w, node, key, depth = 0, seen = new Set()) {
+    const m = resolve(w, node);
+    if (!m || !(0, yaml_1.isMap)(m) || depth > COLLECTOR_MERGE_DEPTH || seen.has(m))
+        return null;
+    seen.add(m);
+    const merges = [];
+    for (const pair of m.items) {
+        if (isMergeKey(pair.key)) {
+            merges.push(pair.value);
+            continue;
+        }
+        if (scalarText(pair.key) === key)
+            return resolve(w, pair.value);
+    }
+    for (const src of merges) {
+        for (const x of mergeSources(w, src)) {
+            const v = entry(w, x, key, depth + 1, seen);
+            if (v)
+                return v;
+        }
+    }
+    return null;
+}
+/** A mapping's keys through merge keys, its own first, each once; [] for anything but a mapping. */
+function mappingKeys(w, node) {
+    const out = [];
+    const seen = new Set();
+    const read = (n, depth) => {
+        const m = resolve(w, n);
+        if (!m || !(0, yaml_1.isMap)(m) || depth > COLLECTOR_MERGE_DEPTH || seen.has(m))
+            return;
+        seen.add(m);
+        const merges = [];
+        for (const pair of m.items) {
+            if (isMergeKey(pair.key)) {
+                merges.push(pair.value);
+                continue;
+            }
+            const k = scalarText(pair.key);
+            if (k !== null && !out.includes(k))
+                out.push(k);
+        }
+        for (const src of merges)
+            for (const x of mergeSources(w, src))
+                read(x, depth + 1);
+    };
+    read(node, 0);
+    return out;
+}
+/**
+ * A collector configuration's service.pipelines mapping, or null when the mapping is not one: it must hold a pipeline
+ * that names receivers, processors or exporters.
+ */
+function collectorPipelinesOf(w, m) {
+    const service = entry(w, m, 'service');
+    if (!service || !(0, yaml_1.isMap)(service))
+        return null;
+    const pipelines = entry(w, service, 'pipelines');
+    if (!pipelines || !(0, yaml_1.isMap)(pipelines))
+        return null;
+    for (const pair of pipelines.items) {
+        const p = resolve(w, pair.value);
+        if (!p || !(0, yaml_1.isMap)(p))
+            continue;
+        if (['receivers', 'processors', 'exporters'].some((k) => entry(w, p, k) !== null))
+            return pipelines;
+    }
+    return null;
+}
+/** A mapping as one document: its aliases resolved and its comments dropped, as the CLI writes it; '' when it cannot be. */
+function collectorText(w, node) {
+    try {
+        return w.doc ? (0, yaml_1.stringify)(node.toJS(w.doc, { maxAliasCount: exports.ALIAS_NODES_MAX })) : '';
+    }
+    catch {
+        return '';
+    }
+}
+/**
+ * Looks for collector configurations in one YAML document's node tree: a mapping found is read and not searched
+ * further; a string holding one is parsed once, unless the document is a Secret, the string is a file the embedded-file
+ * reader already reads, or the file is one a Secret carries.
+ */
+function collectorFind(w, node, keys, depth, kind, doc) {
+    if (!node || depth > exports.DEPTH_MAX || w.out.inSecret)
+        return;
+    if ((0, yaml_1.isMap)(node)) {
+        if (collectorPipelinesOf(w, node)) {
+            const whole = (keys.length === 0 || (kind === 'OpenTelemetryCollector' && keys.length === 2 && keys[0] === 'spec' && keys[1] === 'config'))
+                && entry(w, node, 'receivers') !== null && entry(w, node, 'exporters') !== null;
+            const text = !whole ? '' : keys.length === 0 ? doc : collectorText(w, node);
+            collectorRead(w, node, whole, text, w.at(node));
+            return;
+        }
+        const parent = keys.length > 0 ? keys[keys.length - 1].toLowerCase() : '';
+        for (const pair of node.items) {
+            const key = scalarText(pair.key);
+            const v = (pair.value ?? null);
+            if (key === null || !v || (0, yaml_1.isAlias)(v) || isMergeKey(pair.key))
+                continue;
+            const path = [...keys, key];
+            if ((0, yaml_1.isScalar)(v)) {
+                if (w.embedded || w.secret || (embeddedKind(key) !== null && (parent === 'data' || parent === 'stringdata')))
+                    continue;
+                const text = scalarText(v);
+                if (text !== null && text.includes('pipelines:'))
+                    collectorString(w, v, text);
+                continue;
+            }
+            collectorFind(w, v, path, depth + 1, kind, doc);
+        }
+    }
+    else if ((0, yaml_1.isSeq)(node)) {
+        for (const item of node.items) {
+            if (item && !(0, yaml_1.isAlias)(item))
+                collectorFind(w, item, keys, depth + 1, kind, doc);
+        }
+    }
+}
+/**
+ * Reads a collector configuration a string carries, its lines placed as the embedded-file reader places them: a
+ * literal block's line for line, any other value's at its own line. The string is read as a file is.
+ */
+function collectorString(w, written, text) {
+    const at = w.at(written);
+    const literal = (0, yaml_1.isScalar)(written) && written.type === 'BLOCK_LITERAL';
+    const lineAt = literal ? (k) => at + k : () => at;
+    const { docs, counter } = parsed(text);
+    for (const [n, doc] of docs.entries()) {
+        const aliases = doc.errors.length > 0 || (n > 0 && !doc.directives?.docStart) ? null : aliasTargets(doc);
+        if (!aliases) {
+            if (text.includes('service:'))
+                w.out.problems.push({ path: w.path, line: at, reason: 'a collector configuration in a string is not valid YAML' });
+            return;
+        }
+        const root = doc.contents;
+        const inner = {
+            path: w.path, out: w.out, aliases, embedded: true, secret: false, doc,
+            at: (node) => {
+                const pos = node?.range?.[0];
+                return lineAt(pos === undefined ? 1 : counter.linePos(pos).line);
+            },
+        };
+        if (!root || !(0, yaml_1.isMap)(root) || !collectorPipelinesOf(inner, root))
+            continue;
+        const whole = entry(inner, root, 'receivers') !== null && entry(inner, root, 'exporters') !== null;
+        collectorRead(inner, root, whole, whole ? text : '', inner.at(root));
+    }
+}
+/** Writes one setting per logs pipeline of a collector configuration, and records a whole one for validation. */
+function collectorRead(w, config, whole, text, line) {
+    const { out, path } = w;
+    const defined = mappingKeys(w, entry(w, config, 'processors'));
+    out.collectorDefined.push({ dir: posixDir(path), defined });
+    const pipelines = collectorPipelinesOf(w, config);
+    for (const pair of pipelines.items) {
+        const name = scalarText(pair.key);
+        if (name === null || (name !== 'logs' && !name.startsWith('logs/')))
+            continue;
+        const pipeline = resolve(w, pair.value);
+        if (!pipeline || !(0, yaml_1.isMap)(pipeline))
+            continue;
+        const pline = w.at(pair.key);
+        const notChecked = (why) => {
+            out.problems.push({ path, line: pline, reason: `the collector's ${name} pipeline ${why}, not checked` });
+        };
+        const list = entry(w, pipeline, 'processors');
+        let value;
+        if (out.templated) {
+            notChecked('is in a Helm template');
+            continue;
+        }
+        else if (!list && !whole) {
+            continue;
+        }
+        else if (!list) {
+            value = '';
+        }
+        else if ((0, yaml_1.isSeq)(list)) {
+            const items = list.items.map((item) => scalarText(resolve(w, item))).filter((v) => v !== null);
+            value = items.join(',');
+            if (items.some((v) => ciRules_1.PLACEHOLDER.test((0, ciRules_1.trimAscii)(v))))
+                notChecked('names a processor through a placeholder');
+        }
+        else {
+            value = scalarText(list) ?? '';
+            if (ciRules_1.PLACEHOLDER.test((0, ciRules_1.trimAscii)(value)))
+                notChecked('names its processors through a placeholder');
+        }
+        out.settings.push({ name: ciRules_1.COLLECTOR_PIPELINES + name, value: `${value}|${defined.join(',')}`, path, line: pline, origin: out.origins++ });
+        if (!whole)
+            out.fragments.push({ setting: out.settings.length - 1, list: value });
+    }
+    if (!whole)
+        return;
+    let skip = '';
+    if (out.templated)
+        skip = 'it is in a Helm template';
+    else if (text === '')
+        skip = 'it cannot be written out as one document';
+    else {
+        for (const m of text.matchAll(PROVIDER_REFERENCE)) {
+            if (m[1] !== 'env') {
+                skip = `it reads a value through \${${m[1]}:...}`;
+                break;
+            }
+        }
+    }
+    const env = [];
+    for (const m of text.matchAll(ENV_REFERENCE))
+        if (!env.includes(m[1]))
+            env.push(m[1]);
+    const dirs = [];
+    const extensions = entry(w, config, 'extensions');
+    for (const k of mappingKeys(w, extensions)) {
+        if (k !== 'file_storage' && !k.startsWith('file_storage/'))
+            continue;
+        const set = scalarText(entry(w, entry(w, extensions, k), 'directory'));
+        const dir = set ? set : FILE_STORAGE_DEFAULT;
+        if (!PLAIN_DIRECTORY.test(dir)) {
+            if (!skip)
+                skip = 'its file_storage directory is not a plain absolute path';
+            continue;
+        }
+        if (!dirs.includes(dir))
+            dirs.push(dir);
+    }
+    out.collectors.push({ path, line, text, env, dirs, skip });
+}
+/** The directory of a repository path, as path.posix.dirname reads it. */
+function posixDir(p) {
+    const i = p.lastIndexOf('/');
+    return i < 0 ? '.' : i === 0 ? '/' : p.substring(0, i);
+}
+/**
+ * Gives each fragment's logs pipeline setting the processors every collector configuration in its directory defines,
+ * so a values file layered over another is judged with the processors the other defines.
+ */
+function widenFragments(settings, fragments, defined) {
+    const byDir = new Map();
+    for (const d of defined) {
+        const all = byDir.get(d.dir) ?? [];
+        for (const p of d.defined)
+            if (!all.includes(p))
+                all.push(p);
+        byDir.set(d.dir, all);
+    }
+    for (const f of fragments) {
+        const s = settings[f.setting];
+        s.value = `${f.list}|${(byDir.get(posixDir(s.path)) ?? []).join(',')}`;
+    }
+}
+
+
+/***/ }),
+
+/***/ 4224:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.IMAGE_SHAPE = exports.COLLECTOR_VALIDATION_MAX = exports.COLLECTOR_IMAGE = void 0;
+exports.dockerRunner = dockerRunner;
+exports.findDocker = findDocker;
+exports.watches = watches;
+exports.validateCollectors = validateCollectors;
+const child_process_1 = __nccwpck_require__(5317);
+const crypto = __importStar(__nccwpck_require__(6982));
+const fs = __importStar(__nccwpck_require__(9896));
+const os = __importStar(__nccwpck_require__(857));
+const path = __importStar(__nccwpck_require__(6928));
+const ciRules_1 = __nccwpck_require__(7944);
+/**
+ * The collector the check validates with unless told otherwise: the release every generated collector configuration
+ * is validated for, pinned by digest.
+ */
+exports.COLLECTOR_IMAGE = 'otel/opentelemetry-collector-contrib:0.155.0@sha256:4935caa35e9a4cb387e35732e8fb22b2b5759af8d12e7043357f03837f6e8df5';
+/** The most distinct collector configurations one check validates. */
+exports.COLLECTOR_VALIDATION_MAX = 20;
+/** A container image reference the check runs: a name, a tag and a digest, never an option. */
+exports.IMAGE_SHAPE = /^[a-z0-9][a-z0-9._/-]*(?::[0-9]+\/[a-z0-9._/-]+)?(?::[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?(?:@sha256:[0-9a-f]{64})?$/;
+/**
+ * Runs the docker client at a path with an environment. Nothing it prints is shown: a collector's refusal can quote a
+ * value.
+ */
+function dockerRunner(docker, env) {
+    return (args, timeoutMs) => new Promise((resolve) => {
+        let timedOut = false;
+        const child = (0, child_process_1.spawn)(docker, args, { stdio: 'ignore', env });
+        const timer = setTimeout(() => {
+            timedOut = true;
+            child.kill('SIGKILL');
+        }, timeoutMs);
+        child.on('error', () => {
+            clearTimeout(timer);
+            resolve({ code: -1, timedOut });
+        });
+        child.on('close', (code) => {
+            clearTimeout(timer);
+            resolve({ code: timedOut || code === null ? -1 : code, timedOut });
+        });
+    });
+}
+/** The variables the docker client reads; nothing else of the runner's environment reaches it. */
+const DOCKER_KEYS = ['HOME', 'USER', 'TMPDIR', 'XDG_RUNTIME_DIR', 'DOCKER_HOST', 'DOCKER_CONFIG', 'DOCKER_CONTEXT',
+    'DOCKER_CERT_PATH', 'DOCKER_TLS_VERIFY', 'SYSTEMROOT'];
+/**
+ * The first regular, executable docker on a PATH that is not inside the workspace, and the environment it runs with:
+ * that PATH without its relative directories or those inside the workspace (docker runs credential helpers from PATH),
+ * and the docker client's own variables. Null when there is none.
+ */
+function findDocker(workspace, pathList = process.env.PATH ?? '') {
+    const root = (() => {
+        try {
+            return fs.realpathSync(workspace);
+        }
+        catch {
+            return null;
+        }
+    })();
+    const inside = (p) => root !== null && (p === root || p.startsWith(root + path.sep));
+    const dirs = pathList.split(path.delimiter).filter((dir) => {
+        if (!dir || !path.isAbsolute(dir))
+            return false;
+        try {
+            return !inside(fs.realpathSync(dir));
+        }
+        catch {
+            return true;
+        }
+    });
+    for (const dir of dirs) {
+        const candidate = path.join(dir, process.platform === 'win32' ? 'docker.exe' : 'docker');
+        try {
+            const real = fs.realpathSync(candidate);
+            if (inside(real) || !fs.statSync(real).isFile())
+                continue;
+            fs.accessSync(real, fs.constants.X_OK);
+            const env = { PATH: dirs.join(path.delimiter) };
+            for (const k of DOCKER_KEYS)
+                if (process.env[k] !== undefined)
+                    env[k] = process.env[k];
+            return { docker: real, env };
+        }
+        catch {
+            continue;
+        }
+    }
+    return null;
+}
+/** Whether a rule set holds a rule on a setting name: a version without one has nothing to do with what is written under it. */
+function watches(set, name) {
+    return set.rules.some((r) => (0, ciRules_1.matches)(r, (0, ciRules_1.fold)(name)));
+}
+/** A configuration every collector accepts: a refusal of it means the collector could not be run here. */
+const CONTROL_CONFIG = 'receivers:\n  otlp:\n    protocols:\n      grpc: {}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n' +
+    '    logs:\n      receivers: [otlp]\n      exporters: [debug]\n';
+/**
+ * Runs the collector's own validate, check-only, on each whole collector configuration found: in a container with no
+ * network, no capabilities and a read-only filesystem, given only the configuration, a fake Kubernetes service account
+ * and a stand-in for each environment variable it reads with no default. A refused configuration is a
+ * COLLECTOR_VALIDATE setting at its line; what could not be validated is a problem.
+ */
+async function validateCollectors(collectors, v, origin, results = new Map()) {
+    const out = { settings: [], problems: [] };
+    if (collectors.length === 0)
+        return out;
+    const first = collectors[0];
+    const notValidated = (why) => {
+        out.problems.push({ path: first.path, line: first.line, reason: `collector configurations not validated: ${why}` });
+        return out;
+    };
+    const inspect = await v.run(['image', 'inspect', v.image], v.pullMs);
+    if (inspect.code !== 0) {
+        const pull = await v.run(['pull', v.image], v.pullMs);
+        if (pull.code !== 0)
+            return notValidated('the collector image could not be pulled');
+    }
+    let dir;
+    try {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-collector-'));
+    }
+    catch {
+        return notValidated('no temporary directory');
+    }
+    try {
+        const cfg = path.join(dir, 'cfg');
+        const account = path.join(dir, 'serviceaccount');
+        try {
+            fs.mkdirSync(cfg, { mode: 0o700 });
+            fs.mkdirSync(account, { mode: 0o700 });
+            fs.writeFileSync(path.join(account, 'token'), 'validate-only', { mode: 0o600 });
+            fs.writeFileSync(path.join(account, 'namespace'), 'default', { mode: 0o600 });
+        }
+        catch {
+            return notValidated('no temporary directory');
+        }
+        const control = await validateOne(v, cfg, account, CONTROL_CONFIG, [], []);
+        if (control.code !== 0) {
+            return notValidated(control.why || `the collector refused a configuration every collector accepts (docker exited ${control.code})`);
+        }
+        let capped = false;
+        const here = new Set();
+        for (const c of collectors) {
+            if (c.skip) {
+                out.problems.push({ path: c.path, line: c.line, reason: `collector configuration not validated: ${c.skip}` });
+                continue;
+            }
+            const key = crypto.createHash('sha256').update(`${v.image}\0${c.text}\0${c.env.join(',')}\0${c.dirs.join(',')}`).digest('hex');
+            let r = results.get(key);
+            if (!here.has(key)) {
+                if (here.size >= exports.COLLECTOR_VALIDATION_MAX) {
+                    if (!capped) {
+                        capped = true;
+                        out.problems.push({
+                            path: c.path,
+                            line: c.line,
+                            reason: `more than ${exports.COLLECTOR_VALIDATION_MAX} collector configurations, the rest not validated`,
+                        });
+                    }
+                    continue;
+                }
+                here.add(key);
+            }
+            if (!r) {
+                r = await validateOne(v, cfg, account, c.text, c.env, c.dirs);
+                results.set(key, r);
+            }
+            if (r.why)
+                out.problems.push({ path: c.path, line: c.line, reason: `collector configuration not validated: ${r.why}` });
+            else if (r.code === 1)
+                out.settings.push({ name: ciRules_1.COLLECTOR_VALIDATE, value: '', path: c.path, line: c.line, origin: origin++ });
+        }
+        return out;
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+}
+/** Runs the collector's validate on one configuration: its exit status, or why it could not run. */
+async function validateOne(v, cfg, account, text, env, dirs) {
+    try {
+        fs.writeFileSync(path.join(cfg, 'config.yaml'), text, { mode: 0o600 });
+    }
+    catch {
+        return { code: -1, why: 'it could not be written to a temporary file' };
+    }
+    const container = `maestro-validate-${crypto.randomBytes(8).toString('hex')}`;
+    const args = ['run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+        '--pids-limit', '64', '--memory', '512m', '--name', container];
+    if (typeof process.getuid === 'function' && typeof process.getgid === 'function') {
+        args.push('--user', `${process.getuid()}:${process.getgid()}`);
+    }
+    args.push('-v', `${cfg}:/cfg:ro`, '-v', `${account}:/var/run/secrets/kubernetes.io/serviceaccount:ro`, '-e', 'KUBERNETES_SERVICE_HOST=127.0.0.1', '-e', 'KUBERNETES_SERVICE_PORT=6443');
+    for (const e of env)
+        args.push('-e', `${e}=validate-only`);
+    for (const d of dirs)
+        args.push('--tmpfs', d);
+    args.push(v.image, 'validate', '--config=/cfg/config.yaml');
+    const r = await v.run(args, v.timeoutMs);
+    if (r.timedOut) {
+        await v.run(['rm', '-f', container], 30_000);
+        return { code: -1, why: `the collector did not finish in ${Math.round(v.timeoutMs / 1000)}s` };
+    }
+    if (r.code < 0)
+        return { code: -1, why: 'docker could not be run' };
+    if (r.code !== 0 && r.code !== 1)
+        return { code: r.code, why: `docker exited ${r.code}` };
+    return { code: r.code, why: '' };
+}
 
 
 /***/ }),
@@ -31461,13 +32079,14 @@ async function checkOnly(api, inputs, root) {
         }
         pairs.push({ service: inputs.service, environment: inputs.environment });
     }
+    const collectors = { validate: inputs.collectorValidate, image: inputs.collectorImage, results: new Map() };
     const failed = [];
     const outcomes = new Set();
     let findings = 0;
     for (const p of pairs) {
         const who = `${(0, ciCheck_1.printable)(p.service)} in ${(0, ciCheck_1.printable)(p.environment)}`;
         try {
-            const run = await (0, ciCheck_1.runCheck)(api, projectUid, p.environment, p.service, root, repo, { checkOnly: true });
+            const run = await (0, ciCheck_1.runCheck)(api, projectUid, p.environment, p.service, root, repo, { checkOnly: true, collectors });
             outcomes.add(run.outcome);
             findings += run.result?.total ?? 0;
             if (run.outcome === 'failed') {
@@ -31568,6 +32187,7 @@ const minimatch_1 = __nccwpck_require__(6507);
 const yaml_1 = __nccwpck_require__(8815);
 const api_1 = __nccwpck_require__(6879);
 const ciRules_1 = __nccwpck_require__(7944);
+const validate_1 = __nccwpck_require__(4224);
 const aot_1 = __nccwpck_require__(7600);
 const extract_1 = __nccwpck_require__(821);
 const errors_1 = __nccwpck_require__(17);
@@ -31611,10 +32231,10 @@ function enforcing(mode) {
 function fingerprint(f) {
     return `${f.rule}|${f.name}|${f.path}`;
 }
-/** GET .../envs/{env}/ci-rules for one service, at the one version this Action reads. */
+/** GET .../envs/{env}/ci-rules for one service, naming every rule-set version this Action reads. */
 async function fetchRules(api, projectUid, environment, service, lockedVersionUid) {
     const lock = lockedVersionUid ? `&lockedVersionUid=${encodeURIComponent(lockedVersionUid)}` : '';
-    const res = await api.get(`${(0, resolveConfig_1.envPath)(projectUid, environment)}/ci-rules?service=${encodeURIComponent(service)}&versions=${ciRules_1.VERSION}${lock}`);
+    const res = await api.get(`${(0, resolveConfig_1.envPath)(projectUid, environment)}/ci-rules?service=${encodeURIComponent(service)}&versions=${ciRules_1.VERSIONS.join(',')}${lock}`);
     if (res.statusCode === 404) {
         const code = res.body?.data?.code;
         if (code === 'ci_rules_service_unknown') {
@@ -31808,9 +32428,11 @@ function filesFor(files, mapping, service, environment) {
  * only the AOT cache notes are read, as for an environment whose check is off.
  */
 function scan(root, files, mapped = false, settings = true) {
-    const result = { settings: [], problems: [], aot: [], read: 0, leftOut: 0 };
+    const result = { settings: [], problems: [], aot: [], read: 0, leftOut: 0, collectors: [] };
     const realRoot = fs.realpathSync(root);
     let origins = 0;
+    const fragments = [];
+    const defined = [];
     for (const rel of files) {
         const kind = (0, extract_1.kindOf)(rel);
         if (!kind || NEVER_READ.test(rel) || (!mapped && SKIPPED.some((re) => re.test(rel))))
@@ -31851,11 +32473,16 @@ function scan(root, files, mapped = false, settings = true) {
             continue;
         const found = (0, extract_1.extract)(rel, text, kind);
         result.read++;
+        for (const f of found.fragments)
+            fragments.push({ setting: result.settings.length + f.setting, list: f.list });
+        defined.push(...found.collectorDefined);
         for (const s of found.settings)
             result.settings.push({ ...s, origin: origins + s.origin });
         origins += found.origins;
         result.problems.push(...found.problems);
+        result.collectors.push(...found.collectors);
     }
+    (0, extract_1.widenFragments)(result.settings, fragments, defined);
     return result;
 }
 /**
@@ -31933,7 +32560,7 @@ function report(findings, problems, aot = []) {
             core.warning(message, where);
     }
     for (const p of problems) {
-        core.warning(`Log policy check could not read ${p.path} line ${p.line}: ${p.reason}`, { file: p.path, startLine: p.line });
+        core.warning(`Log policy check could not read ${printable(p.path)} line ${p.line}: ${printable(p.reason)}`, { file: p.path, startLine: p.line });
     }
     for (const n of aot) {
         core.notice(`AOT cache: ${n.flags.join(' ')}. On JDK 25 the cache does not work with the agent: a training run with agent 2.33.1 attached fails on Linux, and a cache trained without the agent is rejected when it is attached. Start the service without the cache while the agent is attached.`, {
@@ -32022,6 +32649,27 @@ async function runCheck(api, projectUid, environment, service, root, repo, opts)
         mine = mappedFiles(repo, service, environment);
     }
     const read = scan(root, mine, repo.mapping !== null);
+    if (read.collectors.length > 0 && (0, validate_1.watches)(served.ruleSet, ciRules_1.COLLECTOR_VALIDATE)) {
+        const c = opts.collectors;
+        if (c?.validate) {
+            const found = c.docker === undefined ? (0, validate_1.findDocker)(root) : c.docker === null ? null : { docker: c.docker, env: process.env };
+            if (!found) {
+                const first = read.collectors[0];
+                read.problems.push({ path: first.path, line: first.line, reason: 'collector configurations not validated: docker is not on PATH' });
+            }
+            else {
+                const origin = read.settings.reduce((m, s) => Math.max(m, s.origin + 1), 0);
+                const done = await (0, validate_1.validateCollectors)(read.collectors, {
+                    image: c.image, run: c.run ?? (0, validate_1.dockerRunner)(found.docker, found.env), timeoutMs: 60_000, pullMs: 300_000,
+                }, origin, c.results);
+                read.settings.push(...done.settings);
+                read.problems.push(...done.problems);
+            }
+        }
+        else {
+            core.info(`Log policy check: ${read.collectors.length} collector configuration(s) found; collector-validate: 'true' runs the collector's own validate on them.`);
+        }
+    }
     const findings = findingsOf(served.ruleSet, read.settings);
     const result = checkResult(service, served.ruleSet, findings);
     const decided = verdict(mode, findings, result.total, served.baseline);
@@ -32042,10 +32690,11 @@ async function runCheck(api, projectUid, environment, service, root, repo, opts)
  * The check a build runs before its upload: returns the result the build carries, or null when none ran, and throws
  * when the environment's mode fails the build, before anything is uploaded.
  */
-async function logPolicyCheck(api, projectUid, environment, service, root, lockedVersionUid) {
+async function logPolicyCheck(api, projectUid, environment, service, root, lockedVersionUid, collectors) {
     const run = await runCheck(api, projectUid, environment, service, root, readRepo(root), {
         checkOnly: false,
         lockedVersionUid,
+        collectors,
     });
     core.setOutput('log-policy-check', run.outcome);
     core.setOutput('log-policy-findings', String(run.result?.total ?? 0));
