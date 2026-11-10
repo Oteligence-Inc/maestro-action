@@ -1,0 +1,412 @@
+{
+  "version": 1,
+  "about": "Each agents case is one file's text and the notes AgentNotes / agentNotes give, one per line naming each Java agent other than the OpenTelemetry agent once. Each extensions case is settings as an extraction writes them and the notes ExtensionNotes / extensionNotes give, one per file, line and otel.javaagent.extensions entry not named as a bundle's extension (<service>-extension.jar with an optional counter, extension.jar, or one naming oteligence). platform-cli and maestro-action each hold a copy and pin its digest.",
+  "agents": [
+    {
+      "name": "a second agent in an exec-form entrypoint",
+      "path": "Dockerfile",
+      "text": "FROM eclipse-temurin:21-jre\nENTRYPOINT [\"java\", \"-javaagent:/opt/opentelemetry-javaagent.jar\", \"-javaagent:/opt/dd-java-agent.jar\", \"-jar\", \"app.jar\"]\n",
+      "notes": [
+        {
+          "line": 2,
+          "agents": [
+            "dd-java-agent.jar"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "the OpenTelemetry agent under a distribution's name is not noted",
+      "path": "deploy/prod.env",
+      "text": "JAVA_TOOL_OPTIONS=-javaagent:/otel/agent.jar -javaagent:/opt/splunk-otel-javaagent.jar -javaagent:/opt/aws-opentelemetry-agent.jar\n",
+      "notes": []
+    },
+    {
+      "name": "an agent's options are not part of its name",
+      "path": "deploy/prod.env",
+      "text": "JAVA_TOOL_OPTIONS=-javaagent:/opt/jmx_prometheus_javaagent.jar=9404:/etc/jmx.yaml\n",
+      "notes": [
+        {
+          "line": 1,
+          "agents": [
+            "jmx_prometheus_javaagent.jar"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "helm values env: one note per line, each agent once",
+      "path": "helm/values.yaml",
+      "text": "env:\n  - name: JAVA_TOOL_OPTIONS\n    value: \"-javaagent:/nr/newrelic.jar -javaagent:/nr/newrelic.jar -javaagent:/ea/elastic-apm-agent.jar\"\n",
+      "notes": [
+        {
+          "line": 3,
+          "agents": [
+            "newrelic.jar",
+            "elastic-apm-agent.jar"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "comment lines and paths a template fills in are skipped",
+      "path": "Dockerfile",
+      "text": "# ENTRYPOINT [\"java\", \"-javaagent:/opt/newrelic.jar\"]\nCMD java -javaagent:${AGENT_JAR} -javaagent:{{ .Values.agent }} -jar app.jar\n",
+      "notes": []
+    },
+    {
+      "name": "a word holding otel is not the OpenTelemetry agent",
+      "path": "Dockerfile",
+      "text": "CMD java -javaagent:/opt/hotel-agent.jar -jar app.jar\n",
+      "notes": [
+        {
+          "line": 1,
+          "agents": [
+            "hotel-agent.jar"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a properties file's ! comment is skipped",
+      "path": "conf/app.properties",
+      "text": "! java.opts=-javaagent:/x/newrelic.jar\njava.opts=-javaagent:/x/newrelic.jar\n",
+      "notes": [
+        {
+          "line": 2,
+          "agents": [
+            "newrelic.jar"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a Windows path names its last segment",
+      "path": "deploy/windows.env",
+      "text": "JAVA_TOOL_OPTIONS=-javaagent:C:\\agents\\dd-java-agent.jar\r\n",
+      "notes": [
+        {
+          "line": 1,
+          "agents": [
+            "dd-java-agent.jar"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "-javaagent inside a longer token is not a flag",
+      "path": "Dockerfile",
+      "text": "LABEL note=x-javaagent:/opt/dd-java-agent.jar\n",
+      "notes": []
+    },
+    {
+      "name": "an OpenTelemetry path in capitals is the OpenTelemetry agent",
+      "path": "deploy/prod.env",
+      "text": "JAVA_TOOL_OPTIONS=-javaagent:/opt/OTEL/Agent.jar -javaagent:/opt/OpenTelemetry-JavaAgent.jar\n",
+      "notes": []
+    },
+    {
+      "name": "a non-ASCII letter beside otel does not join the word",
+      "path": "deploy/prod.env",
+      "text": "JAVA_TOOL_OPTIONS=-javaagent:/opt/\u017fotel.jar -javaagent:/opt/otel\u212a.jar\n",
+      "notes": []
+    },
+    {
+      "name": "an unquoted list in a values file",
+      "path": "helm/values.yaml",
+      "text": "args: [-javaagent:/nr/newrelic.jar, -jar, /app.jar]\n",
+      "notes": [
+        {
+          "line": 1,
+          "agents": [
+            "newrelic.jar"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a path that names no file names nothing",
+      "path": "Dockerfile",
+      "text": "CMD java -javaagent:/ -jar a.jar\n",
+      "notes": []
+    },
+    {
+      "name": "a .properties file's escaped colon",
+      "path": "conf/app.properties",
+      "text": "java.opts=-javaagent\\:/x/newrelic.jar\n",
+      "notes": [
+        {
+          "line": 1,
+          "agents": [
+            "newrelic.jar"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a byte order mark is dropped before a comment",
+      "path": "Dockerfile",
+      "text": "\ufeff# -javaagent:/x/newrelic.jar\n",
+      "notes": []
+    },
+    {
+      "name": "an indented comment line is skipped",
+      "path": "helm/values.yaml",
+      "text": "  # value: -javaagent:/x/newrelic.jar\n",
+      "notes": []
+    },
+    {
+      "name": "a ! line outside a .properties file is not a comment",
+      "path": "Dockerfile",
+      "text": "! java -javaagent:/x/newrelic.jar\n",
+      "notes": [
+        {
+          "line": 1,
+          "agents": [
+            "newrelic.jar"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a name that is not a plain file name is not shown",
+      "path": "Dockerfile",
+      "text": "CMD java -javaagent:/opt/tok;en.jar -javaagent:/opt/ag\u00e9nt.jar -jar a.jar\n",
+      "notes": [
+        {
+          "line": 1,
+          "agents": [
+            "(name not shown)"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a path written as @name@ is skipped",
+      "path": "Dockerfile",
+      "text": "CMD java -javaagent:/opt/@AGENT@ -jar a.jar\n",
+      "notes": []
+    },
+    {
+      "name": "a comma or a single quote stands before a flag",
+      "path": "deploy/prod.env",
+      "text": "OPTS=a,-javaagent:/x/dd.jar 'b' '-javaagent:/x/nr.jar'\n",
+      "notes": [
+        {
+          "line": 1,
+          "agents": [
+            "dd.jar",
+            "nr.jar"
+          ]
+        }
+      ]
+    }
+  ],
+  "extensions": [
+    {
+      "name": "the bundle's own extension is not noted",
+      "settings": [
+        {
+          "name": "otel.javaagent.extensions",
+          "value": "/opt/orders-extension.jar",
+          "path": "Dockerfile",
+          "line": 9
+        }
+      ],
+      "notes": []
+    },
+    {
+      "name": "an extension the bundle does not ship beside its own",
+      "settings": [
+        {
+          "name": "OTEL_JAVAAGENT_EXTENSIONS",
+          "value": "/opt/orders-extension.jar, /opt/opentelemetry-dynamic-control.jar",
+          "path": "compose.yaml",
+          "line": 21
+        }
+      ],
+      "notes": [
+        {
+          "path": "compose.yaml",
+          "line": 21,
+          "extension": "opentelemetry-dynamic-control.jar",
+          "directory": false
+        }
+      ]
+    },
+    {
+      "name": "a directory loads every JAR in it",
+      "settings": [
+        {
+          "name": "otel.javaagent.extensions",
+          "value": "/opt/extensions/",
+          "path": "k8s/deploy.yaml",
+          "line": 30
+        }
+      ],
+      "notes": [
+        {
+          "path": "k8s/deploy.yaml",
+          "line": 30,
+          "extension": "extensions",
+          "directory": true
+        }
+      ]
+    },
+    {
+      "name": "a value or an entry a template fills in is skipped",
+      "settings": [
+        {
+          "name": "OTEL_JAVAAGENT_EXTENSIONS",
+          "value": "${EXTENSIONS}",
+          "path": "compose.yaml",
+          "line": 4
+        },
+        {
+          "name": "OTEL_JAVAAGENT_EXTENSIONS",
+          "value": "/opt/vendor.jar,${MORE},/opt/{{ .Values.ext }}",
+          "path": "compose.yaml",
+          "line": 5
+        }
+      ],
+      "notes": [
+        {
+          "path": "compose.yaml",
+          "line": 5,
+          "extension": "vendor.jar",
+          "directory": false
+        }
+      ]
+    },
+    {
+      "name": "two names of one setting give one note",
+      "settings": [
+        {
+          "name": "otel.javaagent.extensions",
+          "value": "/opt/vendor.jar",
+          "path": "deploy/prod.env",
+          "line": 2
+        },
+        {
+          "name": "OTEL_JAVAAGENT_EXTENSIONS",
+          "value": "/opt/vendor.jar",
+          "path": "deploy/prod.env",
+          "line": 2
+        }
+      ],
+      "notes": [
+        {
+          "path": "deploy/prod.env",
+          "line": 2,
+          "extension": "vendor.jar",
+          "directory": false
+        }
+      ]
+    },
+    {
+      "name": "the bundle's naming is read in any case, and other settings are not read",
+      "settings": [
+        {
+          "name": "otel.javaagent.extensions",
+          "value": "/opt/Orders-Extension.JAR",
+          "path": "Dockerfile",
+          "line": 3
+        },
+        {
+          "name": "otel.javaagent.configuration-file",
+          "value": "/opt/vendor.jar",
+          "path": "Dockerfile",
+          "line": 3
+        }
+      ],
+      "notes": []
+    },
+    {
+      "name": "the bundle's names: a counter, extension.jar, a Prelude extension named oteligence, any case",
+      "settings": [
+        {
+          "name": "otel.javaagent.extensions",
+          "value": "/app/extension.jar,/opt/orders-extension-2.jar,/opt/oteligence.jar,/opt/ORDERS-EXTENSION.JAR",
+          "path": "k8s/deploy.yaml",
+          "line": 12
+        }
+      ],
+      "notes": []
+    },
+    {
+      "name": "a __TEMPLATE__ entry is skipped",
+      "settings": [
+        {
+          "name": "OTEL_JAVAAGENT_EXTENSIONS",
+          "value": "/opt/vendor.jar,__TEMPLATE__",
+          "path": "compose.yaml",
+          "line": 7
+        }
+      ],
+      "notes": [
+        {
+          "path": "compose.yaml",
+          "line": 7,
+          "extension": "vendor.jar",
+          "directory": false
+        }
+      ]
+    },
+    {
+      "name": "a JAR named in capitals is a JAR, and a trailing space is trimmed",
+      "settings": [
+        {
+          "name": "OTEL_JAVAAGENT_EXTENSIONS",
+          "value": "/opt/Vendor.JAR,/opt/other.jar ",
+          "path": "compose.yaml",
+          "line": 8
+        }
+      ],
+      "notes": [
+        {
+          "path": "compose.yaml",
+          "line": 8,
+          "extension": "Vendor.JAR",
+          "directory": false
+        },
+        {
+          "path": "compose.yaml",
+          "line": 8,
+          "extension": "other.jar",
+          "directory": false
+        }
+      ]
+    },
+    {
+      "name": "a value that is not a plain file name is not shown",
+      "settings": [
+        {
+          "name": "OTEL_JAVAAGENT_EXTENSIONS",
+          "value": "s3cr3t:token",
+          "path": "k8s/secret.yaml",
+          "line": 4
+        }
+      ],
+      "notes": [
+        {
+          "path": "k8s/secret.yaml",
+          "line": 4,
+          "extension": "(name not shown)",
+          "directory": true
+        }
+      ]
+    },
+    {
+      "name": "any name ending -extension.jar is taken as a bundle's",
+      "settings": [
+        {
+          "name": "OTEL_JAVAAGENT_EXTENSIONS",
+          "value": "/opt/vendor-extension.jar",
+          "path": "compose.yaml",
+          "line": 9
+        }
+      ],
+      "notes": []
+    }
+  ]
+}

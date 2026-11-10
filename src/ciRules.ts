@@ -3,13 +3,13 @@
 // to the same answers, and CASES_DIGEST pins which copy of that suite this release was tested against.
 
 /** The newest rule-set version this Action reads; it reads every version from 1 up and names them all to the platform. */
-export const VERSION = 2;
+export const VERSION = 3;
 
 /** The rule-set versions this Action reads; the platform serves the highest it has. */
-export const VERSIONS = [1, 2];
+export const VERSIONS = [1, 2, 3];
 
 /** The SHA-256 of the evaluation fixture suite this release was tested against; the server serves its own. */
-export const CASES_DIGEST = '1779d21a6eb889f5cc59210b80e3ab4ee2f12caf53b9a0e363a8adb12cd3fdf0';
+export const CASES_DIGEST = '6124a1f43e7b537ddf86f219ee932e1ace37fc203a839abead8bca80875b750b';
 
 /**
  * The setting the Action writes for each logs pipeline of a collector configuration it finds, valued

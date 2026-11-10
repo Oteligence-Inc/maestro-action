@@ -8,6 +8,7 @@ import { parseAllDocuments } from 'yaml';
 import { MaestroApi, expectOk } from '../api';
 import { CASES_DIGEST, COLLECTOR_VALIDATE, Finding, RuleSet, VERSIONS, evaluate, unreadable } from '../ciRules';
 import { Runner, dockerRunner, findDocker, validateCollectors, watches } from '../logPolicy/validate';
+import { AgentNote, ExtensionNote, agentNotes, extensionNotes } from '../logPolicy/agents';
 import { AotNote, aotNotes } from '../logPolicy/aot';
 import { CollectorConfig, CollectorFragment, Problem, SourcedSetting, decode, extract, kindOf, trimSpace, widenFragments, withoutYamlVersion } from '../logPolicy/extract';
 import { UserError } from '../util/errors';
@@ -104,6 +105,10 @@ export interface Scan {
   settings: SourcedSetting[];
   problems: Problem[];
   aot: AotNote[];
+  /** Java agents other than the OpenTelemetry agent, by line. */
+  agents: AgentNote[];
+  /** otel.javaagent.extensions entries that are not a bundle's extension. */
+  extensions: ExtensionNote[];
   read: number;
   leftOut: number;
   /** The whole collector configurations read, for validation. */
@@ -310,10 +315,10 @@ export function filesFor(files: string[], mapping: MappingEntry[] | null, servic
 
 /**
  * Reads the deployment files among `files`: regular files only, inside the root, never a link. With `settings` false
- * only the AOT cache notes are read, as for an environment whose check is off.
+ * only the notes (AOT cache, agents, extensions) are read, as for an environment whose check is off.
  */
 export function scan(root: string, files: string[], mapped = false, settings = true): Scan {
-  const result: Scan = { settings: [], problems: [], aot: [], read: 0, leftOut: 0, collectors: [] };
+  const result: Scan = { settings: [], problems: [], aot: [], agents: [], extensions: [], read: 0, leftOut: 0, collectors: [] };
   const realRoot = fs.realpathSync(root);
   let origins = 0;
   const fragments: CollectorFragment[] = [];
@@ -348,8 +353,10 @@ export function scan(root: string, files: string[], mapped = false, settings = t
     if (problem) result.problems.push({ path: rel, line: 1, reason: problem });
     if (text === null) continue;
     result.aot.push(...aotNotes(rel, text));
-    if (!settings) continue;
+    result.agents.push(...agentNotes(rel, text));
     const found = extract(rel, text, kind);
+    result.extensions.push(...extensionNotes(found.settings));
+    if (!settings) continue;
     result.read++;
     for (const f of found.fragments) fragments.push({ setting: result.settings.length + f.setting, list: f.list });
     defined.push(...found.collectorDefined);
@@ -427,8 +434,16 @@ export function verdict(mode: string, findings: Finding[], total: number, baseli
   return { outcome: 'warned', newFindings: null, reason: null };
 }
 
-/** One log line per finding: its rule, the setting's name, and where; and a notice per AOT cache line. Never a value. */
-export function report(findings: Finding[], problems: Problem[], aot: AotNote[] = []): void {
+/** The notes a scan gives beside its findings; a note changes no outcome. */
+export type Notes = Pick<Scan, 'aot' | 'agents' | 'extensions'>;
+
+const NO_NOTES: Notes = { aot: [], agents: [], extensions: [] };
+
+/**
+ * One log line per finding: its rule, the setting's name, and where; and a notice per note on its line. Never a value in
+ * full: an agent or extension note names the last path segment of one, and only when it is a plain file name.
+ */
+export function report(findings: Finding[], problems: Problem[], notes: Notes = NO_NOTES): void {
   for (const f of findings) {
     const message = `${f.rule}: ${f.name}`;
     const where = { file: f.path, startLine: f.line, title: `Maestro log policy: ${f.rule}` };
@@ -438,12 +453,25 @@ export function report(findings: Finding[], problems: Problem[], aot: AotNote[] 
   for (const p of problems) {
     core.warning(`Log policy check could not read ${printable(p.path)} line ${p.line}: ${printable(p.reason)}`, { file: p.path, startLine: p.line });
   }
-  for (const n of aot) {
+  for (const n of notes.aot) {
     core.notice(`AOT cache: ${n.flags.join(' ')}. On JDK 25 the cache does not work with the agent: a training run with agent 2.33.1 attached fails on Linux, and a cache trained without the agent is rejected when it is attached. Start the service without the cache while the agent is attached.`, {
       file: n.path,
       startLine: n.line,
       title: 'Maestro: JDK AOT cache',
     });
+  }
+  for (const n of notes.agents) {
+    core.notice(`Java agent not named as the OpenTelemetry agent: ${printable(n.agents.join(', '))}. Another agent can export the same telemetry again or change what the agent records; the OpenTelemetry agent under another name is fine.`, {
+      file: n.path,
+      startLine: n.line,
+      title: 'Maestro: another Java agent',
+    });
+  }
+  for (const n of notes.extensions) {
+    const message = n.directory
+      ? `Agent extension directory: ${printable(n.extension)}. The agent loads every JAR directly in it, which this check cannot see; keep only the bundle's extension there.`
+      : `Agent extension not named as a bundle's extension: ${printable(n.extension)}. Another extension runs inside the agent and can change what it records or exports; your bundle's extension under another name is fine.`;
+    core.notice(message, { file: n.path, startLine: n.line, title: 'Maestro: another agent extension' });
   }
 }
 
@@ -494,9 +522,9 @@ export async function runCheck(
   const mode = served.ruleSet.mode;
   if (mode === 'OFF') {
     core.info(`Log policy check: off for ${printable(environment)}.`);
-    // The AOT cache notes are not log policy findings, so an environment that turns the check off still gets them,
+    // The notes are not log policy findings, so an environment that turns the check off still gets them,
     // for the files the check would read.
-    if (repo.files !== null) report([], [], scan(root, mappedFiles(repo, service, environment), repo.mapping !== null, false).aot);
+    if (repo.files !== null) report([], [], scan(root, mappedFiles(repo, service, environment), repo.mapping !== null, false));
     return { outcome: 'off', result: null, reason: null };
   }
   if (served.casesDigest && CASES_DIGEST && served.casesDigest !== CASES_DIGEST) {
@@ -556,7 +584,7 @@ export async function runCheck(
   const findings = findingsOf(served.ruleSet, read.settings);
   const result = checkResult(service, served.ruleSet, findings);
   const decided = verdict(mode, findings, result.total, served.baseline);
-  report(findings, read.problems, read.aot);
+  report(findings, read.problems, read);
   const errors = findings.filter((f) => f.severity === 'error').length;
   const scope = repo.mapping ? ` (the files ${MAPPING_FILE} maps to ${who})` : '';
   const line =

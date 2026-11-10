@@ -80,14 +80,14 @@ afterEach(() => {
 
 describe('fetchRules', () => {
   it('asks for one service, naming every version this Action reads', async () => {
-    nock(BASE).get(RULES).query({ service: 'orders', versions: '1,2' }).reply(200, served('WARN', { baseline: ['x'] }));
+    nock(BASE).get(RULES).query({ service: 'orders', versions: '1,2,3' }).reply(200, served('WARN', { baseline: ['x'] }));
     const got = await fetchRules(client(), 'proj_1', 'prod', 'orders');
     expect(got.ruleSet.mode).toBe('WARN');
     expect(got.baseline).toEqual(['x']);
   });
 
   it.each([
-    ['another version', { version: 3 }, 'version 3'],
+    ['another version', { version: 4 }, 'version 4'],
     ['an unknown test', { rules: [rule('NEW', 'error', { test: 'regex' })] }, 'NEW uses a test this Action does not know'],
     ['no digest', { digest: undefined }, 'no mode, floor or digest'],
     ['an unknown mode', { mode: 'FAIL_LOUDLY' }, 'a mode this Action does not know'],
@@ -101,7 +101,7 @@ describe('fetchRules', () => {
   });
 
   it('asks for the rules of the lock the build names', async () => {
-    nock(BASE).get(RULES).query({ service: 'orders', versions: '1,2', lockedVersionUid: 'lv_4' }).reply(200, served('FAIL'));
+    nock(BASE).get(RULES).query({ service: 'orders', versions: '1,2,3', lockedVersionUid: 'lv_4' }).reply(200, served('FAIL'));
     expect((await fetchRules(client(), 'proj_1', 'prod', 'orders', 'lv_4')).ruleSet.mode).toBe('FAIL');
   });
 
@@ -323,6 +323,36 @@ describe('logPolicyCheck', () => {
         startLine: 1,
         title: 'Maestro: JDK AOT cache',
       });
+    }
+  });
+
+  const SECOND_AGENT =
+    'CMD ["java", "-javaagent:/opt/opentelemetry-javaagent.jar", "-javaagent:/opt/dd-java-agent.jar", ' +
+    '"-Dotel.javaagent.extensions=/opt/orders-extension.jar,/opt/vendor.jar", "-jar", "a.jar"]\n';
+  const agentNotice = (title: string) => expect.objectContaining({ file: 'Dockerfile', startLine: 1, title });
+
+  it('notes another Java agent and extension with the check off', async () => {
+    nock(BASE).get(RULES).query(true).reply(200, served('OFF'));
+    const root = repo({ Dockerfile: SECOND_AGENT });
+    expect(await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root)).toBeNull();
+    expect(core.notice).toHaveBeenCalledWith(expect.stringMatching(/^Java agent not named as the OpenTelemetry agent: dd-java-agent\.jar\./),
+      agentNotice('Maestro: another Java agent'));
+    expect(core.notice).toHaveBeenCalledWith(expect.stringMatching(/^Agent extension not named as a bundle's extension: vendor\.jar\./),
+      agentNotice('Maestro: another agent extension'));
+    expect(core.notice).toHaveBeenCalledTimes(2);
+  });
+
+  it('notes another Java agent and extension in an enforcing mode, and the notes change no outcome', async () => {
+    for (const mode of ['WARN', 'FAIL']) {
+      jest.mocked(core.notice).mockClear();
+      nock(BASE).get(RULES).query(true).reply(200, served(mode));
+      const root = repo({ Dockerfile: SECOND_AGENT });
+      const result = await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root);
+      expect(result?.total).toBe(0);
+      expect(core.setOutput).toHaveBeenCalledWith('log-policy-check', 'passed');
+      expect(core.notice).toHaveBeenCalledWith(expect.stringMatching(/^Java agent not named/), agentNotice('Maestro: another Java agent'));
+      expect(core.notice).toHaveBeenCalledWith(expect.stringMatching(/^Agent extension not named/), agentNotice('Maestro: another agent extension'));
+      expect(core.notice).toHaveBeenCalledTimes(2);
     }
   });
 

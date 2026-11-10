@@ -25866,11 +25866,11 @@ exports.passesTest = passesTest;
 exports.dropsProcessor = dropsProcessor;
 exports.unreadable = unreadable;
 /** The newest rule-set version this Action reads; it reads every version from 1 up and names them all to the platform. */
-exports.VERSION = 2;
+exports.VERSION = 3;
 /** The rule-set versions this Action reads; the platform serves the highest it has. */
-exports.VERSIONS = [1, 2];
+exports.VERSIONS = [1, 2, 3];
 /** The SHA-256 of the evaluation fixture suite this release was tested against; the server serves its own. */
-exports.CASES_DIGEST = '1779d21a6eb889f5cc59210b80e3ab4ee2f12caf53b9a0e363a8adb12cd3fdf0';
+exports.CASES_DIGEST = '6124a1f43e7b537ddf86f219ee932e1ace37fc203a839abead8bca80875b750b';
 /**
  * The setting the Action writes for each logs pipeline of a collector configuration it finds, valued
  * "<the pipeline's processors>|<the processors the configuration defines>"; the files' own settings under it are not read.
