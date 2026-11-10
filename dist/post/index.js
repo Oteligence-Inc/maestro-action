@@ -25870,7 +25870,7 @@ exports.VERSION = 3;
 /** The rule-set versions this Action reads; the platform serves the highest it has. */
 exports.VERSIONS = [1, 2, 3];
 /** The SHA-256 of the evaluation fixture suite this release was tested against; the server serves its own. */
-exports.CASES_DIGEST = '08408ee2766cc089b1d7e26e59a87b119677fead277d679c17ec165fc40b3d90';
+exports.CASES_DIGEST = '6124a1f43e7b537ddf86f219ee932e1ace37fc203a839abead8bca80875b750b';
 /**
  * The setting the Action writes for each logs pipeline of a collector configuration it finds, valued
  * "<the pipeline's processors>|<the processors the configuration defines>"; the files' own settings under it are not read.

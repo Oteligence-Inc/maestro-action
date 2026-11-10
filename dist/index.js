@@ -29700,7 +29700,7 @@ exports.VERSION = 3;
 /** The rule-set versions this Action reads; the platform serves the highest it has. */
 exports.VERSIONS = [1, 2, 3];
 /** The SHA-256 of the evaluation fixture suite this release was tested against; the server serves its own. */
-exports.CASES_DIGEST = '08408ee2766cc089b1d7e26e59a87b119677fead277d679c17ec165fc40b3d90';
+exports.CASES_DIGEST = '6124a1f43e7b537ddf86f219ee932e1ace37fc203a839abead8bca80875b750b';
 /**
  * The setting the Action writes for each logs pipeline of a collector configuration it finds, valued
  * "<the pipeline's processors>|<the processors the configuration defines>"; the files' own settings under it are not read.
@@ -30290,24 +30290,31 @@ function trustedHostname(raw) {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.NOTE_NAME_MAX = void 0;
+exports.NOT_SHOWN = exports.NOTE_NAME_MAX = void 0;
 exports.agentNotes = agentNotes;
 exports.extensionNotes = extensionNotes;
 const ciRules_1 = __nccwpck_require__(7944);
 const extract_1 = __nccwpck_require__(821);
-/** The bound, in code points, on the name a note shows. */
+/** The bound on the name a note shows. */
 exports.NOTE_NAME_MAX = 200;
-// A -javaagent flag standing as its own token; its JAR path ends at its options' =. Whitespace is ASCII only, as Go's
-// class is in the CLI's copy.
-const JAVA_AGENT_FLAG = /(?:^|[\t\n\f\r "'[,=])-javaagent:([^\t\n\f\r "',\]=]+)/g;
-// A path naming the OpenTelemetry agent: otel or opentelemetry as a word in any segment, as every distribution of it is
-// named.
-const OTEL_AGENT_PATH = /(?:^|[^a-z])(?:otel|opentelemetry)(?:[^a-z]|$)/i;
+/** Stands for a name a note does not show: one that is not a plain file name, which a Secret's value could be. */
+exports.NOT_SHOWN = '(name not shown)';
+// A -javaagent flag standing as its own token, its colon escaped as a .properties file may; its JAR path ends at its
+// options' =. Whitespace is ASCII only, as Go's class is in the CLI's copy.
+const JAVA_AGENT_FLAG = /(?:^|[\t\n\f\r "'[,=])-javaagent\\?:([^\t\n\f\r "',\]=]+)/g;
+// An ASCII-lowercased path naming the OpenTelemetry agent: otel or opentelemetry as a word in any segment, as every
+// distribution of it is named.
+const OTEL_AGENT_PATH = /(?:^|[^a-z])(?:otel|opentelemetry)(?:[^a-z]|$)/;
+// An ASCII-lowercased file name a bundle's extension goes by: <service>-extension.jar, with a counter where two services
+// share a name, mounted as extension.jar, or a Prelude extension named oteligence.
+const BUNDLE_EXTENSION = /^(?:.*-)?extension(?:-[0-9]+)?\.jar$|(?:^|[^a-z])oteligence(?:[^a-z]|$)/;
+// A name a note may show.
+const FILE_SHAPED = /^[A-Za-z0-9._+-]+$/;
 // A path a template fills in, which names nothing the check can judge.
 const UNREADABLE_PATH = /[$@{}]/;
 /**
- * The lines of one file's text that start a Java agent other than the OpenTelemetry agent, one note per line naming each
- * such agent's file once, skipping comment lines and paths a template fills in.
+ * The lines of one file's text that start a Java agent not named as the OpenTelemetry agent, one note per line naming
+ * each such agent's file once, skipping comment lines and paths a template fills in.
  */
 function agentNotes(path, text) {
     const out = [];
@@ -30318,11 +30325,11 @@ function agentNotes(path, text) {
             return;
         const agents = [];
         for (const m of line.matchAll(JAVA_AGENT_FLAG)) {
-            if (UNREADABLE_PATH.test(m[1]) || OTEL_AGENT_PATH.test(m[1]))
+            if (UNREADABLE_PATH.test(m[1]) || OTEL_AGENT_PATH.test(asciiLower(m[1])))
                 continue;
             const name = lastSegment(m[1]);
-            if (name !== '' && !agents.includes(name))
-                agents.push(name);
+            if (name !== '' && !agents.includes(shown(name)))
+                agents.push(shown(name));
         }
         if (agents.length > 0)
             out.push({ path, line: i + 1, agents });
@@ -30330,9 +30337,8 @@ function agentNotes(path, text) {
     return out;
 }
 /**
- * The entries of each otel.javaagent.extensions setting that are not a bundle's extension (a JAR named
- * <service>-extension.jar), once per file, line and entry, in the settings' order. An entry a template fills in is
- * skipped, and the value's other entries are still read.
+ * The entries of each otel.javaagent.extensions setting not named as a bundle's extension, once per file, line and
+ * entry, in the settings' order. An entry a template fills in is skipped, and the value's other entries are still read.
  */
 function extensionNotes(settings) {
     const out = [];
@@ -30347,10 +30353,10 @@ function extensionNotes(settings) {
             const name = lastSegment(entry);
             if (name === '')
                 continue;
-            const lower = name.replace(/[A-Z]/g, (c) => c.toLowerCase());
-            if (lower.endsWith('-extension.jar'))
+            const lower = asciiLower(name);
+            if (BUNDLE_EXTENSION.test(lower))
                 continue;
-            const note = { path: s.path, line: s.line, extension: name, directory: !lower.endsWith('.jar') };
+            const note = { path: s.path, line: s.line, extension: shown(name), directory: !lower.endsWith('.jar') };
             const key = JSON.stringify(note);
             if (!seen.has(key)) {
                 seen.add(key);
@@ -30360,10 +30366,23 @@ function extensionNotes(settings) {
     }
     return out;
 }
-/** A path's last non-empty segment, / or \ separated, cut to NOTE_NAME_MAX code points. */
+/** A to Z lower-cased and nothing else, as the CLI's copy does, so the two read names alike. */
+function asciiLower(s) {
+    return s.replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+/** A name as a note shows it: itself when it is a plain file name, else NOT_SHOWN. */
+function shown(name) {
+    return FILE_SHAPED.test(name) ? name : exports.NOT_SHOWN;
+}
+/** A path's last non-empty segment, / or \ separated, cut to NOTE_NAME_MAX code points; linear in its length. */
 function lastSegment(p) {
-    const trimmed = p.replace(/[/\\]+$/, '');
-    const name = trimmed.slice(Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\')) + 1);
+    let end = p.length;
+    while (end > 0 && (p.charCodeAt(end - 1) === 0x2f || p.charCodeAt(end - 1) === 0x5c))
+        end--;
+    let start = end;
+    while (start > 0 && p.charCodeAt(start - 1) !== 0x2f && p.charCodeAt(start - 1) !== 0x5c)
+        start--;
+    const name = p.slice(start, end);
     const points = Array.from(name);
     return points.length > exports.NOTE_NAME_MAX ? points.slice(0, exports.NOTE_NAME_MAX).join('') : name;
 }
@@ -32641,8 +32660,8 @@ function verdict(mode, findings, total, baseline) {
 }
 const NO_NOTES = { aot: [], agents: [], extensions: [] };
 /**
- * One log line per finding: its rule, the setting's name, and where; and a notice per note on its line. Never a value:
- * an agent or extension note names the file's last segment only.
+ * One log line per finding: its rule, the setting's name, and where; and a notice per note on its line. Never a value in
+ * full: an agent or extension note names the last path segment of one, and only when it is a plain file name.
  */
 function report(findings, problems, notes = NO_NOTES) {
     for (const f of findings) {
@@ -32664,7 +32683,7 @@ function report(findings, problems, notes = NO_NOTES) {
         });
     }
     for (const n of notes.agents) {
-        core.notice(`Java agent: ${printable(n.agents.join(' '))}. An agent beside the OpenTelemetry agent can export the same telemetry again or change what the agent records.`, {
+        core.notice(`Java agent not named as the OpenTelemetry agent: ${printable(n.agents.join(', '))}. Another agent can export the same telemetry again or change what the agent records; the OpenTelemetry agent under another name is fine.`, {
             file: n.path,
             startLine: n.line,
             title: 'Maestro: another Java agent',
@@ -32672,8 +32691,8 @@ function report(findings, problems, notes = NO_NOTES) {
     }
     for (const n of notes.extensions) {
         const message = n.directory
-            ? `Agent extension directory: ${printable(n.extension)}. The agent loads every JAR in it, which this check cannot see; keep only the bundle's <service>-extension.jar there.`
-            : `Agent extension: ${printable(n.extension)} is not the bundle's <service>-extension.jar. Another extension runs inside the agent and can change what it records or exports.`;
+            ? `Agent extension directory: ${printable(n.extension)}. The agent loads every JAR directly in it, which this check cannot see; keep only the bundle's extension there.`
+            : `Agent extension not named as a bundle's extension: ${printable(n.extension)}. Another extension runs inside the agent and can change what it records or exports; your bundle's extension under another name is fine.`;
         core.notice(message, { file: n.path, startLine: n.line, title: 'Maestro: another agent extension' });
     }
 }

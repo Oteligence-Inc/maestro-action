@@ -326,6 +326,36 @@ describe('logPolicyCheck', () => {
     }
   });
 
+  const SECOND_AGENT =
+    'CMD ["java", "-javaagent:/opt/opentelemetry-javaagent.jar", "-javaagent:/opt/dd-java-agent.jar", ' +
+    '"-Dotel.javaagent.extensions=/opt/orders-extension.jar,/opt/vendor.jar", "-jar", "a.jar"]\n';
+  const agentNotice = (title: string) => expect.objectContaining({ file: 'Dockerfile', startLine: 1, title });
+
+  it('notes another Java agent and extension with the check off', async () => {
+    nock(BASE).get(RULES).query(true).reply(200, served('OFF'));
+    const root = repo({ Dockerfile: SECOND_AGENT });
+    expect(await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root)).toBeNull();
+    expect(core.notice).toHaveBeenCalledWith(expect.stringMatching(/^Java agent not named as the OpenTelemetry agent: dd-java-agent\.jar\./),
+      agentNotice('Maestro: another Java agent'));
+    expect(core.notice).toHaveBeenCalledWith(expect.stringMatching(/^Agent extension not named as a bundle's extension: vendor\.jar\./),
+      agentNotice('Maestro: another agent extension'));
+    expect(core.notice).toHaveBeenCalledTimes(2);
+  });
+
+  it('notes another Java agent and extension in an enforcing mode, and the notes change no outcome', async () => {
+    for (const mode of ['WARN', 'FAIL']) {
+      jest.mocked(core.notice).mockClear();
+      nock(BASE).get(RULES).query(true).reply(200, served(mode));
+      const root = repo({ Dockerfile: SECOND_AGENT });
+      const result = await logPolicyCheck(client(), 'proj_1', 'prod', 'orders', root);
+      expect(result?.total).toBe(0);
+      expect(core.setOutput).toHaveBeenCalledWith('log-policy-check', 'passed');
+      expect(core.notice).toHaveBeenCalledWith(expect.stringMatching(/^Java agent not named/), agentNotice('Maestro: another Java agent'));
+      expect(core.notice).toHaveBeenCalledWith(expect.stringMatching(/^Agent extension not named/), agentNotice('Maestro: another agent extension'));
+      expect(core.notice).toHaveBeenCalledTimes(2);
+    }
+  });
+
   it('is not run, with a warning, outside a git checkout where the mode accepts a build with no check', async () => {
     for (const mode of ['WARN', 'FAIL_ON_NEW']) {
       nock(BASE).get(RULES).query(true).reply(200, served(mode));

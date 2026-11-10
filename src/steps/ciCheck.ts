@@ -440,8 +440,8 @@ export type Notes = Pick<Scan, 'aot' | 'agents' | 'extensions'>;
 const NO_NOTES: Notes = { aot: [], agents: [], extensions: [] };
 
 /**
- * One log line per finding: its rule, the setting's name, and where; and a notice per note on its line. Never a value:
- * an agent or extension note names the file's last segment only.
+ * One log line per finding: its rule, the setting's name, and where; and a notice per note on its line. Never a value in
+ * full: an agent or extension note names the last path segment of one, and only when it is a plain file name.
  */
 export function report(findings: Finding[], problems: Problem[], notes: Notes = NO_NOTES): void {
   for (const f of findings) {
@@ -461,7 +461,7 @@ export function report(findings: Finding[], problems: Problem[], notes: Notes = 
     });
   }
   for (const n of notes.agents) {
-    core.notice(`Java agent: ${printable(n.agents.join(' '))}. An agent beside the OpenTelemetry agent can export the same telemetry again or change what the agent records.`, {
+    core.notice(`Java agent not named as the OpenTelemetry agent: ${printable(n.agents.join(', '))}. Another agent can export the same telemetry again or change what the agent records; the OpenTelemetry agent under another name is fine.`, {
       file: n.path,
       startLine: n.line,
       title: 'Maestro: another Java agent',
@@ -469,8 +469,8 @@ export function report(findings: Finding[], problems: Problem[], notes: Notes = 
   }
   for (const n of notes.extensions) {
     const message = n.directory
-      ? `Agent extension directory: ${printable(n.extension)}. The agent loads every JAR in it, which this check cannot see; keep only the bundle's <service>-extension.jar there.`
-      : `Agent extension: ${printable(n.extension)} is not the bundle's <service>-extension.jar. Another extension runs inside the agent and can change what it records or exports.`;
+      ? `Agent extension directory: ${printable(n.extension)}. The agent loads every JAR directly in it, which this check cannot see; keep only the bundle's extension there.`
+      : `Agent extension not named as a bundle's extension: ${printable(n.extension)}. Another extension runs inside the agent and can change what it records or exports; your bundle's extension under another name is fine.`;
     core.notice(message, { file: n.path, startLine: n.line, title: 'Maestro: another agent extension' });
   }
 }

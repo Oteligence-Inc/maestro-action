@@ -10,7 +10,7 @@ import { report, scan } from '../../src/steps/ciCheck';
 
 // The CLI's suite holds a copy of this file and pins the same digest; a case is added to both by copying the file.
 const SUITE = path.join(__dirname, '..', 'fixtures', 'ci-rules', 'agent-cases.json');
-const AGENT_CASES_DIGEST = 'f5187f15f71ccc8b7e9df090f3b621dc3915c7d2dcc755c91eb6050903cd00ed';
+const AGENT_CASES_DIGEST = '8f7c06d31540ffeb62b45e8c973f4b606157ce1a4840997c373cb70fe7cff57a';
 
 interface Cases {
   agents: { name: string; path: string; text: string; notes: { line: number; agents: string[] }[] }[];
@@ -36,12 +36,22 @@ it.each(cases.extensions.map((c) => [c.name, c] as const))('extensions: %s', (_n
   expect(extensionNotes(c.settings)).toEqual(c.notes);
 });
 
-it('cuts a note name to its bound in code points', () => {
-  const long = '\u{1F600}'.repeat(NOTE_NAME_MAX + 5) + '.jar';
+it('cuts a note name to its bound', () => {
+  const long = 'a'.repeat(NOTE_NAME_MAX + 5) + '.jar';
   const [agent] = agentNotes('Dockerfile', `CMD java -javaagent:/opt/${long}\n`);
   expect(Array.from(agent.agents[0])).toHaveLength(NOTE_NAME_MAX);
   const [ext] = extensionNotes([{ name: 'OTEL_JAVAAGENT_EXTENSIONS', value: `/opt/${long}`, path: 'a.env', line: 1 }]);
   expect(Array.from(ext.extension)).toHaveLength(NOTE_NAME_MAX);
+});
+
+it('reads a long run of separators in linear time', () => {
+  const started = Date.now();
+  expect(agentNotes('Dockerfile', 'CMD java -javaagent:' + '/'.repeat(200000) + 'x\n')).toEqual([
+    { path: 'Dockerfile', line: 1, agents: ['x'] },
+  ]);
+  expect(extensionNotes([{ name: 'OTEL_JAVAAGENT_EXTENSIONS', value: 'x' + '/'.repeat(200000), path: 'a.env', line: 1 }]))
+    .toEqual([{ path: 'a.env', line: 1, extension: 'x', directory: true }]);
+  expect(Date.now() - started).toBeLessThan(1000);
 });
 
 it('collects agent notes from each file the scan reads and extension notes from its settings, with the check off too', () => {
@@ -64,15 +74,15 @@ it('reports each note as a notice on its file and line, naming the file only', (
   ];
   report([], [], { aot: [], agents, extensions });
   expect(core.notice).toHaveBeenCalledWith(
-    'Java agent: dd-java-agent.jar newrelic.jar. An agent beside the OpenTelemetry agent can export the same telemetry again or change what the agent records.',
+    'Java agent not named as the OpenTelemetry agent: dd-java-agent.jar, newrelic.jar. Another agent can export the same telemetry again or change what the agent records; the OpenTelemetry agent under another name is fine.',
     { file: 'Dockerfile', startLine: 2, title: 'Maestro: another Java agent' },
   );
   expect(core.notice).toHaveBeenCalledWith(
-    "Agent extension: vendor.jar is not the bundle's <service>-extension.jar. Another extension runs inside the agent and can change what it records or exports.",
+    "Agent extension not named as a bundle's extension: vendor.jar. Another extension runs inside the agent and can change what it records or exports; your bundle's extension under another name is fine.",
     { file: 'k8s/deploy.yaml', startLine: 30, title: 'Maestro: another agent extension' },
   );
   expect(core.notice).toHaveBeenCalledWith(
-    "Agent extension directory: ext. The agent loads every JAR in it, which this check cannot see; keep only the bundle's <service>-extension.jar there.",
+    "Agent extension directory: ext. The agent loads every JAR directly in it, which this check cannot see; keep only the bundle's extension there.",
     { file: 'k8s/deploy.yaml', startLine: 31, title: 'Maestro: another agent extension' },
   );
   expect(core.notice).toHaveBeenCalledTimes(3);

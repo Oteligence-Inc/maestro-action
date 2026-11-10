@@ -9,7 +9,7 @@ export const VERSION = 3;
 export const VERSIONS = [1, 2, 3];
 
 /** The SHA-256 of the evaluation fixture suite this release was tested against; the server serves its own. */
-export const CASES_DIGEST = '08408ee2766cc089b1d7e26e59a87b119677fead277d679c17ec165fc40b3d90';
+export const CASES_DIGEST = '6124a1f43e7b537ddf86f219ee932e1ace37fc203a839abead8bca80875b750b';
 
 /**
  * The setting the Action writes for each logs pipeline of a collector configuration it finds, valued
