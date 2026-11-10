@@ -1,6 +1,6 @@
 jest.mock('@actions/core');
 import * as core from '@actions/core';
-import { reportDrift } from '../../src/steps/drift';
+import { reportDrift, reportNewSensitive } from '../../src/steps/drift';
 
 const warning = core.warning as jest.Mock;
 const info = core.info as jest.Mock;
@@ -117,4 +117,54 @@ it('treats every service as its own when the run knows no names of its own', () 
   expect(warning).toHaveBeenCalledWith(expect.stringContaining('in a: 1 method(s)'));
   expect(warning).toHaveBeenCalledWith(expect.stringContaining('in b: 1 locked method(s)'));
   expect(info).not.toHaveBeenCalledWith(expect.stringContaining('Other services'));
+});
+
+describe('new sensitive log statements', () => {
+  const at = (method: string, line?: number) => ({ className: 'a.B', method, level: 'DEBUG', ...(line === undefined ? {} : { line }) });
+  const drift = (services: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    checked({}, { newSensitive: { count: 1, services, ...extra } });
+
+  it("warns on the run's own service with where each is, never what it logs", () => {
+    reportNewSensitive(drift({ fts: { count: 2, statements: [at('added', 30), at('other')] } }), ['fts']);
+
+    expect(warning).toHaveBeenCalledTimes(1);
+    expect(warning).toHaveBeenCalledWith('New sensitive log statements in fts since its last build: 2: '
+      + 'a.B.added line 30 (DEBUG), a.B.other (DEBUG). Each logs a value that reads as sensitive; check what it writes '
+      + 'before it ships.');
+  });
+
+  it("prints the server's full count beside the statements it listed", () => {
+    reportNewSensitive(drift({ fts: { count: 14, statements: [at('a', 1)] } }), ['fts']);
+
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining(': 14: a.B.a line 1 (DEBUG) and 13 more.'));
+  });
+
+  it("names nothing for another service, a service with none, or a drift that carries none", () => {
+    reportNewSensitive(drift({ peer: { count: 1, statements: [at('x')] }, fts: { count: 0, statements: [] } }), ['fts']);
+    reportNewSensitive(checked({}), ['fts']);
+    reportNewSensitive({ status: 'unreadable' }, ['fts']);
+    reportNewSensitive(undefined, ['fts']);
+
+    expect(warning).not.toHaveBeenCalled();
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it('says so when the service was not compared, and only for its own', () => {
+    reportNewSensitive(drift({}, { notCompared: ['fts', 'peer'] }), ['fts']);
+
+    expect(warning).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith('Sensitive log statements in fts were not compared: neither a build nor the '
+      + "lock's analysis recorded them.");
+  });
+
+  it('skips a statement it cannot read and never counts fewer than it lists', () => {
+    reportNewSensitive(drift({ fts: { count: 0, statements: [at('ok', 3), { className: 'a.B' }, 'x'] } }), ['fts']);
+
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('in fts since its last build: 1: a.B.ok line 3 (DEBUG).'));
+  });
+
+  it('is called with the build drift on every run', () => {
+    const index = require('fs').readFileSync(require('path').join(__dirname, '../../src/index.ts'), 'utf8') as string;
+    expect(index).toMatch(/reportDrift\(build\.drift, analysisNames\);\n\s*reportNewSensitive\(build\.drift, analysisNames\);/);
+  });
 });

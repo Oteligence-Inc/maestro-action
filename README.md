@@ -266,6 +266,21 @@ named in a warning. Other services' drift is one count line, and their own runs 
 as information, and one whose analysis was not made from this build's JARs says so in a warning. Drift never fails
 the step: `fail-on-warnings` applies to peer staleness only, and the build is still the lock's.
 
+### New sensitive log statements
+
+With the drift, job-manager names the log statements the build's analysis reads as sensitive that the service's last
+build did not hold, or the lock's analysis when no build of the environment recorded them. A **`::warning`** lists
+where each one is (class, method, line, level) and never what it logs:
+
+```
+New sensitive log statements in fund-transfer-service since its last build: 1: org.example.TransferAudit.record
+line 42 (DEBUG). Each logs a value that reads as sensitive; check what it writes before it ships.
+```
+
+A statement is known by its class, method, level and message, so moving it to another line is not new, and each
+build records its service's statements for the next, so a statement is named once. A service neither a build nor
+the lock's analysis recorded statements for is not compared, and says so as information. It never fails the step.
+
 ## The log policy check
 
 Before it uploads anything, the Action reads the environment's log policy rules from Maestro

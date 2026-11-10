@@ -11,7 +11,7 @@ import { verifyBuild } from './steps/verify';
 import { readAnalysisOfUpload } from './steps/analysisService';
 import { registerJarForEnv } from './steps/register';
 import { warnStalePeers } from './steps/staleness';
-import { reportDrift } from './steps/drift';
+import { reportDrift, reportNewSensitive } from './steps/drift';
 import { reportDeployRun } from './steps/reportDeployRun';
 import { logPolicyCheck } from './steps/ciCheck';
 import { checkOnly } from './steps/checkOnly';
@@ -84,6 +84,7 @@ export async function run(): Promise<void> {
     const buildJobId = build.jobId;
     // Before the build runs, so a build that fails still says how its inputs drifted from the lock.
     reportDrift(build.drift, analysisNames);
+    reportNewSensitive(build.drift, analysisNames);
     await pollJob(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
     const paths = await downloadArtifacts(api, buildJobId, inputs.service, analysisNames); // [8]
     // [8b] Every downloaded file against the record of the build's inputs, before anything registers or deploys it.
