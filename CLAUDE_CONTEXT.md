@@ -76,8 +76,9 @@ included; non-empty strings; each path through `globRefusal`, one linear pass th
    drift and for a drift job-manager could not compare. A missing `drift` (an older job-manager), or a compared one
    whose `services` is not an object, prints nothing. Drift never fails the step, `fail-on-warnings` included.
    `reportNewSensitive` (same file) follows it on the same drift: one `core.warning` per own service with
-   `newSensitive.services[service].count` above zero, listing each statement's class, method, line and level (inside
-   `core.warning`), and one `core.info` naming the own services in `newSensitive.notCompared`. Never fails the step.
+   `newSensitive.services[service].count` above zero, worded by its `since` (`build`: not in its last completed build;
+   otherwise the lock's analysis) and listing each statement's class, method, line and level (inside `core.warning`),
+   and one `core.info` naming the own services in `newSensitive.notCompared`. Never fails the step.
 7. `downloadArtifacts`: `/jobs/{id}/download`; empties the job's folder, extracts the bundle and writes this service's
    `javaagent.config`, chosen by the analysis key, then the `service` input, then a unique letters-only match. It returns
    the response's `buildRecord` (`undefined` when the field is absent, a server older than build records; `null` when

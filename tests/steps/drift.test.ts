@@ -124,23 +124,35 @@ describe('new sensitive log statements', () => {
   const drift = (services: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
     checked({}, { newSensitive: { count: 1, services, ...extra } });
 
-  it("warns on the run's own service with where each is, never what it logs", () => {
-    reportNewSensitive(drift({ fts: { count: 2, statements: [at('added', 30), at('other')] } }), ['fts']);
+  it("warns on the run's own service with where each is, never what it logs, against its last completed build", () => {
+    reportNewSensitive(drift({ fts: { count: 2, since: 'build', statements: [at('added', 30), at('other')] } }), ['fts']);
 
     expect(warning).toHaveBeenCalledTimes(1);
-    expect(warning).toHaveBeenCalledWith('New sensitive log statements in fts since its last build: 2: '
+    expect(warning).toHaveBeenCalledWith('New sensitive log statements in fts, not in its last completed build: 2: '
       + 'a.B.added line 30 (DEBUG), a.B.other (DEBUG). Each logs a value that reads as sensitive; check what it writes '
       + 'before it ships.');
   });
 
+  it("names the lock's analysis when that is what the statements were compared with", () => {
+    reportNewSensitive(drift({ fts: { count: 1, since: 'lock', statements: [at('added', 30)] } }), ['fts']);
+
+    expect(warning).toHaveBeenCalledWith(expect.stringMatching(/^New sensitive log statements in fts, not in the lock's analysis: 1: /));
+  });
+
   it("prints the server's full count beside the statements it listed", () => {
-    reportNewSensitive(drift({ fts: { count: 14, statements: [at('a', 1)] } }), ['fts']);
+    reportNewSensitive(drift({ fts: { count: 14, since: 'build', statements: [at('a', 1)] } }), ['fts']);
 
     expect(warning).toHaveBeenCalledWith(expect.stringContaining(': 14: a.B.a line 1 (DEBUG) and 13 more.'));
   });
 
+  it('treats every service as its own when the run knows no names, as the drift report does', () => {
+    reportNewSensitive(drift({ peer: { count: 1, since: 'lock', statements: [at('x')] } }), []);
+
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('in peer, not in'));
+  });
+
   it("names nothing for another service, a service with none, or a drift that carries none", () => {
-    reportNewSensitive(drift({ peer: { count: 1, statements: [at('x')] }, fts: { count: 0, statements: [] } }), ['fts']);
+    reportNewSensitive(drift({ peer: { count: 1, statements: [at('x')] }, fts: { count: 0, since: 'build', statements: [] } }), ['fts']);
     reportNewSensitive(checked({}), ['fts']);
     reportNewSensitive({ status: 'unreadable' }, ['fts']);
     reportNewSensitive(undefined, ['fts']);
@@ -153,14 +165,15 @@ describe('new sensitive log statements', () => {
     reportNewSensitive(drift({}, { notCompared: ['fts', 'peer'] }), ['fts']);
 
     expect(warning).not.toHaveBeenCalled();
-    expect(info).toHaveBeenCalledWith('Sensitive log statements in fts were not compared: neither a build nor the '
-      + "lock's analysis recorded them.");
+    expect(info).toHaveBeenCalledWith('Sensitive log statements in fts were not compared: neither a completed build nor '
+      + "the lock's analysis recorded them.");
   });
 
-  it('skips a statement it cannot read and never counts fewer than it lists', () => {
-    reportNewSensitive(drift({ fts: { count: 0, statements: [at('ok', 3), { className: 'a.B' }, 'x'] } }), ['fts']);
+  it('skips a statement it cannot place, shows one with no level without it, and never counts fewer than it lists', () => {
+    reportNewSensitive(drift({ fts: { count: 0, since: 'build',
+      statements: [at('ok', 3), { className: 'a.B', method: 'nolevel' }, { className: 'a.B' }, 'x'] } }), ['fts']);
 
-    expect(warning).toHaveBeenCalledWith(expect.stringContaining('in fts since its last build: 1: a.B.ok line 3 (DEBUG).'));
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining(': 2: a.B.ok line 3 (DEBUG), a.B.nolevel. Each'));
   });
 
   it('is called with the build drift on every run', () => {

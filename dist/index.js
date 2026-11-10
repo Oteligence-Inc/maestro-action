@@ -33092,15 +33092,17 @@ function reportDrift(drift, ownNames) {
 }
 function placed(value) {
     const p = (value ?? {});
-    if (typeof p.className !== 'string' || typeof p.method !== 'string' || typeof p.level !== 'string')
+    if (typeof p.className !== 'string' || typeof p.method !== 'string')
         return undefined;
-    return { className: p.className, method: p.method, level: p.level,
+    return { className: p.className, method: p.method,
+        level: typeof p.level === 'string' ? p.level : undefined,
         line: Number.isInteger(p.line) ? p.line : undefined };
 }
 /**
- * Warns of the log statements the build's analysis reads as sensitive that its service's last build did not hold (the
- * lock's analysis when no build recorded them), as job-manager worked them out with the drift. Only where each is,
- * never what it logs, and printed only through core.warning, which escapes the customer's names. Never fails the step.
+ * Warns of the log statements the build's analysis reads as sensitive, for the service it built, that the analysis of
+ * that service's newest completed build did not hold (the lock's analysis before any), as job-manager worked them out
+ * with the drift. Only where each is, never what it logs, and printed only through core.warning, which escapes the
+ * customer's names. Never fails the step.
  */
 function reportNewSensitive(drift, ownNames) {
     if (!drift || typeof drift !== 'object')
@@ -33121,16 +33123,18 @@ function reportNewSensitive(drift, ownNames) {
         const count = Number.isInteger(s.count) && s.count >= list.length ? s.count : list.length;
         if (count === 0)
             continue;
-        const named = list.map((p) => `${p.className}.${p.method}${p.line === undefined ? '' : ` line ${p.line}`} (${p.level})`);
+        const named = list.map((p) => `${p.className}.${p.method}${p.line === undefined ? '' : ` line ${p.line}`}`
+            + (p.level === undefined ? '' : ` (${p.level})`));
         const more = count - named.length;
-        core.warning(`New sensitive log statements in ${service} since its last build: ${count}: ${named.join(', ')}`
+        const against = s.since === 'build' ? 'its last completed build' : "the lock's analysis";
+        core.warning(`New sensitive log statements in ${service}, not in ${against}: ${count}: ${named.join(', ')}`
             + `${more > 0 ? ` and ${more} more` : ''}. Each logs a value that reads as sensitive; check what it writes before it ships.`);
     }
     const notCompared = Array.isArray(n.notCompared)
         ? n.notCompared.filter((s) => typeof s === 'string' && isOwn(s)) : [];
     if (notCompared.length > 0) {
-        core.info(`Sensitive log statements in ${notCompared.join(', ')} were not compared: neither a build nor the lock's `
-            + 'analysis recorded them.');
+        core.info(`Sensitive log statements in ${notCompared.join(', ')} were not compared: neither a completed build nor `
+            + "the lock's analysis recorded them.");
     }
 }
 

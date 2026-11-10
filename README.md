@@ -268,18 +268,23 @@ the step: `fail-on-warnings` applies to peer staleness only, and the build is st
 
 ### New sensitive log statements
 
-With the drift, job-manager names the log statements the build's analysis reads as sensitive that the service's last
-build did not hold, or the lock's analysis when no build of the environment recorded them. A **`::warning`** lists
-where each one is (class, method, line, level) and never what it logs:
+With the drift, job-manager names the log statements the build's analysis reads as sensitive, for the service the run
+built, that the analysis of that service's newest completed build in the environment did not hold, or the lock's
+analysis before any. A **`::warning`** says which it compared with and lists where each statement is (class, method,
+line, level), never what it logs:
 
 ```
-New sensitive log statements in fund-transfer-service since its last build: 1: org.example.TransferAudit.record
-line 42 (DEBUG). Each logs a value that reads as sensitive; check what it writes before it ships.
+New sensitive log statements in fund-transfer-service, not in its last completed build: 1:
+org.example.TransferAudit.record line 42 (DEBUG). Each logs a value that reads as sensitive; check what it writes
+before it ships.
 ```
 
-A statement is known by its class, method, level and message, so moving it to another line is not new, and each
-build records its service's statements for the next, so a statement is named once. A service neither a build nor
-the lock's analysis recorded statements for is not compared, and says so as information. It never fails the step.
+The analysis keeps no message text, so a statement is known by its class, method, level, logger and the names and
+origins of the values it logs: moving it to another line is not new, and two statements alike in all of those are one.
+Each run compares with the last build that completed, so a statement is named by the first run that holds it, and again
+if it is removed and then restored. Another service's runs never change this service's baseline. A service neither a
+completed build nor the lock's analysis recorded statements for is not compared, and says so as information. It never
+fails the step.
 
 ## The log policy check
 
