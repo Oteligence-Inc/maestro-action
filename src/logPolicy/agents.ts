@@ -1,5 +1,5 @@
 import { PLACEHOLDER, Setting, fold, trimAscii } from '../ciRules';
-import { kindOf } from './extract';
+import { kindOf, lines } from './extract';
 
 /**
  * A line of a deployment file that starts the JVM with a Java agent not named as the OpenTelemetry agent, which can
@@ -50,8 +50,8 @@ const UNREADABLE_PATH = /[$@{}]/;
 export function agentNotes(path: string, text: string): AgentNote[] {
   const out: AgentNote[] = [];
   const properties = kindOf(path) === 'properties';
-  text.replace(/^\uFEFF/, '').split('\n').forEach((line, i) => {
-    const trimmed = line.replace(/\r$/, '').replace(/^[ \t]+/, '');
+  lines(text.replace(/^\uFEFF/, '')).forEach((line, i) => {
+    const trimmed = line.replace(/^[ \t]+/, '');
     if (trimmed.startsWith('#') || (properties && trimmed.startsWith('!'))) return;
     const agents: string[] = [];
     for (const m of line.matchAll(JAVA_AGENT_FLAG)) {

@@ -10,7 +10,7 @@ import { report, scan } from '../../src/steps/ciCheck';
 
 // The CLI's suite holds a copy of this file and pins the same digest; a case is added to both by copying the file.
 const SUITE = path.join(__dirname, '..', 'fixtures', 'ci-rules', 'agent-cases.json');
-const AGENT_CASES_DIGEST = '8f7c06d31540ffeb62b45e8c973f4b606157ce1a4840997c373cb70fe7cff57a';
+const AGENT_CASES_DIGEST = 'c0a851dc09d01d5611691cd3818a9b1b7f33b5566acdcabbe305edb6b17af238';
 
 interface Cases {
   agents: { name: string; path: string; text: string; notes: { line: number; agents: string[] }[] }[];

@@ -30335,8 +30335,8 @@ const UNREADABLE_PATH = /[$@{}]/;
 function agentNotes(path, text) {
     const out = [];
     const properties = (0, extract_1.kindOf)(path) === 'properties';
-    text.replace(/^\uFEFF/, '').split('\n').forEach((line, i) => {
-        const trimmed = line.replace(/\r$/, '').replace(/^[ \t]+/, '');
+    (0, extract_1.lines)(text.replace(/^\uFEFF/, '')).forEach((line, i) => {
+        const trimmed = line.replace(/^[ \t]+/, '');
         if (trimmed.startsWith('#') || (properties && trimmed.startsWith('!')))
             return;
         const agents = [];
@@ -30421,8 +30421,8 @@ const AOT_FLAG = /(?:^|[ \t\n\f\r"'[,=])(-XX:(?:AOTCacheOutput|AOTCache|AOTMode)
 function aotNotes(path, text) {
     const out = [];
     const properties = (0, extract_1.kindOf)(path) === 'properties';
-    text.replace(/^\uFEFF/, '').split('\n').forEach((line, i) => {
-        const trimmed = line.replace(/\r$/, '').replace(/^[ \t]+/, '');
+    (0, extract_1.lines)(text.replace(/^\uFEFF/, '')).forEach((line, i) => {
+        const trimmed = line.replace(/^[ \t]+/, '');
         if (trimmed.startsWith('#') || (properties && trimmed.startsWith('!')))
             return;
         const flags = [];

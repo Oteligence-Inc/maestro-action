@@ -200,6 +200,19 @@
           ]
         }
       ]
+    },
+    {
+      "name": "lone CR line ends: a comment skipped, the agent on its own line",
+      "path": "Dockerfile",
+      "text": "FROM eclipse-temurin:21-jre\r# ENTRYPOINT [\"java\", \"-javaagent:/opt/old-agent.jar\"]\rENTRYPOINT [\"java\", \"-javaagent:/opt/opentelemetry-javaagent.jar\", \"-javaagent:/opt/dd-java-agent.jar\", \"-jar\", \"app.jar\"]\r",
+      "notes": [
+        {
+          "line": 3,
+          "agents": [
+            "dd-java-agent.jar"
+          ]
+        }
+      ]
     }
   ],
   "extensions": [

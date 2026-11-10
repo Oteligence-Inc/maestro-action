@@ -166,6 +166,19 @@
           ]
         }
       ]
+    },
+    {
+      "name": "lone CR line ends: a comment skipped, the flag on its own line",
+      "path": "Dockerfile",
+      "text": "FROM eclipse-temurin:25\r# ENTRYPOINT [\"java\", \"-XX:AOTCache=old.aot\"]\rENTRYPOINT [\"java\", \"-XX:AOTCache=app.aot\", \"-jar\", \"app.jar\"]\r",
+      "notes": [
+        {
+          "line": 3,
+          "flags": [
+            "-XX:AOTCache"
+          ]
+        }
+      ]
     }
   ]
 }
