@@ -9,7 +9,7 @@ import { report, scan } from '../../src/steps/ciCheck';
 
 // The CLI's suite holds a copy of this file and pins the same digest; a case is added to both by copying the file.
 const SUITE = path.join(__dirname, '..', 'fixtures', 'ci-rules', 'aot-cases.json');
-const AOT_CASES_DIGEST = '0b348acb1fa1497fd1dae23bca92d37438d4080aa64cb04d776d3fbdffd4a418';
+const AOT_CASES_DIGEST = 'ae5e09bd71cc131eb6d813a987c31e28fbdf751971a21033d30edfeb079cd796';
 
 interface Case {
   name: string;

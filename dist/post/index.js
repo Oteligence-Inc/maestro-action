@@ -25856,21 +25856,22 @@ function namedDowngrade(err) {
 // discrete-job-functions' djf-core CiRules.evaluate; the shared fixture suite (tests/fixtures/ci-rules) holds the two
 // to the same answers, and CASES_DIGEST pins which copy of that suite this release was tested against.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.PLACEHOLDER = exports.NAME = exports.TESTS = exports.COLLECTOR_VALIDATE = exports.COLLECTOR_PIPELINES = exports.CASES_DIGEST = exports.VERSIONS = exports.VERSION = void 0;
+exports.REFERENCE = exports.PLACEHOLDER = exports.NAME = exports.TESTS = exports.COLLECTOR_VALIDATE = exports.COLLECTOR_PIPELINES = exports.CASES_DIGEST = exports.VERSIONS = exports.VERSION = void 0;
 exports.findingName = findingName;
 exports.trimAscii = trimAscii;
 exports.fold = fold;
 exports.evaluate = evaluate;
 exports.matches = matches;
 exports.passesTest = passesTest;
+exports.listed = listed;
 exports.dropsProcessor = dropsProcessor;
 exports.unreadable = unreadable;
 /** The newest rule-set version this Action reads; it reads every version from 1 up and names them all to the platform. */
-exports.VERSION = 3;
+exports.VERSION = 4;
 /** The rule-set versions this Action reads; the platform serves the highest it has. */
-exports.VERSIONS = [1, 2, 3];
+exports.VERSIONS = [1, 2, 3, 4];
 /** The SHA-256 of the evaluation fixture suite this release was tested against; the server serves its own. */
-exports.CASES_DIGEST = '6124a1f43e7b537ddf86f219ee932e1ace37fc203a839abead8bca80875b750b';
+exports.CASES_DIGEST = '1841c6e602817098b6e291b8751c3913fca5de34c48aab3c4e3838bc054c177e';
 /**
  * The setting the Action writes for each logs pipeline of a collector configuration it finds, valued
  * "<the pipeline's processors>|<the processors the configuration defines>"; the files' own settings under it are not read.
@@ -25889,6 +25890,7 @@ exports.TESTS = [
     'exposes_loggers',
     'profile_below_floor',
     'keeps_processors',
+    'not_listed',
 ];
 const LEVELS = ['ALL', 'TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL', 'OFF'];
 /** The shape of a folded name a finding carries; job-manager lists no other. */
@@ -25976,9 +25978,22 @@ function passesTest(r, raw, set) {
             return isLevel(v) && below(v.toUpperCase(), set.floor);
         case 'not_exporter':
             return v !== '' && v.toLowerCase() !== 'none' && set.exporter !== null && v.toLowerCase() !== set.exporter.toLowerCase();
+        case 'not_listed':
+            return v !== '' && !exports.REFERENCE.test(v) && !listed(r.values, v);
         default:
             throw new Error(`unknown test ${r.test}`);
     }
+}
+/** A value holding a variable or command reference (${...}, $(...), $VAR) is not judged against the collectors. */
+exports.REFERENCE = /\$[({A-Za-z_]/;
+/**
+ * Whether an endpoint is one of the environment's collectors: each entry is a lower-case scheme://host[:port], and the
+ * value, its ASCII letters lower-cased, is the entry or the entry followed by a path. No URL is parsed, so every interpreter agrees.
+ */
+function listed(entries, value) {
+    // ASCII letters only, as CEL's lowerAscii: another script's lookalike letter is never listed.
+    const v = value.replace(/[A-Z]/g, (c) => c.toLowerCase());
+    return entries.some((e) => v === e || v.startsWith(e + '/'));
 }
 /**
  * Whether a logs pipeline of the generated collector configuration lacks a processor it keeps: the pipeline's list is

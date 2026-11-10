@@ -3,13 +3,13 @@
 // to the same answers, and CASES_DIGEST pins which copy of that suite this release was tested against.
 
 /** The newest rule-set version this Action reads; it reads every version from 1 up and names them all to the platform. */
-export const VERSION = 3;
+export const VERSION = 4;
 
 /** The rule-set versions this Action reads; the platform serves the highest it has. */
-export const VERSIONS = [1, 2, 3];
+export const VERSIONS = [1, 2, 3, 4];
 
 /** The SHA-256 of the evaluation fixture suite this release was tested against; the server serves its own. */
-export const CASES_DIGEST = '6124a1f43e7b537ddf86f219ee932e1ace37fc203a839abead8bca80875b750b';
+export const CASES_DIGEST = '1841c6e602817098b6e291b8751c3913fca5de34c48aab3c4e3838bc054c177e';
 
 /**
  * The setting the Action writes for each logs pipeline of a collector configuration it finds, valued
@@ -31,6 +31,7 @@ export const TESTS = [
   'exposes_loggers',
   'profile_below_floor',
   'keeps_processors',
+  'not_listed',
 ] as const;
 
 export interface Rule {
@@ -149,9 +150,24 @@ export function passesTest(r: Rule, raw: string | null | undefined, set: RuleSet
       return isLevel(v) && below(v.toUpperCase(), set.floor);
     case 'not_exporter':
       return v !== '' && v.toLowerCase() !== 'none' && set.exporter !== null && v.toLowerCase() !== set.exporter.toLowerCase();
+    case 'not_listed':
+      return v !== '' && !REFERENCE.test(v) && !listed(r.values, v);
     default:
       throw new Error(`unknown test ${r.test}`);
   }
+}
+
+/** A value holding a variable or command reference (${...}, $(...), $VAR) is not judged against the collectors. */
+export const REFERENCE = /\$[({A-Za-z_]/;
+
+/**
+ * Whether an endpoint is one of the environment's collectors: each entry is a lower-case scheme://host[:port], and the
+ * value, its ASCII letters lower-cased, is the entry or the entry followed by a path. No URL is parsed, so every interpreter agrees.
+ */
+export function listed(entries: string[], value: string): boolean {
+  // ASCII letters only, as CEL's lowerAscii: another script's lookalike letter is never listed.
+  const v = value.replace(/[A-Z]/g, (c) => c.toLowerCase());
+  return entries.some((e) => v === e || v.startsWith(e + '/'));
 }
 
 /**

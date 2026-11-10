@@ -1,4 +1,4 @@
-import { kindOf } from './extract';
+import { kindOf, lines } from './extract';
 
 /**
  * A line of a deployment file that starts the JVM with a JDK AOT cache, which on JDK 25 does not work with the agent:
@@ -19,8 +19,8 @@ const AOT_FLAG = /(?:^|[ \t\n\f\r"'[,=])(-XX:(?:AOTCacheOutput|AOTCache|AOTMode)
 export function aotNotes(path: string, text: string): AotNote[] {
   const out: AotNote[] = [];
   const properties = kindOf(path) === 'properties';
-  text.replace(/^\uFEFF/, '').split('\n').forEach((line, i) => {
-    const trimmed = line.replace(/\r$/, '').replace(/^[ \t]+/, '');
+  lines(text.replace(/^\uFEFF/, '')).forEach((line, i) => {
+    const trimmed = line.replace(/^[ \t]+/, '');
     if (trimmed.startsWith('#') || (properties && trimmed.startsWith('!'))) return;
     const flags: string[] = [];
     for (const m of line.matchAll(AOT_FLAG)) {

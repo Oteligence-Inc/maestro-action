@@ -6,7 +6,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { MaestroApi } from '../../src/api';
-import { Rule, RuleSet } from '../../src/ciRules';
+import { Rule, RuleSet, VERSION } from '../../src/ciRules';
 import {
   FINDINGS_MAX,
   checkResult,
@@ -80,14 +80,14 @@ afterEach(() => {
 
 describe('fetchRules', () => {
   it('asks for one service, naming every version this Action reads', async () => {
-    nock(BASE).get(RULES).query({ service: 'orders', versions: '1,2,3' }).reply(200, served('WARN', { baseline: ['x'] }));
+    nock(BASE).get(RULES).query({ service: 'orders', versions: '1,2,3,4' }).reply(200, served('WARN', { baseline: ['x'] }));
     const got = await fetchRules(client(), 'proj_1', 'prod', 'orders');
     expect(got.ruleSet.mode).toBe('WARN');
     expect(got.baseline).toEqual(['x']);
   });
 
   it.each([
-    ['another version', { version: 4 }, 'version 4'],
+    ['another version', { version: 5 }, 'version 5'],
     ['an unknown test', { rules: [rule('NEW', 'error', { test: 'regex' })] }, 'NEW uses a test this Action does not know'],
     ['no digest', { digest: undefined }, 'no mode, floor or digest'],
     ['an unknown mode', { mode: 'FAIL_LOUDLY' }, 'a mode this Action does not know'],
@@ -101,7 +101,7 @@ describe('fetchRules', () => {
   });
 
   it('asks for the rules of the lock the build names', async () => {
-    nock(BASE).get(RULES).query({ service: 'orders', versions: '1,2,3', lockedVersionUid: 'lv_4' }).reply(200, served('FAIL'));
+    nock(BASE).get(RULES).query({ service: 'orders', versions: '1,2,3,4', lockedVersionUid: 'lv_4' }).reply(200, served('FAIL'));
     expect((await fetchRules(client(), 'proj_1', 'prod', 'orders', 'lv_4')).ruleSet.mode).toBe('FAIL');
   });
 
@@ -113,6 +113,19 @@ describe('fetchRules', () => {
   it('names an environment that does not exist', async () => {
     nock(BASE).get(RULES).query(true).reply(404, { message: 'Environment not found' });
     await expect(fetchRules(client(), 'proj_1', 'prod', 'orders')).rejects.toThrow('Env "prod" was not found');
+  });
+});
+
+describe('the drift note', () => {
+  it('names its own copy as drifted only when the platform serves this Action its own version', async () => {
+    const root = repo({ 'deploy/.env': 'LOGGING_LEVEL_ROOT=INFO\n' });
+    const note = 'This Action was tested against another copy of the log policy rules than the platform holds. Update the Maestro Action.';
+    nock(BASE).get(RULES).query(true).reply(200, served('WARN', { version: VERSION - 1, casesDigest: 'f'.repeat(64) }));
+    await runCheck(client(), 'proj_1', 'prod', 'orders', root, readRepo(root), { checkOnly: true });
+    expect(core.warning).not.toHaveBeenCalledWith(note);
+    nock(BASE).get(RULES).query(true).reply(200, served('WARN', { version: VERSION, casesDigest: 'f'.repeat(64) }));
+    await runCheck(client(), 'proj_1', 'prod', 'orders', root, readRepo(root), { checkOnly: true });
+    expect(core.warning).toHaveBeenCalledWith(note);
   });
 });
 
