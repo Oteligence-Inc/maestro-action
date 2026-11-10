@@ -350,8 +350,11 @@ vendor's own log forwarding switched on and the structured-attributes pin the bu
 3: New Relic's in-agent forwarding, Elastic APM's `log_sending`, Sentry's logs, the Datadog Agent's container log
 collection as its variables or its Helm chart's values),
 settings the overrides refuse, and, from the analysis of the locked JAR, a variable its packaged logging reads a
-level from and a profile whose packaged level is below the floor. The bundle's own start command and identity
-settings are never findings.
+level from and a profile whose packaged level is below the floor. Where the environment names its collectors (an Org
+Admin's list on the APM step, rule set version 4), the general OpenTelemetry endpoint set to an address that is
+neither one of them nor one of them followed by a path is an error (`ENDPOINT_NOT_LISTED`); a value holding `$` is not
+judged. The bundle's own start command and identity settings are never findings: its collector address always counts
+as one of the environment's.
 
 The check also reads collector configurations: a collector file, a Helm chart's `config` values, an Operator
 `OpenTelemetryCollector`'s `spec.config` (a mapping or a string) and a string a ConfigMap carries (a `relay` key, or a

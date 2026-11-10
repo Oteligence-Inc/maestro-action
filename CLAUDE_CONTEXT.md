@@ -146,7 +146,8 @@ included; non-empty strings; each path through `globRefusal`, one linear pass th
   installer prints it once, and a job-processor that holds a key logs its public half at startup.
 
 - **Log policy check.** job-manager's `GET .../envs/{env}/ci-rules?service=&versions=<each it reads>&lockedVersionUid=` (every
-  version `VERSIONS` reads, served at the highest job-manager holds; the
+  version `VERSIONS` reads, served at the highest job-manager holds, with that version's suite digest as
+  `casesDigest`; version 4 adds `not_listed`, `listed` here, for an environment's collectors; the
   Action sends the lock it builds) serves `version`, `mode` (`OFF`, `WARN`, `FAIL`, `FAIL_ON_NEW`), `floor`,
   `exporter`, `lockFree`, `rules`, `digest`, `casesDigest`, `lockVersion`, `baseline` (the fingerprints
   `rule|name|path` of the service's first checked build, or null) and `packaged` (`matched`, `not_recorded`, `absent`,
