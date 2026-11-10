@@ -29696,11 +29696,11 @@ exports.passesTest = passesTest;
 exports.dropsProcessor = dropsProcessor;
 exports.unreadable = unreadable;
 /** The newest rule-set version this Action reads; it reads every version from 1 up and names them all to the platform. */
-exports.VERSION = 2;
+exports.VERSION = 3;
 /** The rule-set versions this Action reads; the platform serves the highest it has. */
-exports.VERSIONS = [1, 2];
+exports.VERSIONS = [1, 2, 3];
 /** The SHA-256 of the evaluation fixture suite this release was tested against; the server serves its own. */
-exports.CASES_DIGEST = '1779d21a6eb889f5cc59210b80e3ab4ee2f12caf53b9a0e363a8adb12cd3fdf0';
+exports.CASES_DIGEST = '08408ee2766cc089b1d7e26e59a87b119677fead277d679c17ec165fc40b3d90';
 /**
  * The setting the Action writes for each logs pipeline of a collector configuration it finds, valued
  * "<the pipeline's processors>|<the processors the configuration defines>"; the files' own settings under it are not read.
@@ -30279,6 +30279,93 @@ function trustedHostname(raw) {
         throw new errors_1.UserError('trusted-api-host must be a hostname only, such as maestro.example.internal, with no scheme, port, path or wildcard.');
     }
     return parsed.hostname;
+}
+
+
+/***/ }),
+
+/***/ 8260:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.NOTE_NAME_MAX = void 0;
+exports.agentNotes = agentNotes;
+exports.extensionNotes = extensionNotes;
+const ciRules_1 = __nccwpck_require__(7944);
+const extract_1 = __nccwpck_require__(821);
+/** The bound, in code points, on the name a note shows. */
+exports.NOTE_NAME_MAX = 200;
+// A -javaagent flag standing as its own token; its JAR path ends at its options' =. Whitespace is ASCII only, as Go's
+// class is in the CLI's copy.
+const JAVA_AGENT_FLAG = /(?:^|[\t\n\f\r "'[,=])-javaagent:([^\t\n\f\r "',\]=]+)/g;
+// A path naming the OpenTelemetry agent: otel or opentelemetry as a word in any segment, as every distribution of it is
+// named.
+const OTEL_AGENT_PATH = /(?:^|[^a-z])(?:otel|opentelemetry)(?:[^a-z]|$)/i;
+// A path a template fills in, which names nothing the check can judge.
+const UNREADABLE_PATH = /[$@{}]/;
+/**
+ * The lines of one file's text that start a Java agent other than the OpenTelemetry agent, one note per line naming each
+ * such agent's file once, skipping comment lines and paths a template fills in.
+ */
+function agentNotes(path, text) {
+    const out = [];
+    const properties = (0, extract_1.kindOf)(path) === 'properties';
+    text.replace(/^\uFEFF/, '').split('\n').forEach((line, i) => {
+        const trimmed = line.replace(/\r$/, '').replace(/^[ \t]+/, '');
+        if (trimmed.startsWith('#') || (properties && trimmed.startsWith('!')))
+            return;
+        const agents = [];
+        for (const m of line.matchAll(JAVA_AGENT_FLAG)) {
+            if (UNREADABLE_PATH.test(m[1]) || OTEL_AGENT_PATH.test(m[1]))
+                continue;
+            const name = lastSegment(m[1]);
+            if (name !== '' && !agents.includes(name))
+                agents.push(name);
+        }
+        if (agents.length > 0)
+            out.push({ path, line: i + 1, agents });
+    });
+    return out;
+}
+/**
+ * The entries of each otel.javaagent.extensions setting that are not a bundle's extension (a JAR named
+ * <service>-extension.jar), once per file, line and entry, in the settings' order. An entry a template fills in is
+ * skipped, and the value's other entries are still read.
+ */
+function extensionNotes(settings) {
+    const out = [];
+    const seen = new Set();
+    for (const s of settings) {
+        if ((0, ciRules_1.fold)(s.name) !== 'otel.javaagent.extensions')
+            continue;
+        for (const raw of (s.value ?? '').split(',')) {
+            const entry = (0, ciRules_1.trimAscii)(raw);
+            if (entry === '' || ciRules_1.PLACEHOLDER.test(entry) || UNREADABLE_PATH.test(entry))
+                continue;
+            const name = lastSegment(entry);
+            if (name === '')
+                continue;
+            const lower = name.replace(/[A-Z]/g, (c) => c.toLowerCase());
+            if (lower.endsWith('-extension.jar'))
+                continue;
+            const note = { path: s.path, line: s.line, extension: name, directory: !lower.endsWith('.jar') };
+            const key = JSON.stringify(note);
+            if (!seen.has(key)) {
+                seen.add(key);
+                out.push(note);
+            }
+        }
+    }
+    return out;
+}
+/** A path's last non-empty segment, / or \ separated, cut to NOTE_NAME_MAX code points. */
+function lastSegment(p) {
+    const trimmed = p.replace(/[/\\]+$/, '');
+    const name = trimmed.slice(Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\')) + 1);
+    const points = Array.from(name);
+    return points.length > exports.NOTE_NAME_MAX ? points.slice(0, exports.NOTE_NAME_MAX).join('') : name;
 }
 
 
@@ -32188,6 +32275,7 @@ const yaml_1 = __nccwpck_require__(8815);
 const api_1 = __nccwpck_require__(6879);
 const ciRules_1 = __nccwpck_require__(7944);
 const validate_1 = __nccwpck_require__(4224);
+const agents_1 = __nccwpck_require__(8260);
 const aot_1 = __nccwpck_require__(7600);
 const extract_1 = __nccwpck_require__(821);
 const errors_1 = __nccwpck_require__(17);
@@ -32425,10 +32513,10 @@ function filesFor(files, mapping, service, environment) {
 }
 /**
  * Reads the deployment files among `files`: regular files only, inside the root, never a link. With `settings` false
- * only the AOT cache notes are read, as for an environment whose check is off.
+ * only the notes (AOT cache, agents, extensions) are read, as for an environment whose check is off.
  */
 function scan(root, files, mapped = false, settings = true) {
-    const result = { settings: [], problems: [], aot: [], read: 0, leftOut: 0, collectors: [] };
+    const result = { settings: [], problems: [], aot: [], agents: [], extensions: [], read: 0, leftOut: 0, collectors: [] };
     const realRoot = fs.realpathSync(root);
     let origins = 0;
     const fragments = [];
@@ -32469,9 +32557,11 @@ function scan(root, files, mapped = false, settings = true) {
         if (text === null)
             continue;
         result.aot.push(...(0, aot_1.aotNotes)(rel, text));
+        result.agents.push(...(0, agents_1.agentNotes)(rel, text));
+        const found = (0, extract_1.extract)(rel, text, kind);
+        result.extensions.push(...(0, agents_1.extensionNotes)(found.settings));
         if (!settings)
             continue;
-        const found = (0, extract_1.extract)(rel, text, kind);
         result.read++;
         for (const f of found.fragments)
             fragments.push({ setting: result.settings.length + f.setting, list: f.list });
@@ -32549,8 +32639,12 @@ function verdict(mode, findings, total, baseline) {
     }
     return { outcome: 'warned', newFindings: null, reason: null };
 }
-/** One log line per finding: its rule, the setting's name, and where; and a notice per AOT cache line. Never a value. */
-function report(findings, problems, aot = []) {
+const NO_NOTES = { aot: [], agents: [], extensions: [] };
+/**
+ * One log line per finding: its rule, the setting's name, and where; and a notice per note on its line. Never a value:
+ * an agent or extension note names the file's last segment only.
+ */
+function report(findings, problems, notes = NO_NOTES) {
     for (const f of findings) {
         const message = `${f.rule}: ${f.name}`;
         const where = { file: f.path, startLine: f.line, title: `Maestro log policy: ${f.rule}` };
@@ -32562,12 +32656,25 @@ function report(findings, problems, aot = []) {
     for (const p of problems) {
         core.warning(`Log policy check could not read ${printable(p.path)} line ${p.line}: ${printable(p.reason)}`, { file: p.path, startLine: p.line });
     }
-    for (const n of aot) {
+    for (const n of notes.aot) {
         core.notice(`AOT cache: ${n.flags.join(' ')}. On JDK 25 the cache does not work with the agent: a training run with agent 2.33.1 attached fails on Linux, and a cache trained without the agent is rejected when it is attached. Start the service without the cache while the agent is attached.`, {
             file: n.path,
             startLine: n.line,
             title: 'Maestro: JDK AOT cache',
         });
+    }
+    for (const n of notes.agents) {
+        core.notice(`Java agent: ${printable(n.agents.join(' '))}. An agent beside the OpenTelemetry agent can export the same telemetry again or change what the agent records.`, {
+            file: n.path,
+            startLine: n.line,
+            title: 'Maestro: another Java agent',
+        });
+    }
+    for (const n of notes.extensions) {
+        const message = n.directory
+            ? `Agent extension directory: ${printable(n.extension)}. The agent loads every JAR in it, which this check cannot see; keep only the bundle's <service>-extension.jar there.`
+            : `Agent extension: ${printable(n.extension)} is not the bundle's <service>-extension.jar. Another extension runs inside the agent and can change what it records or exports.`;
+        core.notice(message, { file: n.path, startLine: n.line, title: 'Maestro: another agent extension' });
     }
 }
 /** Writes the job summary's table: rule, setting, file and line. */
@@ -32609,10 +32716,10 @@ async function runCheck(api, projectUid, environment, service, root, repo, opts)
     const mode = served.ruleSet.mode;
     if (mode === 'OFF') {
         core.info(`Log policy check: off for ${printable(environment)}.`);
-        // The AOT cache notes are not log policy findings, so an environment that turns the check off still gets them,
+        // The notes are not log policy findings, so an environment that turns the check off still gets them,
         // for the files the check would read.
         if (repo.files !== null)
-            report([], [], scan(root, mappedFiles(repo, service, environment), repo.mapping !== null, false).aot);
+            report([], [], scan(root, mappedFiles(repo, service, environment), repo.mapping !== null, false));
         return { outcome: 'off', result: null, reason: null };
     }
     if (served.casesDigest && ciRules_1.CASES_DIGEST && served.casesDigest !== ciRules_1.CASES_DIGEST) {
@@ -32673,7 +32780,7 @@ async function runCheck(api, projectUid, environment, service, root, repo, opts)
     const findings = findingsOf(served.ruleSet, read.settings);
     const result = checkResult(service, served.ruleSet, findings);
     const decided = verdict(mode, findings, result.total, served.baseline);
-    report(findings, read.problems, read.aot);
+    report(findings, read.problems, read);
     const errors = findings.filter((f) => f.severity === 'error').length;
     const scope = repo.mapping ? ` (the files ${exports.MAPPING_FILE} maps to ${who})` : '';
     const line = `Log policy check for ${who}: ${read.read} deployment file(s) read${scope}, ` +

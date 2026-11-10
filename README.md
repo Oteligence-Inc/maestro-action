@@ -313,9 +313,19 @@ without the agent is rejected when it is attached), so start the service without
 check is off still gets it for the files the check would read. `maestro check` prints the same notes; the two hold
 copies of one case file (`tests/fixtures/ci-rules/aot-cases.json`).
 
+A line that starts a Java agent other than the OpenTelemetry agent (a `-javaagent:` whose path does not name `otel` or
+`opentelemetry` as a word, outside a comment) gets a notice naming the agent's file: another agent can export the same
+telemetry again or change what the agent records. So does each `otel.javaagent.extensions` entry that is not a
+bundle's `<service>-extension.jar`, naming its file, and an entry that is a directory, since the agent loads every JAR
+in it. An entry or a path a template fills in is skipped. These notices behave as the AOT cache notice does, and
+`maestro check` prints the same notes from one shared case file (`tests/fixtures/ci-rules/agent-cases.json`). A log
+shipper running on the node rather than in these files is not seen.
+
 The rules come from the environment's lock: a level below the lock's floor, a lowered floor, a logs exporter other
 than the lock's, debug switches (Spring's and the agent's), a logging file chosen at deploy, the loggers endpoint
-exposed, a logs endpoint or a declarative config file set, SQL sanitization off or query parameters captured,
+exposed, a logs endpoint or a declarative config file set, SQL sanitization off or query parameters captured, a
+vendor's own log forwarding switched on (rule set version 3: New Relic's in-agent forwarding, Elastic APM's
+`log_sending`, Sentry's logs, the Datadog Agent's container log collection),
 settings the overrides refuse, and, from the analysis of the locked JAR, a variable its packaged logging reads a
 level from and a profile whose packaged level is below the floor. The bundle's own start command and identity
 settings are never findings.

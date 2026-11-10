@@ -39,7 +39,7 @@ it('collects the notes of each file the scan reads, and none from a file it does
 
 it('reports each note as a notice on its file and line, never with a value', () => {
   const notes: AotNote[] = [{ path: 'Dockerfile', line: 2, flags: ['-XX:AOTMode', '-XX:AOTCache'] }];
-  report([], [], notes);
+  report([], [], { aot: notes, agents: [], extensions: [] });
   expect(core.notice).toHaveBeenCalledWith(
     'AOT cache: -XX:AOTMode -XX:AOTCache. On JDK 25 the cache does not work with the agent: a training run with agent 2.33.1 attached fails on Linux, and a cache trained without the agent is rejected when it is attached. Start the service without the cache while the agent is attached.',
     { file: 'Dockerfile', startLine: 2, title: 'Maestro: JDK AOT cache' },
