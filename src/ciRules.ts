@@ -3,13 +3,13 @@
 // to the same answers, and CASES_DIGEST pins which copy of that suite this release was tested against.
 
 /** The newest rule-set version this Action reads; it reads every version from 1 up and names them all to the platform. */
-export const VERSION = 3;
+export const VERSION = 4;
 
 /** The rule-set versions this Action reads; the platform serves the highest it has. */
-export const VERSIONS = [1, 2, 3];
+export const VERSIONS = [1, 2, 3, 4];
 
 /** The SHA-256 of the evaluation fixture suite this release was tested against; the server serves its own. */
-export const CASES_DIGEST = '6124a1f43e7b537ddf86f219ee932e1ace37fc203a839abead8bca80875b750b';
+export const CASES_DIGEST = '34ce71d9b0390d8a1c78ab2b9637e4cb1b21fb0ad3eb97bd9861f301d0febe8f';
 
 /**
  * The setting the Action writes for each logs pipeline of a collector configuration it finds, valued
@@ -31,6 +31,7 @@ export const TESTS = [
   'exposes_loggers',
   'profile_below_floor',
   'keeps_processors',
+  'not_listed',
 ] as const;
 
 export interface Rule {
@@ -149,9 +150,20 @@ export function passesTest(r: Rule, raw: string | null | undefined, set: RuleSet
       return isLevel(v) && below(v.toUpperCase(), set.floor);
     case 'not_exporter':
       return v !== '' && v.toLowerCase() !== 'none' && set.exporter !== null && v.toLowerCase() !== set.exporter.toLowerCase();
+    case 'not_listed':
+      return v !== '' && !v.includes('$') && !listed(r.values, v);
     default:
       throw new Error(`unknown test ${r.test}`);
   }
+}
+
+/**
+ * Whether an endpoint is one of the environment's collectors: each entry is a lower-case scheme://host[:port], and the
+ * value, lower-cased, is the entry or the entry followed by a path. No URL is parsed, so every interpreter agrees.
+ */
+export function listed(entries: string[], value: string): boolean {
+  const v = value.toLowerCase();
+  return entries.some((e) => v === e || v.startsWith(e + '/'));
 }
 
 /**
