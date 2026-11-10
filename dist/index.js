@@ -29686,7 +29686,7 @@ function namedDowngrade(err) {
 // discrete-job-functions' djf-core CiRules.evaluate; the shared fixture suite (tests/fixtures/ci-rules) holds the two
 // to the same answers, and CASES_DIGEST pins which copy of that suite this release was tested against.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.PLACEHOLDER = exports.NAME = exports.TESTS = exports.COLLECTOR_VALIDATE = exports.COLLECTOR_PIPELINES = exports.CASES_DIGEST = exports.VERSIONS = exports.VERSION = void 0;
+exports.REFERENCE = exports.PLACEHOLDER = exports.NAME = exports.TESTS = exports.COLLECTOR_VALIDATE = exports.COLLECTOR_PIPELINES = exports.CASES_DIGEST = exports.VERSIONS = exports.VERSION = void 0;
 exports.findingName = findingName;
 exports.trimAscii = trimAscii;
 exports.fold = fold;
@@ -29701,7 +29701,7 @@ exports.VERSION = 4;
 /** The rule-set versions this Action reads; the platform serves the highest it has. */
 exports.VERSIONS = [1, 2, 3, 4];
 /** The SHA-256 of the evaluation fixture suite this release was tested against; the server serves its own. */
-exports.CASES_DIGEST = '34ce71d9b0390d8a1c78ab2b9637e4cb1b21fb0ad3eb97bd9861f301d0febe8f';
+exports.CASES_DIGEST = '1841c6e602817098b6e291b8751c3913fca5de34c48aab3c4e3838bc054c177e';
 /**
  * The setting the Action writes for each logs pipeline of a collector configuration it finds, valued
  * "<the pipeline's processors>|<the processors the configuration defines>"; the files' own settings under it are not read.
@@ -29809,17 +29809,20 @@ function passesTest(r, raw, set) {
         case 'not_exporter':
             return v !== '' && v.toLowerCase() !== 'none' && set.exporter !== null && v.toLowerCase() !== set.exporter.toLowerCase();
         case 'not_listed':
-            return v !== '' && !v.includes('$') && !listed(r.values, v);
+            return v !== '' && !exports.REFERENCE.test(v) && !listed(r.values, v);
         default:
             throw new Error(`unknown test ${r.test}`);
     }
 }
+/** A value holding a variable or command reference (${...}, $(...), $VAR) is not judged against the collectors. */
+exports.REFERENCE = /\$[({A-Za-z_]/;
 /**
  * Whether an endpoint is one of the environment's collectors: each entry is a lower-case scheme://host[:port], and the
- * value, lower-cased, is the entry or the entry followed by a path. No URL is parsed, so every interpreter agrees.
+ * value, its ASCII letters lower-cased, is the entry or the entry followed by a path. No URL is parsed, so every interpreter agrees.
  */
 function listed(entries, value) {
-    const v = value.toLowerCase();
+    // ASCII letters only, as CEL's lowerAscii: another script's lookalike letter is never listed.
+    const v = value.replace(/[A-Z]/g, (c) => c.toLowerCase());
     return entries.some((e) => v === e || v.startsWith(e + '/'));
 }
 /**
@@ -32754,7 +32757,8 @@ async function runCheck(api, projectUid, environment, service, root, repo, opts)
             report([], [], scan(root, mappedFiles(repo, service, environment), repo.mapping !== null, false));
         return { outcome: 'off', result: null, reason: null };
     }
-    if (served.casesDigest && ciRules_1.CASES_DIGEST && served.casesDigest !== ciRules_1.CASES_DIGEST) {
+    // An older platform serves an older version's suite: only a set at this Action's own version can show drift.
+    if (served.ruleSet.version === ciRules_1.VERSION && served.casesDigest && ciRules_1.CASES_DIGEST && served.casesDigest !== ciRules_1.CASES_DIGEST) {
         core.warning('This Action was tested against another copy of the log policy rules than the platform holds. Update the Maestro Action.');
     }
     if (repo.files === null) {

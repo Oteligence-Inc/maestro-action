@@ -6,7 +6,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { MaestroApi } from '../../src/api';
-import { Rule, RuleSet } from '../../src/ciRules';
+import { Rule, RuleSet, VERSION } from '../../src/ciRules';
 import {
   FINDINGS_MAX,
   checkResult,
@@ -113,6 +113,19 @@ describe('fetchRules', () => {
   it('names an environment that does not exist', async () => {
     nock(BASE).get(RULES).query(true).reply(404, { message: 'Environment not found' });
     await expect(fetchRules(client(), 'proj_1', 'prod', 'orders')).rejects.toThrow('Env "prod" was not found');
+  });
+});
+
+describe('the drift note', () => {
+  it('names its own copy as drifted only when the platform serves this Action its own version', async () => {
+    const root = repo({ 'deploy/.env': 'LOGGING_LEVEL_ROOT=INFO\n' });
+    const note = 'This Action was tested against another copy of the log policy rules than the platform holds. Update the Maestro Action.';
+    nock(BASE).get(RULES).query(true).reply(200, served('WARN', { version: VERSION - 1, casesDigest: 'f'.repeat(64) }));
+    await runCheck(client(), 'proj_1', 'prod', 'orders', root, readRepo(root), { checkOnly: true });
+    expect(core.warning).not.toHaveBeenCalledWith(note);
+    nock(BASE).get(RULES).query(true).reply(200, served('WARN', { version: VERSION, casesDigest: 'f'.repeat(64) }));
+    await runCheck(client(), 'proj_1', 'prod', 'orders', root, readRepo(root), { checkOnly: true });
+    expect(core.warning).toHaveBeenCalledWith(note);
   });
 });
 

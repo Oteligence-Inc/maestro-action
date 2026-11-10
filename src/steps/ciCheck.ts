@@ -6,7 +6,7 @@ import * as path from 'path';
 import { Minimatch } from 'minimatch';
 import { parseAllDocuments } from 'yaml';
 import { MaestroApi, expectOk } from '../api';
-import { CASES_DIGEST, COLLECTOR_VALIDATE, Finding, RuleSet, VERSIONS, evaluate, unreadable } from '../ciRules';
+import { CASES_DIGEST, COLLECTOR_VALIDATE, Finding, RuleSet, VERSION, VERSIONS, evaluate, unreadable } from '../ciRules';
 import { Runner, dockerRunner, findDocker, validateCollectors, watches } from '../logPolicy/validate';
 import { AgentNote, ExtensionNote, agentNotes, extensionNotes } from '../logPolicy/agents';
 import { AotNote, aotNotes } from '../logPolicy/aot';
@@ -527,7 +527,8 @@ export async function runCheck(
     if (repo.files !== null) report([], [], scan(root, mappedFiles(repo, service, environment), repo.mapping !== null, false));
     return { outcome: 'off', result: null, reason: null };
   }
-  if (served.casesDigest && CASES_DIGEST && served.casesDigest !== CASES_DIGEST) {
+  // An older platform serves an older version's suite: only a set at this Action's own version can show drift.
+  if (served.ruleSet.version === VERSION && served.casesDigest && CASES_DIGEST && served.casesDigest !== CASES_DIGEST) {
     core.warning(
       'This Action was tested against another copy of the log policy rules than the platform holds. Update the Maestro Action.',
     );
