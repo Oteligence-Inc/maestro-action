@@ -120,7 +120,10 @@ the app image.
    analysed: com/acme/Broken.class.`, and one per tracer the service bundles beside the agent (Micrometer's
    OpenTelemetry bridge under Spring Boot's tracing, the OpenTelemetry Spring Boot starter, or Quarkus's
    OpenTelemetry extension), such as `Before you deploy order-service: This service bundles Micrometer's
-   OpenTelemetry bridge, ...`, naming the setting that turns that tracing off. The step still succeeds;
+   OpenTelemetry bridge, ...`, naming the setting that turns that tracing off, and one per kind of certificate trust
+   the service sets itself (its own trusted certificates, which a JDK update that distrusts an authority does not
+   reach; trust of every server certificate; a certificate for any host; self-signed certificates), naming where. The
+   step still succeeds;
    `fail-on-warnings` does not apply to these.
 8. Download + extract the bundle and configs -> step outputs.
 9. Verify the download against the build's record and, with `signing-public-key` set, its signature (below), then
@@ -212,7 +215,8 @@ jq -r '.files | to_entries[] | "\(.value)  \(.key)"' build-statement.json | sha2
 
 The first prints `Signature Verified Successfully`; the second prints `OK` for each file the statement covers (on
 macOS, `shasum -a 256 -c -` in place of `sha256sum -c -`). The two configs the Action downloads separately are in the
-bundle too, under their bundle names. Then list every file the statement does not name, in bash:
+bundle too, under their bundle names, and so is each extension JAR's CycloneDX SBOM, `sbom/<extension>.cdx.json`,
+which the statement covers like any other file. Then list every file the statement does not name, in bash:
 
 ```bash
 export LC_ALL=C
