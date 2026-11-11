@@ -34061,8 +34061,9 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.BuildVerificationError = exports.LEFT_OUT = exports.STATEMENT_SCHEMA = exports.SIGNATURE = exports.STATEMENT = void 0;
+exports.BuildVerificationError = exports.LEFT_OUT = exports.ATTESTATION = exports.STATEMENT_SCHEMA = exports.SIGNATURE = exports.STATEMENT = void 0;
 exports.verifyBuild = verifyBuild;
+exports.pae = pae;
 exports.keyFingerprint = keyFingerprint;
 const crypto = __importStar(__nccwpck_require__(6982));
 const fs = __importStar(__nccwpck_require__(9896));
@@ -34073,6 +34074,14 @@ const sha_1 = __nccwpck_require__(634);
 exports.STATEMENT = 'build-statement.json';
 exports.SIGNATURE = 'build-statement.sig';
 exports.STATEMENT_SCHEMA = 'oteligence.build-statement/1';
+/**
+ * The build's provenance: a DSSE envelope over an in-toto Statement with a SLSA provenance predicate, signed by the key
+ * that signs the statement. A signed build carries it; stock tooling such as cosign checks a file against it.
+ */
+exports.ATTESTATION = 'provenance.intoto.json';
+const ATTESTATION_PAYLOAD_TYPE = 'application/vnd.in-toto+json';
+const IN_TOTO_STATEMENT = 'https://in-toto.io/Statement/v1';
+const SLSA_PROVENANCE = 'https://slsa.dev/provenance/v1';
 /**
  * The bundle files a build record leaves out, because they name the build job, the project or the lock version, or
  * sign the covered files. Mirrors discrete-job-functions' `BundleFiles.UNCOVERED`; carried here rather than taken
@@ -34085,6 +34094,7 @@ exports.LEFT_OUT = new Set([
     'SUMMARY.txt',
     exports.STATEMENT,
     exports.SIGNATURE,
+    exports.ATTESTATION,
 ]);
 /** The build's files are not the files of its record, or the record cannot vouch for them. */
 class BuildVerificationError extends errors_1.UserError {
@@ -34259,7 +34269,82 @@ function checkSignature(d, record) {
             refuse(`The build's record differs from its signed statement in ${field}, so the record cannot be trusted.`);
         }
     }
+    checkAttestation(d.extensionDir, d.signingKey, statement);
     return 'verified';
+}
+/** DSSE's pre-authentication encoding: `DSSEv1 <len(type)> <type> <len(body)> <body>`, each length in bytes. */
+function pae(payloadType, body) {
+    const type = Buffer.from(payloadType, 'utf8');
+    return Buffer.concat([
+        Buffer.from(`DSSEv1 ${type.length} `, 'ascii'),
+        type,
+        Buffer.from(` ${body.length} `, 'ascii'),
+        body,
+    ]);
+}
+/**
+ * A signed build's provenance attestation, when the bundle carries one: the workflow key must have signed it, and it must
+ * name exactly the files, organization and lock its signed statement names. A bundle without one is not refused, since
+ * the signed statement already vouches for every file.
+ */
+function checkAttestation(dir, key, statement) {
+    const file = path.join(dir, exports.ATTESTATION);
+    if (!isFile(file))
+        return;
+    let envelope;
+    try {
+        const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+            throw new Error('not an object');
+        envelope = parsed;
+    }
+    catch {
+        refuse(`The build's ${exports.ATTESTATION} is not a JSON object, so it cannot vouch for the download.`);
+    }
+    if (envelope.payloadType !== ATTESTATION_PAYLOAD_TYPE || typeof envelope.payload !== 'string'
+        || !Array.isArray(envelope.signatures)) {
+        refuse(`The build's ${exports.ATTESTATION} is not a DSSE envelope of an in-toto statement.`);
+    }
+    const payload = Buffer.from(envelope.payload, 'base64');
+    const message = pae(ATTESTATION_PAYLOAD_TYPE, payload);
+    const signed = envelope.signatures.some((s) => {
+        const sig = s && typeof s === 'object' ? s.sig : undefined;
+        return typeof sig === 'string' && crypto.verify(null, message, key, Buffer.from(sig, 'base64'));
+    });
+    if (!signed) {
+        refuse(`The build's ${exports.ATTESTATION} does not verify with signing-public-key: it was altered.`);
+    }
+    let provenance;
+    try {
+        provenance = JSON.parse(payload.toString('utf8'));
+    }
+    catch {
+        refuse(`The build's ${exports.ATTESTATION} signs a statement that is not JSON.`);
+    }
+    if (provenance._type !== IN_TOTO_STATEMENT || provenance.predicateType !== SLSA_PROVENANCE) {
+        refuse(`The build's ${exports.ATTESTATION} is not an in-toto statement of SLSA provenance this action knows. Update the action.`);
+    }
+    const subjects = {};
+    for (const subject of Array.isArray(provenance.subject) ? provenance.subject : []) {
+        const name = subject && typeof subject === 'object' ? subject.name : undefined;
+        const digest = subject && typeof subject === 'object' ? subject.digest : undefined;
+        const sha256 = digest && typeof digest === 'object' ? digest.sha256 : undefined;
+        if (typeof name !== 'string' || typeof sha256 !== 'string' || name in subjects) {
+            refuse(`The build's ${exports.ATTESTATION} names a subject without one name and one SHA-256.`);
+        }
+        subjects[name] = sha256;
+    }
+    if (JSON.stringify(sortedObject(subjects)) !== JSON.stringify(sortedObject(statement.files))) {
+        refuse(`The build's ${exports.ATTESTATION} names other files than its signed statement.`);
+    }
+    const predicate = provenance.predicate;
+    const definition = predicate?.buildDefinition;
+    const external = definition?.externalParameters;
+    for (const field of ['organization', 'lockedVersionUid']) {
+        if ((external?.[field] ?? null) !== (statement[field] ?? null)) {
+            refuse(`The build's ${exports.ATTESTATION} names another ${field} than its signed statement.`);
+        }
+    }
 }
 /** `sha256:` and the hex SHA-256 of the key's X.509 SubjectPublicKeyInfo, as the build names its key. */
 function keyFingerprint(key) {

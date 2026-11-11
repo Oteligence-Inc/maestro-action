@@ -139,8 +139,9 @@ writes the record; it is never changed, and every later build of the same inputs
 Before it registers anything, the Action checks that the record names the JAR this run uploaded and binds it to the
 service the analysis made of that JAR, and that every file it extracted, the sources under `sources/` included, and
 both configs it downloaded hash to the record. `build-annex.json`, `lock-record.json`, `summary.html` and
-`SUMMARY.txt` name the build job, the project or the lock version, and `build-statement.json` and
-`build-statement.sig` sign the record, so those six are outside the record and not checked against it. The
+`SUMMARY.txt` name the build job, the project or the lock version, and `build-statement.json`,
+`build-statement.sig` and `provenance.intoto.json` sign the record, so those seven are outside the record and not
+checked against it. The
 step fails, and removes what it downloaded, when:
 
 - the build's files differ from the record of the same inputs (the platform could not reproduce the build; run the job
@@ -150,7 +151,7 @@ step fails, and removes what it downloaded, when:
 - the record does not name the uploaded JAR, binds another JAR to this service, or binds none to it (also when the
   analysis could not be read, so the Action cannot name the service), or there is no record or the record has no
   bindings (a Maestro server older than either says so in its own message);
-- the record covers one of the six files above (a server newer than this action; update the action);
+- the record covers one of the seven files above (a server newer than this action; update the action);
 - the bundle holds a link, an empty folder, or a file in a folder the record does not hold.
 
 A download that stops part way (a signed URL refused, a bundle that does not extract) also leaves no files behind.
@@ -168,7 +169,10 @@ SHA-256 of its X.509 SubjectPublicKeyInfo), the organization the build was made 
 every organization's builds, so this ties a statement to one; this step does not compare it), the record's inputs digest, the application JARs, the upload bound to each
 service, the lock version the build was made from and the SHA-256 of every file the record covers, and
 `build-statement.sig`, the raw Ed25519 signature over those exact bytes. A rebuild of one lock under one key states and
-signs the same bytes. The private key is held by the job processor and by the platform's operators and pipelines that
+signs the same bytes. A signed bundle also carries `provenance.intoto.json`, the same build as a standard
+attestation: a DSSE envelope over an in-toto Statement whose subjects are the files the statement covers, by name and
+SHA-256, with a SLSA provenance v1 predicate naming the organization, the lock version and the build's inputs, signed
+by the same key. The private key is held by the job processor and by the platform's operators and pipelines that
 can read the secret it is stored in, never by the server that answers this Action or by storage, so a server or storage
 that changes a file and its record entry together cannot also make the signature verify.
 
@@ -177,7 +181,10 @@ With `signing-public-key` set, the step also fails, and removes what it download
 - the bundle carries no statement or no signature (the platform holds no signing key, or the download was altered);
 - the statement names another key, or the signature does not verify with this one (a statement or signature altered);
 - the statement's inputs digest, JARs, bindings or files differ from the record the remaining checks use;
-- the statement names another lock version than the one this run built, or a schema this action does not know.
+- the statement names another lock version than the one this run built, or a schema this action does not know;
+- the bundle carries `provenance.intoto.json` and it does not verify with this key, or it names other files, another
+  organization or another lock version than the statement. A bundle without one is not refused for it: the statement
+  already vouches for every file.
 
 Without it, the Action reports the signature and checks nothing about it; `require-signed-build: true` makes an
 empty key an error instead.
@@ -223,9 +230,23 @@ export LC_ALL=C
 comm -13 <(jq -r '.files | keys[]' build-statement.json | sort) <(find . -type f ! -name signing-public-key.pem | sed 's|^\./||' | sort)
 ```
 
-It prints only `SUMMARY.txt`, `build-annex.json`, `build-statement.json`, `build-statement.sig`, `summary.html` and,
-for a build from a lock, `lock-record.json`. Any other name is a file the build did not make. `LC_ALL=C` matters:
+It prints only `SUMMARY.txt`, `build-annex.json`, `build-statement.json`, `build-statement.sig`,
+`provenance.intoto.json`, `summary.html` and, for a build from a lock, `lock-record.json`. Any other name is a file the
+build did not make. `LC_ALL=C` matters:
 `comm` compares in the locale's order and reports every line when that differs from `sort`'s.
+
+Any one file can also be checked with stock tooling against the provenance attestation, for example an extension JAR
+with cosign (the platform publishes no transparency-log entry, hence `--insecure-ignore-tlog`):
+
+```bash
+cosign verify-blob-attestation --key signing-public-key.pem --insecure-ignore-tlog --type slsaprovenance1 \
+  --signature provenance.intoto.json <extension>.jar
+jq -r .payload provenance.intoto.json | base64 -d | jq .predicate.buildDefinition.externalParameters
+```
+
+The first prints `Verified OK` when the key signed an attestation naming that file's exact bytes. It does not read
+which organization or lock the build was for; the second prints both, with the environment and the agent line, to
+compare with your own. No SLSA level is claimed.
 
 Before step 9 registers the JAR, the Action calls `GET .../staleness` and emits a **`::warning`** naming any
 **peer** services *this run* made stale (so they can be re-built). This is the only

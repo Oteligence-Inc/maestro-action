@@ -9,6 +9,14 @@ import { sha256File } from '../util/sha';
 export const STATEMENT = 'build-statement.json';
 export const SIGNATURE = 'build-statement.sig';
 export const STATEMENT_SCHEMA = 'oteligence.build-statement/1';
+/**
+ * The build's provenance: a DSSE envelope over an in-toto Statement with a SLSA provenance predicate, signed by the key
+ * that signs the statement. A signed build carries it; stock tooling such as cosign checks a file against it.
+ */
+export const ATTESTATION = 'provenance.intoto.json';
+const ATTESTATION_PAYLOAD_TYPE = 'application/vnd.in-toto+json';
+const IN_TOTO_STATEMENT = 'https://in-toto.io/Statement/v1';
+const SLSA_PROVENANCE = 'https://slsa.dev/provenance/v1';
 
 /**
  * The bundle files a build record leaves out, because they name the build job, the project or the lock version, or
@@ -22,6 +30,7 @@ export const LEFT_OUT = new Set([
   'SUMMARY.txt',
   STATEMENT,
   SIGNATURE,
+  ATTESTATION,
 ]);
 
 /** The build's files are not the files of its record, or the record cannot vouch for them. */
@@ -228,7 +237,80 @@ function checkSignature(d: Downloaded, record: BuildRecord): SignatureStatus {
       refuse(`The build's record differs from its signed statement in ${field}, so the record cannot be trusted.`);
     }
   }
+  checkAttestation(d.extensionDir, d.signingKey, statement);
   return 'verified';
+}
+
+/** DSSE's pre-authentication encoding: `DSSEv1 <len(type)> <type> <len(body)> <body>`, each length in bytes. */
+export function pae(payloadType: string, body: Buffer): Buffer {
+  const type = Buffer.from(payloadType, 'utf8');
+  return Buffer.concat([
+    Buffer.from(`DSSEv1 ${type.length} `, 'ascii'),
+    type,
+    Buffer.from(` ${body.length} `, 'ascii'),
+    body,
+  ]);
+}
+
+/**
+ * A signed build's provenance attestation, when the bundle carries one: the workflow key must have signed it, and it must
+ * name exactly the files, organization and lock its signed statement names. A bundle without one is not refused, since
+ * the signed statement already vouches for every file.
+ */
+function checkAttestation(dir: string, key: crypto.KeyObject, statement: Record<string, unknown>): void {
+  const file = path.join(dir, ATTESTATION);
+  if (!isFile(file)) return;
+  let envelope: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
+    envelope = parsed as Record<string, unknown>;
+  } catch {
+    refuse(`The build's ${ATTESTATION} is not a JSON object, so it cannot vouch for the download.`);
+  }
+  if (envelope.payloadType !== ATTESTATION_PAYLOAD_TYPE || typeof envelope.payload !== 'string'
+      || !Array.isArray(envelope.signatures)) {
+    refuse(`The build's ${ATTESTATION} is not a DSSE envelope of an in-toto statement.`);
+  }
+  const payload = Buffer.from(envelope.payload as string, 'base64');
+  const message = pae(ATTESTATION_PAYLOAD_TYPE, payload);
+  const signed = (envelope.signatures as unknown[]).some((s) => {
+    const sig = s && typeof s === 'object' ? (s as Record<string, unknown>).sig : undefined;
+    return typeof sig === 'string' && crypto.verify(null, message, key, Buffer.from(sig, 'base64'));
+  });
+  if (!signed) {
+    refuse(`The build's ${ATTESTATION} does not verify with signing-public-key: it was altered.`);
+  }
+  let provenance: Record<string, unknown>;
+  try {
+    provenance = JSON.parse(payload.toString('utf8')) as Record<string, unknown>;
+  } catch {
+    refuse(`The build's ${ATTESTATION} signs a statement that is not JSON.`);
+  }
+  if (provenance._type !== IN_TOTO_STATEMENT || provenance.predicateType !== SLSA_PROVENANCE) {
+    refuse(`The build's ${ATTESTATION} is not an in-toto statement of SLSA provenance this action knows. Update the action.`);
+  }
+  const subjects: Record<string, unknown> = {};
+  for (const subject of Array.isArray(provenance.subject) ? provenance.subject : []) {
+    const name = subject && typeof subject === 'object' ? (subject as Record<string, unknown>).name : undefined;
+    const digest = subject && typeof subject === 'object' ? (subject as Record<string, unknown>).digest : undefined;
+    const sha256 = digest && typeof digest === 'object' ? (digest as Record<string, unknown>).sha256 : undefined;
+    if (typeof name !== 'string' || typeof sha256 !== 'string' || name in subjects) {
+      refuse(`The build's ${ATTESTATION} names a subject without one name and one SHA-256.`);
+    }
+    subjects[name] = sha256;
+  }
+  if (JSON.stringify(sortedObject(subjects)) !== JSON.stringify(sortedObject(statement.files))) {
+    refuse(`The build's ${ATTESTATION} names other files than its signed statement.`);
+  }
+  const predicate = provenance.predicate as Record<string, unknown> | undefined;
+  const definition = predicate?.buildDefinition as Record<string, unknown> | undefined;
+  const external = definition?.externalParameters as Record<string, unknown> | undefined;
+  for (const field of ['organization', 'lockedVersionUid'] as const) {
+    if ((external?.[field] ?? null) !== (statement[field] ?? null)) {
+      refuse(`The build's ${ATTESTATION} names another ${field} than its signed statement.`);
+    }
+  }
 }
 
 /** `sha256:` and the hex SHA-256 of the key's X.509 SubjectPublicKeyInfo, as the build names its key. */
