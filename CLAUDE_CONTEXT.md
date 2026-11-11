@@ -91,8 +91,8 @@ included; non-empty strings; each path through `globRefusal`, one linear pass th
    `files` hash-match every extracted file (by its `/`-separated path: the walk enters folders, since the bundle ships
    each extension JAR's Java source under `sources/<JAR name without .jar>/`; no extra or missing file, no link, no
    empty folder) and both downloaded configs. A record file name must be a relative path with no empty, `.` or `..`
-   segment and no backslash. `LEFT_OUT` (the annex, the lock record, the two summaries, `build-statement.json` and
-   `build-statement.sig`) mirrors discrete-job-functions' `BundleFiles.UNCOVERED`, applies to top-level names only,
+   segment and no backslash. `LEFT_OUT` (the annex, the lock record, the two summaries, `build-statement.json`,
+   `build-statement.sig` and `provenance.intoto.json`) mirrors discrete-job-functions' `BundleFiles.UNCOVERED`, applies to top-level names only,
    and is carried here, not taken from the server; a record that covers one of them is refused by name.
    The signature (`checkSignature`) runs after the record's status check and before the bindings and file checks.
    With `signing-public-key` (`Inputs.signingKey`, parsed by `parseSigningKey`: PEM or base64 SPKI DER, Ed25519
@@ -101,10 +101,14 @@ included; non-empty strings; each path through `globRefusal`, one linear pass th
    SPKI DER), the signature must verify over the statement's bytes (`crypto.verify(null, ...)`), its `schema` must
    be `oteligence.build-statement/1`, its `lockedVersionUid` must be the lock this run resolved, and its
    `inputsDigest`, `applicationJars` (as a set), `bindings` and `files` must equal the record's, so every later check
-   holds the files to the signed record. Without the input, a bundle carrying both files is `not-checked` and any other
+   holds the files to the signed record. When the bundle also carries `provenance.intoto.json` (`checkAttestation`),
+   its DSSE signature must verify with the same key over the pre-authentication encoding (`pae`), its payload must be
+   an in-toto Statement v1 of SLSA provenance v1, its subjects must equal the statement's `files` exactly, and its
+   `externalParameters` must name the statement's `organization` and `lockedVersionUid`; a bundle without one is
+   not refused for it. Without the input, a bundle carrying both files is `not-checked` and any other
    is `unsigned`; nothing is refused for it. The signature covers what the record covers and anchors the lock only
    to the uid the server reported, so it catches tampering after the build, not a platform that builds from inputs
-   it chose. The statement's `organization` is not compared: the Action holds no organization id of its own unless
+   it chose. The statement's `organization` is not compared with the customer's own (only the attestation's with the statement's): the Action holds no organization id of its own unless
    `org-id` is set, and the lock uid already ties the statement to this run's lock. `run` sets `build-signature` to the outcome. Hosted Maestro's production key is published in the
    README (*Hosted Maestro's signing key*), on GitHub rather than on the platform that signs with it; Maestro's Help
    names its fingerprint and links there, so the README section's anchor is a contract with the frontend's
