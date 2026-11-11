@@ -166,7 +166,7 @@ every CI run reads `recorded` each time, since its inputs differ.
 A Maestro platform whose job processor holds a signing key (`OTELIGENCE_MAESTRO_BUILD_SIGNING_KEY`) signs every
 Maestro build: the bundle carries `build-statement.json`, which names the key (`signingKey`, `sha256:` and the
 SHA-256 of its X.509 SubjectPublicKeyInfo), the organization the build was made for (`organization`: one key signs
-every organization's builds, so this ties a statement to one; this step does not compare it), the record's inputs digest, the application JARs, the upload bound to each
+every organization's builds, so this ties a statement to one; this step does not compare it with your own organization), the record's inputs digest, the application JARs, the upload bound to each
 service, the lock version the build was made from and the SHA-256 of every file the record covers, and
 `build-statement.sig`, the raw Ed25519 signature over those exact bytes. A rebuild of one lock under one key states and
 signs the same bytes. A signed bundle also carries `provenance.intoto.json`, the same build as a standard
@@ -235,13 +235,13 @@ It prints only `SUMMARY.txt`, `build-annex.json`, `build-statement.json`, `build
 build did not make. `LC_ALL=C` matters:
 `comm` compares in the locale's order and reports every line when that differs from `sort`'s.
 
-Any one file can also be checked with stock tooling against the provenance attestation, for example an extension JAR
+Any file the statement covers can also be checked with stock tooling against the provenance attestation, for example an extension JAR
 with cosign (the platform publishes no transparency-log entry, hence `--insecure-ignore-tlog`):
 
 ```bash
 cosign verify-blob-attestation --key signing-public-key.pem --insecure-ignore-tlog --type slsaprovenance1 \
   --signature provenance.intoto.json <extension>.jar
-jq -r .payload provenance.intoto.json | base64 -d | jq .predicate.buildDefinition.externalParameters
+jq -r .payload provenance.intoto.json | base64 --decode | jq .predicate.buildDefinition.externalParameters
 ```
 
 The first prints `Verified OK` when the key signed an attestation naming that file's exact bytes. It does not read
