@@ -34305,36 +34305,44 @@ function checkAttestation(dir, key, statement) {
         || !Array.isArray(envelope.signatures)) {
         refuse(`The build's ${exports.ATTESTATION} is not a DSSE envelope of an in-toto statement.`);
     }
-    const payload = Buffer.from(envelope.payload, 'base64');
+    const payload = strictBase64(envelope.payload);
+    if (!payload) {
+        refuse(`The build's ${exports.ATTESTATION} carries a payload that is not base64.`);
+    }
     const message = pae(ATTESTATION_PAYLOAD_TYPE, payload);
     const signed = envelope.signatures.some((s) => {
-        const sig = s && typeof s === 'object' ? s.sig : undefined;
-        return typeof sig === 'string' && crypto.verify(null, message, key, Buffer.from(sig, 'base64'));
+        const sig = s && typeof s === 'object' ? strictBase64(s.sig) : null;
+        return sig !== null && sig.length === 64 && crypto.verify(null, message, key, sig);
     });
     if (!signed) {
         refuse(`The build's ${exports.ATTESTATION} does not verify with signing-public-key: it was altered.`);
     }
     let provenance;
     try {
-        provenance = JSON.parse(payload.toString('utf8'));
+        const parsed = JSON.parse(payload.toString('utf8'));
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+            throw new Error('not an object');
+        provenance = parsed;
     }
     catch {
-        refuse(`The build's ${exports.ATTESTATION} signs a statement that is not JSON.`);
+        refuse(`The build's ${exports.ATTESTATION} signs a statement that is not a JSON object.`);
     }
     if (provenance._type !== IN_TOTO_STATEMENT || provenance.predicateType !== SLSA_PROVENANCE) {
         refuse(`The build's ${exports.ATTESTATION} is not an in-toto statement of SLSA provenance this action knows. Update the action.`);
     }
-    const subjects = {};
+    const subjects = new Map();
     for (const subject of Array.isArray(provenance.subject) ? provenance.subject : []) {
         const name = subject && typeof subject === 'object' ? subject.name : undefined;
         const digest = subject && typeof subject === 'object' ? subject.digest : undefined;
         const sha256 = digest && typeof digest === 'object' ? digest.sha256 : undefined;
-        if (typeof name !== 'string' || typeof sha256 !== 'string' || name in subjects) {
+        if (typeof name !== 'string' || typeof sha256 !== 'string' || subjects.has(name)) {
             refuse(`The build's ${exports.ATTESTATION} names a subject without one name and one SHA-256.`);
         }
-        subjects[name] = sha256;
+        subjects.set(name, sha256);
     }
-    if (JSON.stringify(sortedObject(subjects)) !== JSON.stringify(sortedObject(statement.files))) {
+    const files = statement.files && typeof statement.files === 'object' ? statement.files : {};
+    const fileNames = Object.keys(files);
+    if (subjects.size !== fileNames.length || fileNames.some((n) => subjects.get(n) !== files[n])) {
         refuse(`The build's ${exports.ATTESTATION} names other files than its signed statement.`);
     }
     const predicate = provenance.predicate;
@@ -34350,6 +34358,13 @@ function checkAttestation(dir, key, statement) {
 function keyFingerprint(key) {
     const spki = key.export({ type: 'spki', format: 'der' });
     return `sha256:${crypto.createHash('sha256').update(spki).digest('hex')}`;
+}
+/** The bytes of standard, padded base64 (the encoding the platform writes), or null for any other text. */
+function strictBase64(value) {
+    if (typeof value !== 'string' || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value))
+        return null;
+    const bytes = Buffer.from(value, 'base64');
+    return bytes.toString('base64') === value ? bytes : null;
 }
 function sortedObject(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value))

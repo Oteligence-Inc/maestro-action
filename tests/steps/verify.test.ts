@@ -542,6 +542,93 @@ it('refuses an attestation that is not JSON, not a DSSE envelope, or not SLSA pr
   ).toMatch(/not an in-toto statement of SLSA provenance this action knows/);
 });
 
+/**
+ * The envelope discrete-job-functions writes (its ProvenanceAttestationTest golden, held byte-identical here by
+ * platform-overview's check-shared-pins.sh), over RFC 8032's first key: this verifier accepts what the producer makes.
+ */
+it("accepts the producer's golden attestation and refuses it with one byte of its signature changed", async () => {
+  const rfc = crypto.createPrivateKey({
+    key: Buffer.from('302e020100300506032b657004220420' + '9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60', 'hex'),
+    format: 'der',
+    type: 'pkcs8',
+  });
+  const golden = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'provenance', 'provenance.intoto.json'));
+  const make = (attestation: Buffer): Downloaded => {
+    const ext = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-golden-'));
+    fs.writeFileSync(path.join(ext, 'orders-otel-extension.jar'), 'jar bytes');
+    const record: BuildRecord = {
+      status: 'recorded',
+      inputsDigest: 'd'.repeat(64),
+      applicationJars: [UPLOAD],
+      files: { 'orders-otel-extension.jar': sha('jar bytes') },
+      firstJobId: 'build_0',
+      bindings: { orders: UPLOAD },
+    };
+    const d: Downloaded = {
+      record,
+      uploadSha: UPLOAD,
+      serviceKey: 'orders',
+      extensionDir: ext,
+      configPath: '',
+      configFileName: null,
+      collectorConfigPath: '',
+      collectorConfigFileName: null,
+      signingKey: crypto.createPublicKey(rfc),
+      lockedVersionUid: 'lv_golden',
+    };
+    sign(d, rfc, statementFor(record, rfc, { organization: 'org_golden', lockedVersionUid: 'lv_golden' }));
+    fs.writeFileSync(path.join(ext, ATTESTATION), attestation);
+    return d;
+  };
+  await expect(verifyBuild(make(golden))).resolves.toEqual({ record: 'recorded', signature: 'verified' });
+  const envelope = JSON.parse(golden.toString());
+  const sig = Buffer.from(envelope.signatures[0].sig, 'base64');
+  sig[0] ^= 1;
+  envelope.signatures[0].sig = sig.toString('base64');
+  expect(await refusal(make(Buffer.from(JSON.stringify(envelope))))).toMatch(/does not verify with signing-public-key/);
+});
+
+it('refuses an attestation of another statement type, a payload that is not an object, and base64 it does not write', async () => {
+  const typed = sign(download(keyed()));
+  expect(await refusal(attest(typed, attestationFor(typed, KEY.privateKey, (st) => (st._type = 'https://in-toto.io/Statement/v0.1')))))
+    .toMatch(/not an in-toto statement of SLSA provenance this action knows/);
+
+  const nullPayload = sign(download(keyed()));
+  const payload = Buffer.from('null');
+  const sig = crypto.sign(null, pae('application/vnd.in-toto+json', payload), KEY.privateKey);
+  attest(nullPayload, Buffer.from(JSON.stringify({ payloadType: 'application/vnd.in-toto+json', payload: payload.toString('base64'),
+    signatures: [{ keyid: '', sig: sig.toString('base64') }] })));
+  expect(await refusal(nullPayload)).toMatch(/signs a statement that is not a JSON object/);
+
+  const urlSafe = sign(download(keyed()));
+  const envelope = JSON.parse(attestationFor(urlSafe).toString());
+  envelope.payload = Buffer.from(envelope.payload, 'base64').toString('base64url');
+  expect(await refusal(attest(urlSafe, Buffer.from(JSON.stringify(envelope))))).toMatch(/payload that is not base64/);
+});
+
+it('accepts one good signature among malformed ones, and refuses a subject named like an object property', async () => {
+  const several = sign(download(keyed()));
+  const envelope = JSON.parse(attestationFor(several).toString());
+  envelope.signatures = [{ keyid: '', sig: '!!' }, { sig: 5 }, { sig: Buffer.alloc(64).toString('base64') }, envelope.signatures[0]];
+  await expect(verifyBuild(attest(several, Buffer.from(JSON.stringify(envelope))))).resolves.toMatchObject({ signature: 'verified' });
+
+  const proto = sign(download(keyed()));
+  expect(
+    await refusal(attest(proto, attestationFor(proto, KEY.privateKey, (st) => (st.subject[0].name = '__proto__')))),
+  ).toMatch(/names other files than its signed statement/);
+});
+
+it('holds the attestation to an organization the statement names, not only to an absent one', async () => {
+  const d = download(keyed());
+  sign(d, KEY.privateKey, statementFor(d.record as BuildRecord, KEY.privateKey, { organization: 'org_1' }));
+  await expect(verifyBuild(attest(d))).resolves.toMatchObject({ signature: 'verified' });
+  const other = download(keyed());
+  sign(other, KEY.privateKey, statementFor(other.record as BuildRecord, KEY.privateKey, { organization: 'org_1' }));
+  expect(
+    await refusal(attest(other, attestationFor(other, KEY.privateKey, (st) => (st.predicate.buildDefinition.externalParameters.organization = null)))),
+  ).toMatch(/names another organization than its signed statement/);
+});
+
 it('checks no attestation when the workflow supplies no key, as it checks no signature', async () => {
   const d = sign(download());
   attest(d, Buffer.from('not json'));
