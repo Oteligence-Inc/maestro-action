@@ -15,6 +15,7 @@ import { reportDrift, reportNewSensitive } from './steps/drift';
 import { reportDeployRun } from './steps/reportDeployRun';
 import { logPolicyCheck } from './steps/ciCheck';
 import { checkOnly } from './steps/checkOnly';
+import { reportDeploy } from './steps/reportDeploy';
 import { formatError, RemovedServiceError, SubscriptionInactiveError } from './util/errors';
 import { Inputs } from './types';
 
@@ -35,7 +36,11 @@ export async function run(): Promise<void> {
     core.setFailed(formatError(err));
     return;
   }
-  core.info(`Maestro: ${inputs.project || inputs.projectId}/${inputs.service} @ ${inputs.environment}`);
+  core.info(
+    inputs.reportDeploy
+      ? `Maestro: deploy report of build ${inputs.buildJobId} to ${inputs.project || inputs.projectId} @ ${inputs.environment}`
+      : `Maestro: ${inputs.project || inputs.projectId}/${inputs.service} @ ${inputs.environment}`,
+  );
   const api = new MaestroApi(inputs.apiUrl);
   let projectUid: string | undefined;
 
@@ -43,6 +48,10 @@ export async function run(): Promise<void> {
     await auth(api, inputs); // [1]
     if (inputs.checkOnly) {
       await checkOnly(api, inputs, workspace());
+      return;
+    }
+    if (inputs.reportDeploy) {
+      await reportDeploy(api, inputs);
       return;
     }
     const cfg = await resolveLockedConfig(api, inputs); // [2]

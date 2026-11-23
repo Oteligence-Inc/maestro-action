@@ -282,3 +282,62 @@ describe('signing-public-key', () => {
     expect(parseInputs().signingKey?.asymmetricKeyType).toBe('ed25519');
   });
 });
+
+describe('parseInputs: report-deploy', () => {
+  const keys = ['INPUT_API-KEY', 'INPUT_PROJECT', 'INPUT_ENVIRONMENT', 'INPUT_API-URL', 'INPUT_SERVICE', 'INPUT_JARS',
+    'INPUT_REPORT-DEPLOY', 'INPUT_BUILD-JOB-ID', 'INPUT_REQUIRE-DEPLOY-REPORT', 'INPUT_CHECK-ONLY'];
+  let saved: Record<string, string | undefined>;
+  beforeEach(() => {
+    saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    for (const k of keys) delete process.env[k];
+    process.env['INPUT_API-KEY'] = 'k';
+    process.env['INPUT_PROJECT'] = 'shop';
+    process.env['INPUT_ENVIRONMENT'] = 'prod';
+    process.env['INPUT_API-URL'] = 'https://prod.api.oteligence.com';
+    process.env['INPUT_REPORT-DEPLOY'] = 'true';
+  });
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it('needs no service or jars, and takes the build job id', () => {
+    process.env['INPUT_BUILD-JOB-ID'] = ' job_1-a ';
+    const parsed = parseInputs();
+    expect(parsed.reportDeploy).toBe(true);
+    expect(parsed.buildJobId).toBe('job_1-a');
+    expect(parsed.requireDeployReport).toBe(false);
+  });
+
+  it('refuses a missing or malformed build job id, beside the one it accepts', () => {
+    expect(() => parseInputs()).toThrow(/build-job-id/);
+    process.env['INPUT_BUILD-JOB-ID'] = 'job 1; rm';
+    expect(() => parseInputs()).toThrow(/build-job-id/);
+    process.env['INPUT_BUILD-JOB-ID'] = 'j'.repeat(129);
+    expect(() => parseInputs()).toThrow(/build-job-id/);
+    process.env['INPUT_BUILD-JOB-ID'] = 'j'.repeat(128);
+    expect(parseInputs().buildJobId).toHaveLength(128);
+  });
+
+  it('still needs the environment', () => {
+    process.env['INPUT_BUILD-JOB-ID'] = 'job_1';
+    delete process.env['INPUT_ENVIRONMENT'];
+    expect(() => parseInputs()).toThrow(/environment/);
+  });
+
+  it('refuses report-deploy with check-only', () => {
+    process.env['INPUT_BUILD-JOB-ID'] = 'job_1';
+    process.env['INPUT_CHECK-ONLY'] = 'true';
+    expect(() => parseInputs()).toThrow(/two different runs/);
+  });
+
+  it('reads require-deploy-report, and a build run still needs service and jars', () => {
+    process.env['INPUT_BUILD-JOB-ID'] = 'job_1';
+    process.env['INPUT_REQUIRE-DEPLOY-REPORT'] = 'true';
+    expect(parseInputs().requireDeployReport).toBe(true);
+    process.env['INPUT_REPORT-DEPLOY'] = 'false';
+    expect(() => parseInputs()).toThrow(/service/);
+  });
+});

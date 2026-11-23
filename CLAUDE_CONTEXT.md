@@ -9,9 +9,10 @@ extension bundle and configs on the runner for their image build. All analysis a
 | Path | Purpose |
 |---|---|
 | `action.yml` | Inputs, outputs, `runs: using: 'node24'`, `main` `dist/index.js` and `post` `dist/post/index.js` (no `post-if`, so it runs on every outcome). |
-| `src/index.ts` | `run()`: the step order below, the removed-service guard, the two opt-in degradations (`skip-on-removed-service`, `skip-generate-on-inactive`), and the deploy-run report at start and end. |
+| `src/index.ts` | `run()`: the step order below, the removed-service guard, the two opt-in degradations (`skip-on-removed-service`, `skip-generate-on-inactive`), and the deploy-run report at start and end. `check-only` and `report-deploy` branch off right after `auth`. |
 | `src/post.ts`, `src/postMain.ts` | The post step, its own bundle so it can never run the pipeline. `post()` acts only while `deployRunProjectUid` is set (a run Maestro has not accepted as completed): it re-authenticates and reports the run completed with the `deployRunConclusion` the main step last tried to send, or `cancelled` when the main step was stopped before it got that far (a cancel, or a timeout, which therefore reads as cancelled). Warns when it cannot report, and never fails the step. |
-| `src/inputs.ts` | `parseInputs`: reads the inputs, requires `project` or `project-id` and `api-url` (there is no default API), and holds `api-url` to `https://` on an `*.oteligence.com` host, or, when `trusted-api-host` names a hostname, on exactly that host. |
+| `src/inputs.ts` | `parseInputs`: reads the inputs, requires `project` or `project-id` and `api-url` (there is no default API), refuses `check-only` with `report-deploy`, drops the `service` and `jars` requirement in either mode, and under `report-deploy` requires a `build-job-id` of letters, digits, `-` and `_`; and holds `api-url` to `https://` on an `*.oteligence.com` host, or, when `trusted-api-host` names a hostname, on exactly that host. |
+| `src/steps/reportDeploy.ts` | The `report-deploy` run: `reportDeploy` posts `{buildJobId, run}` to `POST /api/job-manager/projects/{uid}/envs/{env}/deploy-reports`, where `run` is `githubRun()` (provider, repository, `runId`, and, when well-formed, `runAttempt`, `commitSha`, `url` (https servers only), `workflow`; null outside a GitHub Actions run, which is a refusal without a request). 201 is `recorded`, 200 `already-recorded`; any other answer is a refusal worded from the response's `code` (`REASONS`), never its raw body. A refusal warns and sets `deploy-report` to `refused`, or throws a `UserError` under `require-deploy-report`. |
 | `src/api.ts` | `MaestroApi` over `@actions/http-client`: bearer auth, retry on transient failures (`util/retry.ts`), signed-URL reads and writes without the auth header and over https only (`requireHttps` refuses another scheme by name, never echoing the URL), `expectOk` mapping a 402 `subscription_inactive` to `SubscriptionInactiveError`, a 403 `reader_read_only` to `ReaderKeyError` and a 403 `key_scope` (the run named a project or environment outside the key's scope) to `KeyScopeError`, each read flat or under `data`. |
 | `src/steps/` | One module per step, each with its own suite under `tests/steps/`. |
 | `src/ciRules.ts` | The log policy rule set's types and its evaluation: a copy of discrete-job-functions' djf-core `CiRules.evaluate` (`fold`, `matches`, `passesTest`, `listed`: an endpoint is an entry of the environment's collectors, lower-cased over ASCII letters only, or an entry followed by `/` and a path, with no URL parsed; `REFERENCE`: a value holding `${`, `$(` or `$NAME` is never judged by `not_listed`), `unreadable` (the version and test check that makes an unknown rule set fail loudly), and `CASES_DIGEST`, the SHA-256 of the fixture suite copy in `tests/fixtures/ci-rules/` this release was tested against. |
@@ -43,6 +44,8 @@ included; non-empty strings; each path through `globRefusal`, one linear pass th
    because job-manager would refuse a build with no check; a mode that fails the findings throws a `UserError`, so
    nothing is uploaded. The result goes on the build submit as `requestJson.ciCheck`. With `check-only` set,
    `run()` calls `checkOnly` right after `auth` (step 1) and returns, so steps 2 to 7 never run.
+   With `report-deploy` set, `run()` calls `reportDeploy` right after `auth` and returns the same way: no lock read,
+   upload, build or deploy-run report. The project is resolved by `resolveProjectUid`, not the lock.
 3. The removed-service guard: once the lock's `registeredJars` is non-empty, a `service` input it does not contain is
    refused before any upload, listing the registered names.
 4. `uploadJar`: the glob's matches, sorted, go through `pickJar`, which uploads a single match whatever its name and,
@@ -135,6 +138,12 @@ included; non-empty strings; each path through `globRefusal`, one linear pass th
   content, so the action never registers under it or advises it.
 - **Billing.** A 402 `subscription_inactive` is `SubscriptionInactiveError`; with `skip-generate-on-inactive` the step
   exits 0 with `generated=false`. Other 402 codes fail the step with the server's message.
+- **Deploy report.** job-manager's `POST .../envs/{env}/deploy-reports` takes `{buildJobId, run}` and answers 201 (new),
+  200 (this run and attempt already reported) or a refusal whose `data.code` is one of `deploy_report_not_this_env`,
+  `deploy_report_build_not_completed`, `deploy_report_invalid`, `deploy_report_api_key_only` or `key_scope`;
+  `REASONS` in `reportDeploy.ts` words them. It is the workflow's claim, recorded as such on the environment's trail,
+  and accepted only for a completed build Maestro made for that environment. The gateway admits the route for an API key in
+  `CliRoutePolicy`. The Action never lets a refused report fail the deploy unless `require-deploy-report` is `true`.
 - **Callers.** The platform's six `maestro-deploy.yml` workflows pin this action by commit SHA and pass their
   `spring.application.name` as `service`.
 - **Build record.** job-manager's download returns `buildRecord: {status, inputsDigest, applicationJars, files,
