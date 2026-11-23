@@ -33417,6 +33417,23 @@ function plural(n, one) {
  * previous build of the service. Printed through core.notice, which escapes the customer's method names. Never fails
  * the step. A job-manager that sends no note prints nothing.
  */
+/** The note's grouping of `group`'s methods under the project's declared critical flows, or null when it names none. */
+function flowsLine(what, group) {
+    const g = group && typeof group === 'object' ? group : {};
+    const flows = g.criticalFlows && typeof g.criticalFlows === 'object' ? g.criticalFlows : {};
+    const byFlow = Array.isArray(flows.byFlow) ? flows.byFlow : [];
+    const parts = byFlow.flatMap((f) => {
+        const flow = f && typeof f === 'object' ? f : {};
+        const keys = Array.isArray(flow.keys) ? flow.keys.filter((k) => typeof k === 'string') : [];
+        const name = typeof flow.businessName === 'string' ? flow.businessName : null;
+        return name && keys.length ? [`${name}: ${keys.map(methodName).join(', ')}`] : [];
+    });
+    if (parts.length === 0)
+        return null;
+    const label = typeof flows.label === 'string' ? flows.label : 'scoring output';
+    return `${what} on declared critical flows (${label}${flows.partial === true ? '; the first of them only' : ''}): `
+        + `${parts.join('; ')}.`;
+}
 function reportReleaseNote(note) {
     if (!note || typeof note !== 'object')
         return;
@@ -33466,6 +33483,9 @@ function reportReleaseNote(note) {
         lines.push(`Locked methods the JAR no longer has: ${named(gone)}.`
             + (spans.length ? ` Spans the previous build's inventory lists for them: ${spans.join(', ')}.` : ''));
     }
+    const goneFlows = flowsLine('Locked methods the JAR no longer has', n.methodsGone);
+    if (goneFlows)
+        lines.push(goneFlows);
     const sensitive = n.newSensitive && typeof n.newSensitive === 'object' ? n.newSensitive : {};
     if (Number.isInteger(sensitive.count) && sensitive.count > 0) {
         lines.push(`${plural(sensitive.count, 'new sensitive log statement')}, each named in a warning above.`);
@@ -33490,6 +33510,9 @@ function reportReleaseNote(note) {
     else if (recommended.count) {
         lines.push(`Newly recommended by this analysis (scoring output, not built until you lock again): ${named(recommended)}.`);
     }
+    const recommendedFlows = flowsLine('Newly recommended methods', n.newlyRecommended);
+    if (recommendedFlows)
+        lines.push(recommendedFlows);
     if (lines.length === 0) {
         lines.push('Nothing could be compared.');
     }
