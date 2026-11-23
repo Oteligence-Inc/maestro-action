@@ -332,6 +332,18 @@ named in a warning. Other services' drift is one count line, and their own runs 
 as information, and one whose analysis was not made from this build's JARs says so in a warning. Drift never fails
 the step: `fail-on-warnings` applies to peer staleness only, and the build is still the lock's.
 
+### Release note
+
+With the drift, job-manager works out the build's release note: what changed since the service's previous build in
+the environment whose JAR was registered. The Action prints it as one **`::notice`** after it submits the build:
+the methods and span attributes the lock added or removed, the locked methods the JAR no longer has with the spans the
+previous build's inventory lists for them, how many new sensitive log statements the drift names, the CI log policy
+check's findings the previous build's check did not have, and the methods the analysis newly recommends (scoring
+output, built only once you lock again). A list a build's drift did not compare, or that the drift names only in part,
+is said so rather than guessed. A rebuild with nothing changed prints `Release note: no change since build <job> (lock
+vN).`, and a service with no earlier registered build says there is nothing to compare with. The note never fails the
+step. The same note is on the build's row of the environment's timeline on the Governance page.
+
 ### New sensitive log statements
 
 With the drift, job-manager names the log statements the build's analysis reads as sensitive, for the service the run

@@ -72,7 +72,7 @@ included; non-empty strings; each path through `globRefusal`, one linear pass th
    JAR) and its `warnings` (each in-app tracer the service bundles beside the agent, and each kind of certificate trust
    it sets itself); `run` emits one `core.warning`
    per notice and one per warning, the latter as `Before you deploy <service>: ...`.
-6b. `reportDrift` (`src/steps/drift.ts`), right after `submitBuild` returns `{jobId, drift}` and before the build is
+6b. `reportDrift` (`src/steps/drift.ts`), right after `submitBuild` returns `{jobId, drift, releaseNote}` and before the build is
    polled: job-manager's drift of the build from its lock. One `core.warning` per kind of drift for the services
    `readAnalysisOfUpload` named, or for every service when it named none (the method names only inside
    `core.warning`, which escapes workflow commands), a note on that warning when `engineChanged` or `goalsChanged`,
@@ -83,6 +83,11 @@ included; non-empty strings; each path through `globRefusal`, one linear pass th
    `newSensitive.services[service].count` above zero, worded by its `since` (`build`: not in its last completed build;
    otherwise the lock's analysis) and listing each statement's class, method, line and level (inside `core.warning`),
    and one `core.info` naming the own services in `newSensitive.notCompared`. Never fails the step.
+   `reportReleaseNote` (`steps/releaseNote.ts`) then prints the create response's `releaseNote` as one `core.notice`
+   (which escapes workflow commands): a headline naming the previous build, then one line per change (the lock's
+   methods and attributes, `methodsGone` with its `spans`, the `newSensitive` count, `ci.newFindings`,
+   `newlyRecommended`), a `compared: false` or `partial` list said as such; `empty` prints the no-change line and a
+   null `previous` the nothing-to-compare line. A missing or malformed note prints nothing. Never fails the step.
 7. `downloadArtifacts`: `/jobs/{id}/download`; empties the job's folder, extracts the bundle and writes this service's
    `javaagent.config`, chosen by the analysis key, then the `service` input, then a unique letters-only match. It returns
    the response's `buildRecord` (`undefined` when the field is absent, a server older than build records; `null` when

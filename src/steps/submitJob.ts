@@ -43,10 +43,14 @@ export async function submitAnalysis(api: MaestroApi, cfg: ResolvedConfig, uploa
   return jobId;
 }
 
-/** A submitted build: its job id, and its drift from the lock as job-manager worked it out (absent from an older one). */
+/**
+ * A submitted build: its job id, its drift from the lock and its release note, as job-manager worked them out (each
+ * absent from an older one).
+ */
 export interface SubmittedBuild {
   jobId: string;
   drift: unknown;
+  releaseNote: unknown;
 }
 
 /**
@@ -86,8 +90,8 @@ export async function submitBuild(
   const jobId = extractJobId(res.body);
   if (!jobId) throw new UserError('Build job submission returned no job id.');
   core.info(`Submitted build job ${jobId}.`);
-  const body = res.body as { data?: { drift?: unknown } } | undefined;
-  return { jobId, drift: body?.data?.drift };
+  const body = res.body as { data?: { drift?: unknown; releaseNote?: unknown } } | undefined;
+  return { jobId, drift: body?.data?.drift, releaseNote: body?.data?.releaseNote };
 }
 
 /**

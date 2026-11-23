@@ -147,6 +147,18 @@ it('reports the drift of a build that then fails', async () => {
   expect(core.setFailed).toHaveBeenCalled();
 });
 
+it("prints the build's release note right after submitting, before the build is polled", async () => {
+  (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer'], notices: [], warnings: [] });
+  (submitBuild as jest.Mock).mockResolvedValue({ jobId: 'build_2', drift: undefined,
+    releaseNote: { previous: { jobId: 'build_1', lockVersion: 3 }, lock: {}, empty: true } });
+  await run();
+  const note = (core.notice as jest.Mock).mock;
+  const at = note.calls.findIndex((c) => c[0] === 'Release note: no change since build build_1 (lock v3).');
+  expect(at).toBeGreaterThanOrEqual(0);
+  expect(note.invocationCallOrder[at]).toBeLessThan((pollJob as jest.Mock).mock.invocationCallOrder[1]);
+  expect(core.setFailed).not.toHaveBeenCalled();
+});
+
 it('carries on when job-manager sends a drift it cannot read', async () => {
   (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: [], notices: [], warnings: [] });
   (submitBuild as jest.Mock).mockResolvedValue({ jobId: 'build_1', drift: 'unexpected' });
