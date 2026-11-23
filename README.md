@@ -339,7 +339,8 @@ the environment whose JAR was registered. The Action prints it as one **`::notic
 the methods and span attributes the lock added or removed, the locked methods the JAR no longer has with the spans the
 previous build's inventory lists for them, how many new sensitive log statements the drift names, the CI log policy
 check's findings the previous build's check did not have, and the methods the analysis newly recommends (scoring
-output, built only once you lock again). A list a build's drift did not compare, or that the drift names only in part,
+output, built only once you lock again). Where the project declares critical flows on the Governance page, it also
+names, by business name, the declared flows the methods gone and newly recommended are on. A list a build's drift did not compare, or that the drift names only in part,
 is said so rather than guessed. A rebuild with nothing changed prints `Release note: no change since build <job> (lock
 vN).`, and a service with no earlier registered build says there is nothing to compare with. The note never fails the
 step. The same note is on the build's row of the environment's timeline on the Governance page.

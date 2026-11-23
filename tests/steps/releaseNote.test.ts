@@ -99,3 +99,28 @@ it('says nothing could be compared when a non-empty note names nothing', () => {
   reportReleaseNote(note());
   expect(notice).toHaveBeenCalledWith('Release note since build build_1 (lock v3):\nNothing could be compared.');
 });
+
+it('names the declared critical flows the gone and newly recommended methods are on, as scoring output', () => {
+  reportReleaseNote(note({
+    methodsGone: { count: 1, keys: ['fts::com.acme.Transfer.internal'], spans: [],
+      criticalFlows: { label: 'scoring output', partial: false,
+        byFlow: [{ flowId: 'a'.repeat(64), businessName: 'Transfer funds', keys: ['fts::com.acme.Transfer.internal'] }] } },
+    newlyRecommended: { count: 1, keys: ['fts::com.acme.Transfer.fee'], label: 'scoring output',
+      criticalFlows: { label: 'scoring output', partial: true,
+        byFlow: [{ flowId: 'b'.repeat(64), businessName: 'Pay a bill', keys: ['fts::com.acme.Transfer.fee'] },
+          { flowId: 'c'.repeat(64), businessName: 'No keys', keys: [] }] } },
+  }));
+  const text = notice.mock.calls[0][0] as string;
+  expect(text).toContain('Locked methods the JAR no longer has on declared critical flows (scoring output): '
+    + 'Transfer funds: com.acme.Transfer.internal.');
+  expect(text).toContain('Newly recommended methods on declared critical flows (scoring output; the first of them '
+    + 'only): Pay a bill: com.acme.Transfer.fee.');
+  expect(text).not.toContain('No keys');
+});
+
+it('prints no flow line when the note groups nothing under a declared flow', () => {
+  reportReleaseNote(note({
+    methodsGone: { count: 1, keys: ['fts::com.acme.Transfer.internal'], spans: [], criticalFlows: { byFlow: [] } },
+  }));
+  expect(notice.mock.calls[0][0] as string).not.toContain('critical flows');
+});

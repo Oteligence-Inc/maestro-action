@@ -86,7 +86,8 @@ included; non-empty strings; each path through `globRefusal`, one linear pass th
    `reportReleaseNote` (`steps/releaseNote.ts`) then prints the create response's `releaseNote` as one `core.notice`
    (which escapes workflow commands): a headline naming the previous build, then one line per change (the lock's
    methods and attributes, `methodsGone` with its `spans`, the `newSensitive` count, `ci.newFindings`,
-   `newlyRecommended`), a `compared: false` or `partial` list said as such; `empty` prints the no-change line and a
+   `newlyRecommended`, and each group's `criticalFlows.byFlow`: the declared critical flows its methods are on, by
+   business name, labelled as the note labels them), a `compared: false` or `partial` list said as such; `empty` prints the no-change line and a
    null `previous` the nothing-to-compare line. A missing or malformed note prints nothing. Never fails the step.
 7. `downloadArtifacts`: `/jobs/{id}/download`; empties the job's folder, extracts the bundle and writes this service's
    `javaagent.config`, chosen by the analysis key, then the `service` input, then a unique letters-only match. It returns
