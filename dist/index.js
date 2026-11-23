@@ -29980,6 +29980,7 @@ const drift_1 = __nccwpck_require__(6352);
 const reportDeployRun_1 = __nccwpck_require__(8013);
 const ciCheck_1 = __nccwpck_require__(4039);
 const checkOnly_1 = __nccwpck_require__(4277);
+const reportDeploy_1 = __nccwpck_require__(6642);
 const errors_1 = __nccwpck_require__(17);
 /**
  * Maestro CI/CD GitHub Action — orchestrates the Step-6 9-step flow:
@@ -29999,13 +30000,19 @@ async function run() {
         core.setFailed((0, errors_1.formatError)(err));
         return;
     }
-    core.info(`Maestro: ${inputs.project || inputs.projectId}/${inputs.service} @ ${inputs.environment}`);
+    core.info(inputs.reportDeploy
+        ? `Maestro: deploy report of build ${inputs.buildJobId} to ${inputs.project || inputs.projectId} @ ${inputs.environment}`
+        : `Maestro: ${inputs.project || inputs.projectId}/${inputs.service} @ ${inputs.environment}`);
     const api = new api_1.MaestroApi(inputs.apiUrl);
     let projectUid;
     try {
         await (0, auth_1.auth)(api, inputs); // [1]
         if (inputs.checkOnly) {
             await (0, checkOnly_1.checkOnly)(api, inputs, workspace());
+            return;
+        }
+        if (inputs.reportDeploy) {
+            await (0, reportDeploy_1.reportDeploy)(api, inputs);
             return;
         }
         const cfg = await (0, resolveConfig_1.resolveLockedConfig)(api, inputs); // [2]
@@ -30189,9 +30196,19 @@ function parseInputs() {
     }
     const orgId = core.getInput('org-id').trim();
     const checkOnly = (core.getInput('check-only') || 'false').toLowerCase() === 'true';
-    const service = core.getInput('service', { required: !checkOnly });
+    const reportDeploy = (core.getInput('report-deploy') || 'false').toLowerCase() === 'true';
+    if (checkOnly && reportDeploy) {
+        throw new errors_1.UserError('check-only and report-deploy are two different runs: set one.');
+    }
+    const service = core.getInput('service', { required: !checkOnly && !reportDeploy });
     const environment = core.getInput('environment', { required: !checkOnly });
-    const jarsGlob = core.getInput('jars', { required: !checkOnly });
+    const jarsGlob = core.getInput('jars', { required: !checkOnly && !reportDeploy });
+    const buildJobId = core.getInput('build-job-id').trim();
+    if (reportDeploy && !/^[A-Za-z0-9_-]{1,128}$/.test(buildJobId)) {
+        throw new errors_1.UserError('report-deploy needs build-job-id: the job-id output of the Maestro step that built what this workflow deployed. ' +
+            'An unset output reads as empty.');
+    }
+    const requireDeployReport = (core.getInput('require-deploy-report') || 'false').toLowerCase() === 'true';
     const apiUrl = normaliseApiUrl(core.getInput('api-url', { required: true }), core.getInput('trusted-api-host'));
     const timeoutRaw = core.getInput('timeout-seconds') || '300';
     const timeoutSeconds = Number.parseInt(timeoutRaw, 10);
@@ -30215,7 +30232,7 @@ function parseInputs() {
     return {
         apiKey, project, projectId, orgId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
         failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey, checkOnly, collectorValidate,
-        collectorImage,
+        collectorImage, reportDeploy, buildJobId, requireDeployReport,
     };
 }
 /**
@@ -33320,6 +33337,135 @@ async function registerJarForEnv(api, inputs, cfg, upload, buildJobId, analysisN
     });
     (0, api_1.expectOk)(res, 'register-jar');
     core.info(`Registered ${service} JAR (sha ${upload.sha}) for env ${inputs.environment}.`);
+}
+
+
+/***/ }),
+
+/***/ 6642:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.reportDeploy = reportDeploy;
+exports.githubRun = githubRun;
+const core = __importStar(__nccwpck_require__(7484));
+const api_1 = __nccwpck_require__(6879);
+const errors_1 = __nccwpck_require__(17);
+const resolveConfig_1 = __nccwpck_require__(749);
+/**
+ * `report-deploy`: after the workflow's own deploy step, tell Maestro which build it deployed to the environment, for
+ * the environment's chained trail and the cockpit's Deployed link. The report is the workflow's claim, worded as such;
+ * Maestro accepts it only for a completed build it made for that environment. A refusal warns, or fails the step under
+ * `require-deploy-report`.
+ */
+async function reportDeploy(api, inputs) {
+    const run = githubRun();
+    if (!run) {
+        return refused(inputs, 'a deploy report names the GitHub run that deployed, and this is not a GitHub Actions run');
+    }
+    let projectUid;
+    try {
+        projectUid = await (0, resolveConfig_1.resolveProjectUid)(api, inputs.project, inputs.projectId);
+    }
+    catch (err) {
+        return refused(inputs, `the project could not be resolved: ${(0, errors_1.formatError)(err)}`);
+    }
+    const path = `${(0, resolveConfig_1.envPath)(projectUid, inputs.environment)}/deploy-reports`;
+    let status;
+    let body;
+    try {
+        const res = await api.post(path, { buildJobId: inputs.buildJobId, run });
+        status = res.statusCode;
+        body = res.body;
+    }
+    catch (err) {
+        return refused(inputs, `it could not be sent: ${(0, errors_1.formatError)(err)}`);
+    }
+    if (status === 201 || status === 200) {
+        const outcome = status === 201 ? 'recorded' : 'already-recorded';
+        core.info(status === 201
+            ? `Maestro recorded that run ${run.runId} deployed build ${inputs.buildJobId} to ${inputs.environment}.`
+            : `Maestro already holds this run's report of build ${inputs.buildJobId} to ${inputs.environment}.`);
+        core.setOutput('deploy-report', outcome);
+        return outcome;
+    }
+    const code = body?.data?.code ?? body?.code;
+    const trace = (0, api_1.traceOf)(body);
+    const reason = REASONS[code] ?? (0, api_1.messageOf)(body) ?? `Maestro answered ${status}`;
+    return refused(inputs, `${reason}${trace ? ` (trace ${trace})` : ''}`);
+}
+const REASONS = {
+    deploy_report_not_this_env: 'Maestro made no completed build with that id for this environment. Pass the job-id output of the step that built ' +
+        'for this environment',
+    deploy_report_build_not_completed: 'the build has not completed',
+    deploy_report_invalid: 'Maestro refused the report as malformed',
+    deploy_report_api_key_only: 'only an API key may report a deploy',
+    key_scope: "the API key's scope does not reach this project or environment",
+};
+function refused(inputs, reason) {
+    const text = `Maestro did not record the deploy report: ${reason}.`;
+    if (inputs.requireDeployReport)
+        throw new errors_1.UserError(text);
+    core.warning(text);
+    core.setOutput('deploy-report', 'refused');
+    return 'refused';
+}
+/** The run the report names, from the runner's GITHUB_* variables; null outside a GitHub Actions run. */
+function githubRun() {
+    const runId = Number(process.env.GITHUB_RUN_ID);
+    const repository = process.env.GITHUB_REPOSITORY;
+    if (!Number.isSafeInteger(runId) || runId <= 0 || !repository)
+        return null;
+    const run = { provider: 'github', repository, runId };
+    const attempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+    if (Number.isSafeInteger(attempt) && attempt >= 1)
+        run.runAttempt = attempt;
+    const sha = process.env.GITHUB_SHA;
+    if (sha && /^([0-9a-f]{40}|[0-9a-f]{64})$/.test(sha))
+        run.commitSha = sha;
+    const server = process.env.GITHUB_SERVER_URL || 'https://github.com';
+    if (server.startsWith('https://'))
+        run.url = `${server}/${repository}/actions/runs/${runId}`;
+    const workflow = process.env.GITHUB_WORKFLOW;
+    if (workflow && !/^[=+@-]/.test(workflow) && !/[\u0000-\u001f\u007f]/.test(workflow)) {
+        run.workflow = workflow.slice(0, 200);
+    }
+    return run;
 }
 
 

@@ -22,9 +22,21 @@ export function parseInputs(): Inputs {
   }
   const orgId = core.getInput('org-id').trim();
   const checkOnly = (core.getInput('check-only') || 'false').toLowerCase() === 'true';
-  const service = core.getInput('service', { required: !checkOnly });
+  const reportDeploy = (core.getInput('report-deploy') || 'false').toLowerCase() === 'true';
+  if (checkOnly && reportDeploy) {
+    throw new UserError('check-only and report-deploy are two different runs: set one.');
+  }
+  const service = core.getInput('service', { required: !checkOnly && !reportDeploy });
   const environment = core.getInput('environment', { required: !checkOnly });
-  const jarsGlob = core.getInput('jars', { required: !checkOnly });
+  const jarsGlob = core.getInput('jars', { required: !checkOnly && !reportDeploy });
+  const buildJobId = core.getInput('build-job-id').trim();
+  if (reportDeploy && !/^[A-Za-z0-9_-]{1,128}$/.test(buildJobId)) {
+    throw new UserError(
+      'report-deploy needs build-job-id: the job-id output of the Maestro step that built what this workflow deployed. ' +
+        'An unset output reads as empty.',
+    );
+  }
+  const requireDeployReport = (core.getInput('require-deploy-report') || 'false').toLowerCase() === 'true';
 
   const apiUrl = normaliseApiUrl(
     core.getInput('api-url', { required: true }),
@@ -61,7 +73,7 @@ export function parseInputs(): Inputs {
   return {
     apiKey, project, projectId, orgId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
     failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey, checkOnly, collectorValidate,
-    collectorImage,
+    collectorImage, reportDeploy, buildJobId, requireDeployReport,
   };
 }
 

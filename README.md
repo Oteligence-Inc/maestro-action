@@ -65,9 +65,9 @@ the app image.
 | `project` | one of `project` / `project-id` | none | Project name (e.g. `banking-app`) or `proj_` UID. |
 | `project-id` | one of `project` / `project-id` | none | Project UID. Wins over `project` when both are set; a name that disagrees is warned about and ignored. |
 | `org-id` | no | none | The id of the organization to act for (`org_...` on hosted SaaS, a UUID on a private-cloud VM). Needed only when the API key is not scoped to a project and its owner belongs to several organizations; the token exchange refuses such a key without it. |
-| `service` | yes, except for `check-only` with a `.maestro/check.yml` | none | The name the environment registers this service under: the analysis's name for the JAR (its `spring.application.name`, else the JAR's file name without its version), or, for one of two JARs that share that name, the file-derived name the wizard registered it under. A run whose input the environment's latest lock does not register fails and lists the names it does. A run warns when the analysis keys the JAR differently from the key the lock recorded for the registration (the build may then carry none of its locked methods), or, under a lock that recorded none, when the analysis names it differently. |
+| `service` | yes, except for `check-only` with a `.maestro/check.yml`, and for `report-deploy` | none | The name the environment registers this service under: the analysis's name for the JAR (its `spring.application.name`, else the JAR's file name without its version), or, for one of two JARs that share that name, the file-derived name the wizard registered it under. A run whose input the environment's latest lock does not register fails and lists the names it does. A run warns when the analysis keys the JAR differently from the key the lock recorded for the registration (the build may then carry none of its locked methods), or, under a lock that recorded none, when the analysis names it differently. |
 | `environment` | yes, except for `check-only` with a `.maestro/check.yml` | none | Target env: `dev` / `staging` / `prod` / custom. |
-| `jars` | yes, except for `check-only` | none | Glob to the JAR or WAR (e.g. `target/*.jar`). When it matches several files, those a build leaves beside the runnable JAR (`original-*` from Maven shade, `*-plain` from Gradle Boot, and `*-sources`, `*-javadoc` and `*-tests` JARs) are set aside and named in the log; exactly one file must remain. |
+| `jars` | yes, except for `check-only` and `report-deploy` | none | Glob to the JAR or WAR (e.g. `target/*.jar`). When it matches several files, those a build leaves beside the runnable JAR (`original-*` from Maven shade, `*-plain` from Gradle Boot, and `*-sources`, `*-javadoc` and `*-tests` JARs) are set aside and named in the log; exactly one file must remain. |
 | `api-url` | yes | | The Maestro API this run talks to: `https://prod.api.oteligence.com` for hosted Maestro, or your private-cloud install's address. It must be `https://` in every case; a private-cloud install serves plain HTTP out of the box, so put a TLS terminator in front of it. The storage URLs it signs for uploads and downloads must be `https://` too. A host outside `*.oteligence.com` must also be named in `trusted-api-host`. |
 | `trusted-api-host` | no | | A private-cloud install's API hostname, such as `maestro.example.internal`: no scheme, port or path. The Action then accepts `api-url` on that host and refuses every other, an `*.oteligence.com` host included. Leave it unset for hosted Maestro. |
 | `timeout-seconds` | no | `300` | Max wait for each Maestro job. |
@@ -79,6 +79,9 @@ the app image.
 | `collector-image` | no | the collector-contrib release the platform validates generated configurations for, by digest | The collector image `collector-validate` runs; anything that is not an image reference is refused. |
 | `check-only` | no | `false` | `true` runs only the log policy check (below) over the repository's tracked deployment files and stops: nothing is uploaded, analysed or built, and `generated` is `false`. With a `.maestro/check.yml`, every service and environment it lists is checked against the files it maps to them. |
 | `require-signed-build` | no | `false` | `true` fails the step when `signing-public-key` is empty. A workflow variable that is missing in a repository, fork or environment reads as empty, which would otherwise switch the signature check off. |
+| `report-deploy` | no | `false` | `true` reports, after your workflow's own deploy step, that this run deployed the build `build-job-id` names to `environment`, and stops: nothing is uploaded or built, and `service` and `jars` are not read. Maestro records it on the environment's trail as your CI's claim and shows it as the environment's Deployed link; it accepts only a completed build it made for that environment, and a repeat of the same run and attempt adds nothing. |
+| `build-job-id` | with `report-deploy` | | The build a deploy report names: the `job-id` output of the Maestro step that built what the workflow deployed. |
+| `require-deploy-report` | no | `false` | `true` fails a `report-deploy` run when Maestro does not record the report; otherwise the step warns and succeeds, so a deploy is never blocked by its report. |
 
 ## Outputs
 
@@ -94,6 +97,7 @@ the app image.
 | `build-record` | How the build's files stand against the record of its inputs: `recorded` (the first build of these inputs) or `matched` (an earlier build of the same inputs produced the same files). Empty when `generated` is `false`. The Action refuses every other outcome. |
 | `log-policy-check` | The log policy check's outcome: `passed`, `warned` (findings the environment's mode allows), `failed`, `off` (the environment's check is off) or `not-run` (the workspace is not a git checkout). |
 | `log-policy-findings` | How many findings the log policy check reported. |
+| `deploy-report` | A `report-deploy` run's outcome: `recorded`, `already-recorded` (this run and attempt reported it before) or `refused`. |
 | `build-signature` | `verified` (the build is signed by `signing-public-key`), `not-checked` (it is signed, but `signing-public-key` is not set) or `unsigned` (the platform holds no signing key). Empty when `generated` is `false`. With `signing-public-key` set, every outcome but `verified` fails the step. |
 
 ## What it does (the 9-step flow)
@@ -258,6 +262,39 @@ end. The Action's post step, which GitHub runs after the job's other steps, clos
 open: as **cancelled** when the run was cancelled or stopped by a `timeout-minutes` before the Action
 finished, or with its real outcome when the final report did not reach Maestro. It re-authenticates
 with the same API key. Reporting is best-effort and never fails the step.
+
+## Reporting the deploy
+
+The build step does not know whether your workflow deployed what it built. To show the environment's Deployed link
+on the cockpit, add a second Maestro step after your own deploy step:
+
+```yaml
+      - id: maestro
+        uses: Oteligence-Inc/maestro-action@v0
+        with:
+          api-key: ${{ secrets.MAESTRO_API_KEY }}
+          project: banking-app
+          service: fund-transfer-service
+          environment: prod
+          jars: target/*.jar
+          api-url: https://prod.api.oteligence.com
+      # ... your deploy step ...
+      - uses: Oteligence-Inc/maestro-action@v0
+        with:
+          api-key: ${{ secrets.MAESTRO_API_KEY }}
+          project: banking-app
+          environment: prod
+          api-url: https://prod.api.oteligence.com
+          report-deploy: true
+          build-job-id: ${{ steps.maestro.outputs.job-id }}
+```
+
+The report names the build and this run (repository, run id and attempt, commit, workflow and the run's link). Maestro
+records it on the environment's trail as your CI's claim, never as its own observation, and accepts it only for a
+completed build it made for that environment: another environment's build, a build still running or a job id it
+never issued is refused. Only an API key reports a deploy. A repeat of the same run and attempt adds nothing; a
+re-run is a new attempt and a new row. A refusal warns and the step succeeds, unless `require-deploy-report` is
+`true`.
 
 ## Cross-service staleness
 

@@ -41,6 +41,15 @@ export interface Inputs {
   collectorValidate: boolean;
   /** The collector image that validate runs. */
   collectorImage: string;
+  /**
+   * `report-deploy`: report that this workflow deployed the build `buildJobId` to the environment, and stop; nothing
+   * is uploaded or built, so `service` and `jars` are not needed.
+   */
+  reportDeploy: boolean;
+  /** The build a deploy report names: the `job-id` output of the step that built it. */
+  buildJobId: string;
+  /** Fail the step when Maestro does not record the deploy report; otherwise it warns. */
+  requireDeployReport: boolean;
 }
 
 export interface Session {

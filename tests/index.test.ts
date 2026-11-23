@@ -13,6 +13,7 @@ jest.mock('../src/steps/staleness');
 jest.mock('../src/steps/reportDeployRun');
 jest.mock('../src/steps/ciCheck');
 jest.mock('../src/steps/checkOnly');
+jest.mock('../src/steps/reportDeploy');
 import * as core from '@actions/core';
 import * as crypto from 'crypto';
 import { run } from '../src/index';
@@ -30,6 +31,7 @@ import { warnStalePeers } from '../src/steps/staleness';
 import { BuildVerificationError, verifyBuild } from '../src/steps/verify';
 import { logPolicyCheck, readMapping } from '../src/steps/ciCheck';
 import { checkOnly } from '../src/steps/checkOnly';
+import { reportDeploy } from '../src/steps/reportDeploy';
 
 const inputs = {
   service: 'fundtransfer', environment: 'dev', apiUrl: 'https://api.oteligence.com', collectorValidate: true,
@@ -87,6 +89,24 @@ describe('the log policy check', () => {
     expect(uploadJar).not.toHaveBeenCalled();
     expect(reportDeployRun).not.toHaveBeenCalled();
     expect(core.setFailed).not.toHaveBeenCalled();
+  });
+
+  it('only reports the deploy in report-deploy mode: no lock read, upload, build or deploy run', async () => {
+    (parseInputs as jest.Mock).mockReturnValue({ ...inputs, reportDeploy: true, buildJobId: 'job_1' });
+    await run();
+    expect(reportDeploy).toHaveBeenCalled();
+    expect(checkOnly).not.toHaveBeenCalled();
+    expect(resolveLockedConfig).not.toHaveBeenCalled();
+    expect(uploadJar).not.toHaveBeenCalled();
+    expect(reportDeployRun).not.toHaveBeenCalled();
+    expect(core.setFailed).not.toHaveBeenCalled();
+  });
+
+  it('fails the step when the report is refused under require-deploy-report', async () => {
+    (parseInputs as jest.Mock).mockReturnValue({ ...inputs, reportDeploy: true, buildJobId: 'job_1' });
+    (reportDeploy as jest.Mock).mockRejectedValueOnce(new UserError('Maestro did not record the deploy report: x.'));
+    await run();
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('did not record the deploy report'));
   });
 });
 
