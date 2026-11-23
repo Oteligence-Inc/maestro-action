@@ -155,7 +155,7 @@ describe('submitBuild', () => {
 
     const profile = buildProfileFromLocked(locked);
     const build = await submitBuild(client(), cfg, upload, 'job_a', profile, 'fund-transfer-service');
-    expect(build).toEqual({ jobId: 'build_1', drift: undefined });
+    expect(build).toEqual({ jobId: 'build_1', drift: undefined, releaseNote: undefined });
     expect(seen.jobType).toBe('MULTI_JAR_EXPLORER_BUILD');
     expect(seen.projectUid).toBe('proj_1'); // stamped so ci-runs (project-scoped) finds it
     expect(seen.lockedVersionUid).toBe('lv_9');
@@ -184,12 +184,13 @@ describe('submitBuild', () => {
     expect('ciCheck' in bodies[1].requestJson).toBe(false);
   });
 
-  it("returns the build's drift as job-manager sent it", async () => {
+  it("returns the build's drift and release note as job-manager sent them", async () => {
     const drift = { status: 'checked', lockVersion: 9, services: {} };
-    nock(BASE).post('/api/job-manager/jobs').reply(201, { data: { id: 'build_2', drift } });
+    const releaseNote = { empty: true, previous: { jobId: 'build_1', lockVersion: 9 } };
+    nock(BASE).post('/api/job-manager/jobs').reply(201, { data: { id: 'build_2', drift, releaseNote } });
 
     const build = await submitBuild(client(), cfg, upload, 'job_a', buildProfileFromLocked(locked), 'orders');
 
-    expect(build).toEqual({ jobId: 'build_2', drift });
+    expect(build).toEqual({ jobId: 'build_2', drift, releaseNote });
   });
 });
