@@ -133,6 +133,10 @@ the app image.
 9. Verify the download against the build's record and, with `signing-public-key` set, its signature (below), then
    register the JAR's SHA for this `(env, service)` (silent; the lock is unchanged).
 
+This is the build run. Two other runs share the Action and stop early: `check-only` (step 1, then the log policy
+check) and `report-deploy` (step 1, then one deploy report; see *Reporting the deploy*). They are exclusive: setting
+both is an input error.
+
 ## Verifying the download
 
 Maestro records every build: one record per set of build inputs (the application JARs the build read, the lock as
@@ -533,7 +537,7 @@ Actions Runner 2.327.1 or later, on an OS and architecture Node 24 supports (not
 
 ## Limitations (v0 pilot)
 
-- **One JAR per invocation.** Monorepos: add one step per service.
+- **One JAR per invocation.** Monorepos: add one step per service, and one `report-deploy` step per deployed build.
 - **Backend flag required:** the server must have `maestro.staleness.enabled`
   (job-processor) on for the staleness warning.
 - Per-service `javaagent.config` enrichment (`agentConfigContextByService`) from the
