@@ -356,7 +356,8 @@ theirs to report.
 
 Method names come from your bytecode, so in a public repository the issue carries counts only unless
 `drift-issue-public` is `true`. The run log still names this service's drifting methods, as it does without
-`drift-issue`. Add `issues: write` to the job's permissions, beside the ones it already has:
+`drift-issue`. GitHub keeps an issue's earlier bodies in its edit history, so names an issue showed while the repository was
+private stay there after it goes public. Add `issues: write` to the job's permissions, beside the ones it already has:
 
 ```yaml
 permissions:
