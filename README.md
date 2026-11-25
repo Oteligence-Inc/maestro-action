@@ -347,7 +347,7 @@ theirs to report.
   count and at most ten names. It also says when the analysis engine or the goals changed since the lock, since a new
   recommendation may then come from them rather than the JAR.
 - Each later build of the service rewrites its body, and adds a comment only when the drift changed (the lock
-  version, or any method named).
+  version, or any method named; where names are left out, only the counts).
 - A build that shows no drift comments and closes it; a later drift opens a new one.
 - An issue a person closes as not planned stays closed until the drift changes.
 - If two runs each opened one, the next run keeps the oldest and closes the others as its duplicates.

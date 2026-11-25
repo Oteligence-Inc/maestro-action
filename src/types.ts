@@ -50,7 +50,7 @@ export interface Inputs {
   buildJobId: string;
   /** Fail the step when Maestro does not record the deploy report; otherwise it warns. */
   requireDeployReport: boolean;
-  /** `drift-issue`: keep one issue per environment current with its builds' drift from the lock. */
+  /** `drift-issue`: keep one issue per service and environment current with its builds' drift from the lock. */
   driftIssue: boolean;
   /** `github-token`: the token the drift issue is written with (issues: write); required when driftIssue is set. */
   githubToken: string;
