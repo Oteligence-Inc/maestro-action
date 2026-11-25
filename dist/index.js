@@ -30050,12 +30050,6 @@ async function run() {
         // Before the build runs, so a build that fails still says how its inputs drifted from the lock.
         (0, drift_1.reportDrift)(build.drift, analysisNames);
         (0, drift_1.reportNewSensitive)(build.drift, analysisNames);
-        if (inputs.driftIssue) {
-            await (0, driftIssue_1.syncDriftIssue)(build.drift, {
-                token: inputs.githubToken, allowPublic: inputs.driftIssuePublic, projectUid, environment: inputs.environment,
-                service: inputs.service, buildJobId, env: process.env,
-            });
-        }
         (0, releaseNote_1.reportReleaseNote)(build.releaseNote);
         await (0, poll_1.pollJob)(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
         const paths = await (0, download_1.downloadArtifacts)(api, buildJobId, inputs.service, analysisNames); // [8]
@@ -30072,6 +30066,13 @@ async function run() {
         // Before registering, so a run that fail-on-warnings stops leaves the environment's JAR as it was.
         await (0, staleness_1.warnStalePeers)(api, inputs, cfg, analysisJobId, inputs.failOnWarnings);
         await (0, register_1.registerJarForEnv)(api, inputs, cfg, upload, buildJobId, analysisNames); // [9]
+        // Once the build is the environment's: the issue says what its registered JAR drifts by.
+        if (inputs.driftIssue) {
+            await (0, driftIssue_1.syncDriftIssue)(build.drift, {
+                token: inputs.githubToken, allowPublic: inputs.driftIssuePublic, projectUid: cfg.projectUid,
+                environment: inputs.environment, service: inputs.service, ownNames: analysisNames, buildJobId, env: process.env,
+            });
+        }
         core.setOutput('extension-dir', paths.extensionDir);
         core.setOutput('config-path', paths.configPath);
         core.setOutput('collector-config-path', paths.collectorConfigPath);
@@ -33240,40 +33241,50 @@ exports.body = body;
 exports.syncDriftIssue = syncDriftIssue;
 const core = __importStar(__nccwpck_require__(7484));
 const crypto = __importStar(__nccwpck_require__(6982));
-/** The label every drift issue carries, so the next run finds it. */
+const http_client_1 = __nccwpck_require__(4844);
+/** The label every drift issue asks for; it is found again by its marker, since GitHub may drop a label. */
 exports.LABEL = 'maestro-drift';
-/** How many method names a group shows in the issue; the count beside them is always the server's full one. */
-const SHOWN = 20;
+/** The names a group shows: job-manager sends at most ten per group, with the full count beside them. */
+const SHOWN = 10;
+/** The pages of open issues read to find this service's issue, 100 to a page. */
+const PAGES = 10;
+const byCodeUnit = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 function group(value) {
     const g = (value ?? {});
     const keys = Array.isArray(g.keys) ? g.keys.filter((k) => typeof k === 'string') : [];
     const count = typeof g.count === 'number' && Number.isInteger(g.count) && g.count >= keys.length ? g.count : keys.length;
-    return { count, keys: [...keys].sort() };
+    return { count, keys: [...keys].sort(byCodeUnit) };
 }
 /**
- * The environment's drift a build reports, or null when it was not compared (no lock, the lock's own analysis, an
- * analysis not made from this build, a server that sends none): then the issue is left as it is.
+ * The run's own services' drift a build reports, or null when it was not compared (no lock, an analysis not made from
+ * this build, a server that sends none): then the issue is left as it is. A build from the lock's own analysis reads as
+ * no drift. With no names of its own, every service is the run's own, as in the log.
  */
-function summarize(drift) {
+function summarize(drift, ownNames = []) {
     if (!drift || typeof drift !== 'object')
         return null;
     const d = drift;
+    const base = { lockVersion: lockVersionOf(d), engineChanged: d.engineChanged === true, goalsChanged: d.goalsChanged === true };
     if (d.status === 'same_analysis')
-        return { lockVersion: lockVersionOf(d), services: {}, unmatched: [] };
+        return { ...base, services: {}, unmatched: [] };
     if (d.status !== 'checked' && d.status !== 'unmatched')
         return null;
     if (!d.services || typeof d.services !== 'object' || Array.isArray(d.services))
         return null;
-    const services = {};
-    for (const [name, raw] of Object.entries(d.services).sort(([a], [b]) => a.localeCompare(b))) {
-        const s = (raw ?? {});
+    const own = new Set(ownNames);
+    const isOwn = (service) => own.size === 0 || own.has(service);
+    const services = Object.create(null);
+    for (const name of Object.keys(d.services).sort(byCodeUnit)) {
+        if (!isOwn(name))
+            continue;
+        const s = (d.services[name] ?? {});
         const entry = { recommendedNotInLock: group(s.recommendedNotInLock), lockedNotInJar: group(s.lockedNotInJar) };
         if (entry.recommendedNotInLock.count > 0 || entry.lockedNotInJar.count > 0)
             services[name] = entry;
     }
     const unmatched = Array.isArray(d.unmatchedServices)
-        ? d.unmatchedServices.filter((s) => typeof s === 'string').sort() : [];
-    return { lockVersion: lockVersionOf(d), services, unmatched };
+        ? d.unmatchedServices.filter((s) => typeof s === 'string' && isOwn(s)).sort(byCodeUnit) : [];
+    return { ...base, services, unmatched };
 }
 function lockVersionOf(d) {
     return Number.isInteger(d.lockVersion) ? d.lockVersion : null;
@@ -33281,9 +33292,14 @@ function lockVersionOf(d) {
 function drifts(s) {
     return Object.keys(s.services).length > 0 || s.unmatched.length > 0;
 }
-/** What identifies a drift, so a run that sees the same drift adds no comment: the lock and every method named. */
-function digest(s) {
-    return crypto.createHash('sha256').update(JSON.stringify([s.lockVersion, s.services, s.unmatched])).digest('hex');
+/**
+ * What identifies a drift, so a run that sees the same drift adds no comment. With names it covers every method named;
+ * without, only the counts, so a public issue's marker cannot be matched against guessed method names.
+ */
+function digest(s, names) {
+    const services = Object.entries(s.services).map(([service, d]) => [service,
+        names ? d : { recommendedNotInLock: d.recommendedNotInLock.count, lockedNotInJar: d.lockedNotInJar.count }]);
+    return crypto.createHash('sha256').update(JSON.stringify([s.lockVersion, services, s.unmatched])).digest('hex');
 }
 /** A name from the customer's bytecode, as inline code that cannot break out of it or out of its table cell. */
 function code(name) {
@@ -33296,18 +33312,22 @@ function listed(g, names) {
     const more = g.count - shown.length;
     return `${g.count}: ${shown.join(', ')}${more > 0 ? ` and ${more} more` : ''}`;
 }
-function marker(projectUid, environment) {
-    return `<!-- maestro-drift project=${encodeURIComponent(projectUid)} environment=${encodeURIComponent(environment)} -->`;
+/** The line that finds this service's issue again: its own line, which no name from the bytecode can make. */
+function marker(projectUid, environment, service) {
+    return `<!-- maestro-drift project=${encodeURIComponent(projectUid)} environment=${encodeURIComponent(environment)} `
+        + `service=${encodeURIComponent(service)} -->`;
 }
 function digestMarker(d) {
     return `<!-- maestro-drift-digest ${d} -->`;
 }
-/** The issue's body: each drifting service's counts, with the method names only where they may be shown. */
+function lockWords(s) {
+    return s.lockVersion === null ? 'its lock' : `lock v${s.lockVersion}`;
+}
+/** The issue's body: the service's drift, with the method names only where they may be shown. */
 function body(s, ctx, names, runUrl) {
-    const lock = s.lockVersion === null ? 'its lock' : `lock v${s.lockVersion}`;
     const lines = [
-        `Maestro builds of environment ${code(ctx.environment)} drift from ${lock}. The newest build to read it is job `
-            + `${code(ctx.buildJobId)} of ${code(ctx.service)}${runUrl ? ` ([run](${runUrl}))` : ''}.`,
+        `Maestro builds of ${code(ctx.service)} in environment ${code(ctx.environment)} drift from ${lockWords(s)}. The `
+            + `newest build to read it is job ${code(ctx.buildJobId)}${runUrl ? ` ([run](${runUrl}))` : ''}.`,
         '',
         '| Service | Recommended now, not in the lock | Locked, no longer in the JAR |',
         '| --- | --- | --- |',
@@ -33319,88 +33339,137 @@ function body(s, ctx, names, runUrl) {
         lines.push('', `This build's analysis holds no methods for ${s.unmatched.map(code).join(', ')}, which the lock's `
             + 'analysis held, so their locked methods were not compared.');
     }
+    if (s.engineChanged) {
+        lines.push('', 'The analysis engine changed since the lock, so a new recommendation may come from the engine rather '
+            + 'than the JAR.');
+    }
+    if (s.goalsChanged) {
+        lines.push('', 'The goals changed since the lock, so a new recommendation may come from the goals rather than the JAR.');
+    }
     if (!names) {
         lines.push('', 'Method names are left out because this repository is public; set `drift-issue-public` to show them.');
     }
     lines.push('', 'Lock again to add the methods now recommended, or leave them out. This issue closes when a build of '
-        + 'this environment shows no drift.', '', marker(ctx.projectUid, ctx.environment), digestMarker(digest(s)));
+        + 'this service shows no drift.', '', marker(ctx.projectUid, ctx.environment, ctx.service), digestMarker(digest(s, names)));
     return lines.join('\n');
 }
+/** The default transport: @actions/http-client, which honours the runner's proxy settings, 20 s per request. */
+const httpSend = async (method, url, headers, body) => {
+    const client = new http_client_1.HttpClient('maestro-action', [], { allowRetries: false, socketTimeout: 20_000 });
+    const res = await client.request(method, url, body ?? null, headers);
+    const text = await res.readBody();
+    let json = null;
+    try {
+        json = text ? JSON.parse(text) : null;
+    }
+    catch {
+        json = null;
+    }
+    return { status: res.message.statusCode ?? 0, json };
+};
 class GitHub {
-    constructor(api, repo, token, fetchImpl) {
+    constructor(api, repo, token, send) {
         this.api = api;
         this.repo = repo;
         this.token = token;
-        this.fetchImpl = fetchImpl;
+        this.send = send;
     }
     async call(method, path, payload) {
-        const res = await this.fetchImpl(`${this.api}/repos/${this.repo}${path}`, {
-            method,
-            headers: {
-                authorization: `Bearer ${this.token}`,
-                accept: 'application/vnd.github+json',
-                'x-github-api-version': '2022-11-28',
-                ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
-            },
-            body: payload === undefined ? undefined : JSON.stringify(payload),
-        });
-        if (!res.ok)
+        const res = await this.send(method, `${this.api}/repos/${this.repo}${path}`, {
+            authorization: `Bearer ${this.token}`,
+            accept: 'application/vnd.github+json',
+            'x-github-api-version': '2022-11-28',
+            ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
+        }, payload === undefined ? undefined : JSON.stringify(payload));
+        if (res.status < 200 || res.status >= 300)
             throw new Error(`GitHub answered ${res.status} to ${method} ${path.split('?')[0]}`);
-        return (res.status === 204 ? undefined : await res.json());
+        return res.json;
+    }
+    /** The issues (never pull requests) in a state whose body carries the marker on a line of its own, newest first. */
+    async find(state, mark) {
+        const found = [];
+        for (let page = 1; page <= PAGES; page++) {
+            const issues = await this.call('GET', `/issues?state=${state}&per_page=100&page=${page}`);
+            if (!Array.isArray(issues))
+                break;
+            for (const i of issues) {
+                if (!i.pull_request && (i.body ?? '').split('\n').includes(mark))
+                    found.push(i);
+            }
+            if (issues.length < 100 || state === 'closed')
+                break;
+        }
+        return found;
     }
 }
 /**
- * Keeps one issue per environment current with the build's drift: opens it when the environment drifts, edits it on
- * each later build, comments when the drift changes, and closes it when a build shows none. Never fails the step.
+ * Keeps one issue per service and environment current with the build's drift: opens it when the service drifts, edits
+ * it on each later build, comments when the drift changes, and closes it when a build shows none. A person's close as
+ * not planned stands until the drift changes. Never fails the step.
  */
 async function syncDriftIssue(drift, ctx) {
     try {
-        const s = summarize(drift);
+        if (/^pull_request/.test(ctx.env.GITHUB_EVENT_NAME ?? '')) {
+            core.info('Drift issue: a pull request run does not change it.');
+            return;
+        }
+        const s = summarize(drift, ctx.ownNames);
         if (s === null) {
             core.info('Drift issue: this build did not compare drift, so the issue is left as it is.');
             return;
         }
         const api = (ctx.env.GITHUB_API_URL || 'https://api.github.com').replace(/\/+$/, '');
-        const repo = ctx.env.GITHUB_REPOSITORY;
-        if (!repo || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) {
-            core.warning('Drift issue not updated: GITHUB_REPOSITORY is not set.');
+        const repo = ctx.env.GITHUB_REPOSITORY ?? '';
+        if (!/^[A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_-][A-Za-z0-9_.-]*$/.test(repo)) {
+            core.warning('Drift issue not updated: GITHUB_REPOSITORY is not an owner/repository name.');
             return;
         }
-        const gh = new GitHub(api, repo, ctx.token, ctx.fetchImpl ?? fetch);
-        const mark = marker(ctx.projectUid, ctx.environment);
-        const open = await gh.call('GET', `/issues?state=open&labels=${exports.LABEL}&per_page=100`);
-        const issue = open.find((i) => (i.body ?? '').includes(mark));
+        const gh = new GitHub(api, repo, ctx.token, ctx.send ?? httpSend);
+        const mark = marker(ctx.projectUid, ctx.environment, ctx.service);
+        const open = await gh.find('open', mark);
+        const issue = open.length > 0 ? open[open.length - 1] : undefined;
         const runUrl = ctx.env.GITHUB_SERVER_URL && ctx.env.GITHUB_RUN_ID
             ? `${ctx.env.GITHUB_SERVER_URL}/${repo}/actions/runs/${ctx.env.GITHUB_RUN_ID}` : null;
         if (!drifts(s)) {
-            if (!issue)
-                return;
-            await gh.call('POST', `/issues/${issue.number}/comments`, {
-                body: `Build ${code(ctx.buildJobId)} of ${code(ctx.service)} shows no drift against `
-                    + `${s.lockVersion === null ? 'the lock' : `lock v${s.lockVersion}`}: closing.`,
-            });
-            await gh.call('PATCH', `/issues/${issue.number}`, { state: 'closed', state_reason: 'completed' });
-            core.info(`Drift issue #${issue.number} closed: no drift.`);
+            for (const i of open) {
+                await gh.call('POST', `/issues/${i.number}/comments`, {
+                    body: `Build ${code(ctx.buildJobId)} of ${code(ctx.service)} shows no drift against ${lockWords(s)}: closing.`,
+                });
+                await gh.call('PATCH', `/issues/${i.number}`, { state: 'closed', state_reason: 'completed' });
+                core.info(`Drift issue #${i.number} closed: no drift.`);
+            }
             return;
         }
         let names = ctx.allowPublic;
         if (!names) {
             const repository = await gh.call('GET', '');
-            names = repository.private === true;
+            names = repository?.private === true;
         }
         const text = body(s, ctx, names, runUrl);
-        const title = `Maestro: ${ctx.environment} drifts from ${s.lockVersion === null ? 'its lock' : `lock v${s.lockVersion}`}`;
+        const sameDrift = digestMarker(digest(s, names));
+        const title = `Maestro: ${ctx.service} in ${ctx.environment} drifts from ${lockWords(s)}`.slice(0, 256);
         if (!issue) {
+            const closed = await gh.find('closed', mark);
+            const dismissed = closed.find((i) => i.state_reason === 'not_planned');
+            if (dismissed && closed[0] === dismissed && (dismissed.body ?? '').split('\n').includes(sameDrift)) {
+                core.info(`Drift issue #${dismissed.number} was closed as not planned and the drift has not changed: left closed.`);
+                return;
+            }
             const made = await gh.call('POST', '/issues', { title, body: text, labels: [exports.LABEL] });
             core.info(`Drift issue #${made.number} opened.`);
             return;
         }
-        const changed = !(issue.body ?? '').includes(digestMarker(digest(s)));
-        await gh.call('PATCH', `/issues/${issue.number}`, { title, body: text });
+        const changed = !(issue.body ?? '').split('\n').includes(sameDrift);
+        await gh.call('PATCH', `/issues/${issue.number}`, { title, body: text, state: 'open' });
         if (changed) {
             await gh.call('POST', `/issues/${issue.number}/comments`, {
                 body: `The drift changed with build ${code(ctx.buildJobId)} of ${code(ctx.service)}: the issue now shows it.`,
             });
+        }
+        // Two runs that each opened one leave the oldest: the newer ones close as its duplicates.
+        for (const extra of open.slice(0, -1)) {
+            await gh.call('POST', `/issues/${extra.number}/comments`, { body: `Duplicate of #${issue.number}.` });
+            await gh.call('PATCH', `/issues/${extra.number}`, { state: 'closed', state_reason: 'completed' });
         }
         core.info(`Drift issue #${issue.number} updated${changed ? ': the drift changed' : ''}.`);
     }

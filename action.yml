@@ -90,10 +90,10 @@ inputs:
     default: 'false'
   drift-issue:
     description: >-
-      'true' keeps one GitHub issue per environment current with its builds' drift from the lock: it opens when a build
-      drifts, its body follows each later build, a comment says when the drift changed, and it closes when a build of
-      the environment shows no drift. Needs github-token with issues: write. A failure to write the issue warns and
-      never fails the step. Default 'false'.
+      'true' keeps one GitHub issue per service and environment current with its builds' drift from the lock: it
+      opens when a build of the service drifts, its body follows each later build, a comment says when the drift
+      changed, and it closes when a build of the service shows no drift. Needs github-token with issues: write. A
+      failure to write the issue warns and never fails the step. Default 'false'.
     required: false
     default: 'false'
   github-token:

@@ -96,12 +96,6 @@ export async function run(): Promise<void> {
     // Before the build runs, so a build that fails still says how its inputs drifted from the lock.
     reportDrift(build.drift, analysisNames);
     reportNewSensitive(build.drift, analysisNames);
-    if (inputs.driftIssue) {
-      await syncDriftIssue(build.drift, {
-        token: inputs.githubToken, allowPublic: inputs.driftIssuePublic, projectUid, environment: inputs.environment,
-        service: inputs.service, buildJobId, env: process.env,
-      });
-    }
     reportReleaseNote(build.releaseNote);
     await pollJob(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
     const paths = await downloadArtifacts(api, buildJobId, inputs.service, analysisNames); // [8]
@@ -118,6 +112,13 @@ export async function run(): Promise<void> {
     // Before registering, so a run that fail-on-warnings stops leaves the environment's JAR as it was.
     await warnStalePeers(api, inputs, cfg, analysisJobId, inputs.failOnWarnings);
     await registerJarForEnv(api, inputs, cfg, upload, buildJobId, analysisNames); // [9]
+    // Once the build is the environment's: the issue says what its registered JAR drifts by.
+    if (inputs.driftIssue) {
+      await syncDriftIssue(build.drift, {
+        token: inputs.githubToken, allowPublic: inputs.driftIssuePublic, projectUid: cfg.projectUid,
+        environment: inputs.environment, service: inputs.service, ownNames: analysisNames, buildJobId, env: process.env,
+      });
+    }
 
     core.setOutput('extension-dir', paths.extensionDir);
     core.setOutput('config-path', paths.configPath);
