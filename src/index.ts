@@ -12,6 +12,7 @@ import { readAnalysisOfUpload } from './steps/analysisService';
 import { registerJarForEnv } from './steps/register';
 import { warnStalePeers } from './steps/staleness';
 import { reportDrift, reportNewSensitive } from './steps/drift';
+import { syncDriftIssue } from './steps/driftIssue';
 import { reportReleaseNote } from './steps/releaseNote';
 import { reportDeployRun } from './steps/reportDeployRun';
 import { logPolicyCheck } from './steps/ciCheck';
@@ -111,6 +112,13 @@ export async function run(): Promise<void> {
     // Before registering, so a run that fail-on-warnings stops leaves the environment's JAR as it was.
     await warnStalePeers(api, inputs, cfg, analysisJobId, inputs.failOnWarnings);
     await registerJarForEnv(api, inputs, cfg, upload, buildJobId, analysisNames); // [9]
+    // Once the build is the environment's: the issue says what its registered JAR drifts by.
+    if (inputs.driftIssue) {
+      await syncDriftIssue(build.drift, {
+        token: inputs.githubToken, allowPublic: inputs.driftIssuePublic, projectUid: cfg.projectUid,
+        environment: inputs.environment, service: inputs.service, ownNames: analysisNames, buildJobId, env: process.env,
+      });
+    }
 
     core.setOutput('extension-dir', paths.extensionDir);
     core.setOutput('config-path', paths.configPath);

@@ -1,3 +1,4 @@
+import * as core from '@actions/core';
 import { COLLECTOR_IMAGE } from '../src/logPolicy/validate';
 import * as crypto from 'crypto';
 import { normaliseApiUrl, parseInputs, parseSigningKey } from '../src/inputs';
@@ -145,6 +146,32 @@ describe('parseInputs — project / project-id', () => {
     expect(i.collectorImage).toBe('otel/opentelemetry-collector-contrib:0.165.0');
     process.env['INPUT_COLLECTOR-IMAGE'] = '--privileged';
     expect(() => parseInputs()).toThrow('collector-image is not an image reference');
+  });
+
+  it('reads the drift issue inputs, refuses drift-issue without a token, and masks the token', () => {
+    seedRequired();
+    process.env['INPUT_PROJECT-ID'] = 'proj_1';
+    delete process.env['INPUT_DRIFT-ISSUE'];
+    delete process.env['INPUT_GITHUB-TOKEN'];
+    delete process.env['INPUT_DRIFT-ISSUE-PUBLIC'];
+    let i = parseInputs();
+    expect(i.driftIssue).toBe(false);
+    expect(i.githubToken).toBe('');
+    expect(i.driftIssuePublic).toBe(false);
+    process.env['INPUT_DRIFT-ISSUE'] = 'true';
+    expect(() => parseInputs()).toThrow(/drift-issue is set but github-token is empty/);
+    process.env['INPUT_GITHUB-TOKEN'] = ' ghs_abc ';
+    process.env['INPUT_DRIFT-ISSUE-PUBLIC'] = 'TRUE';
+    const masked = jest.spyOn(core, 'setSecret').mockImplementation(() => undefined);
+    i = parseInputs();
+    expect(i.driftIssue).toBe(true);
+    expect(i.githubToken).toBe('ghs_abc');
+    expect(i.driftIssuePublic).toBe(true);
+    expect(masked).toHaveBeenCalledWith('ghs_abc');
+    masked.mockRestore();
+    delete process.env['INPUT_DRIFT-ISSUE'];
+    delete process.env['INPUT_GITHUB-TOKEN'];
+    delete process.env['INPUT_DRIFT-ISSUE-PUBLIC'];
   });
 
   it('throws when neither project nor project-id is provided', () => {

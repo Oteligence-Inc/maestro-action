@@ -14,6 +14,7 @@ jest.mock('../src/steps/reportDeployRun');
 jest.mock('../src/steps/ciCheck');
 jest.mock('../src/steps/checkOnly');
 jest.mock('../src/steps/reportDeploy');
+jest.mock('../src/steps/driftIssue');
 import * as core from '@actions/core';
 import * as crypto from 'crypto';
 import { run } from '../src/index';
@@ -32,6 +33,7 @@ import { BuildVerificationError, verifyBuild } from '../src/steps/verify';
 import { logPolicyCheck, readMapping } from '../src/steps/ciCheck';
 import { checkOnly } from '../src/steps/checkOnly';
 import { reportDeploy } from '../src/steps/reportDeploy';
+import { syncDriftIssue } from '../src/steps/driftIssue';
 
 const inputs = {
   service: 'fundtransfer', environment: 'dev', apiUrl: 'https://api.oteligence.com', collectorValidate: true,
@@ -164,6 +166,39 @@ it('carries on when job-manager sends a drift it cannot read', async () => {
   (submitBuild as jest.Mock).mockResolvedValue({ jobId: 'build_1', drift: 'unexpected' });
   await run();
   expect(core.setFailed).not.toHaveBeenCalled();
+});
+
+describe('the drift issue', () => {
+  const drift = { status: 'checked', lockVersion: 3, services: {} };
+
+  beforeEach(() => {
+    (readAnalysisOfUpload as jest.Mock).mockResolvedValue({ names: ['fundtransfer@1a2b', 'fundtransfer'], notices: [], warnings: [] });
+    (submitBuild as jest.Mock).mockResolvedValue({ jobId: 'build_1', drift });
+  });
+
+  it('is left alone unless drift-issue is on', async () => {
+    await run();
+    expect(syncDriftIssue).not.toHaveBeenCalled();
+  });
+
+  it("is synced once the build is the environment's, with this run's service, names and project", async () => {
+    (parseInputs as jest.Mock).mockReturnValue({ ...inputs, driftIssue: true, githubToken: 'ghs_t', driftIssuePublic: true });
+    await run();
+    expect(syncDriftIssue).toHaveBeenCalledWith(drift, expect.objectContaining({
+      token: 'ghs_t', allowPublic: true, projectUid: 'proj_1', environment: 'dev', service: 'fundtransfer',
+      ownNames: ['fundtransfer@1a2b', 'fundtransfer'], buildJobId: 'build_1',
+    }));
+    expect((registerJarForEnv as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(
+      (syncDriftIssue as jest.Mock).mock.invocationCallOrder[0],
+    );
+  });
+
+  it('is not touched when the run stops before registering', async () => {
+    (parseInputs as jest.Mock).mockReturnValue({ ...inputs, driftIssue: true, githubToken: 'ghs_t' });
+    (verifyBuild as jest.Mock).mockRejectedValue(new BuildVerificationError('The download does not match the record of its build: x.jar'));
+    await run();
+    expect(syncDriftIssue).not.toHaveBeenCalled();
+  });
 });
 
 it("verifies the download against the build's record before registering, and outputs the record's status", async () => {

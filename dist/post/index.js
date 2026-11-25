@@ -26184,6 +26184,15 @@ function parseInputs() {
         throw new errors_1.UserError('require-signed-build is set but signing-public-key is empty: an unset variable reads as empty. ' +
             'Supply the platform\'s public key.');
     }
+    const driftIssue = (core.getInput('drift-issue') || 'false').toLowerCase() === 'true';
+    const githubToken = core.getInput('github-token').trim();
+    if (githubToken)
+        core.setSecret(githubToken);
+    if (driftIssue && !githubToken) {
+        throw new errors_1.UserError('drift-issue is set but github-token is empty: give it the workflow\'s token, with issues: write in the job\'s ' +
+            'permissions.');
+    }
+    const driftIssuePublic = (core.getInput('drift-issue-public') || 'false').toLowerCase() === 'true';
     const collectorValidate = (core.getInput('collector-validate') || 'false').toLowerCase() === 'true';
     const collectorImage = core.getInput('collector-image').trim() || validate_1.COLLECTOR_IMAGE;
     if (!validate_1.IMAGE_SHAPE.test(collectorImage)) {
@@ -26192,7 +26201,7 @@ function parseInputs() {
     return {
         apiKey, project, projectId, orgId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
         failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey, checkOnly, collectorValidate,
-        collectorImage, reportDeploy, buildJobId, requireDeployReport,
+        collectorImage, reportDeploy, buildJobId, requireDeployReport, driftIssue, githubToken, driftIssuePublic,
     };
 }
 /**
