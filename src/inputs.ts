@@ -64,6 +64,17 @@ export function parseInputs(): Inputs {
     );
   }
 
+  const driftIssue = (core.getInput('drift-issue') || 'false').toLowerCase() === 'true';
+  const githubToken = core.getInput('github-token').trim();
+  if (githubToken) core.setSecret(githubToken);
+  if (driftIssue && !githubToken) {
+    throw new UserError(
+      'drift-issue is set but github-token is empty: give it the workflow\'s token, with issues: write in the job\'s ' +
+        'permissions.',
+    );
+  }
+  const driftIssuePublic = (core.getInput('drift-issue-public') || 'false').toLowerCase() === 'true';
+
   const collectorValidate = (core.getInput('collector-validate') || 'false').toLowerCase() === 'true';
   const collectorImage = core.getInput('collector-image').trim() || COLLECTOR_IMAGE;
   if (!IMAGE_SHAPE.test(collectorImage)) {
@@ -73,7 +84,7 @@ export function parseInputs(): Inputs {
   return {
     apiKey, project, projectId, orgId, service, environment, jarsGlob, apiUrl, timeoutSeconds,
     failOnWarnings, skipGenerateOnInactive, skipOnRemovedService, signingKey, checkOnly, collectorValidate,
-    collectorImage, reportDeploy, buildJobId, requireDeployReport,
+    collectorImage, reportDeploy, buildJobId, requireDeployReport, driftIssue, githubToken, driftIssuePublic,
   };
 }
 

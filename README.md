@@ -79,6 +79,9 @@ the app image.
 | `collector-image` | no | the collector-contrib release the platform validates generated configurations for, by digest | The collector image `collector-validate` runs; anything that is not an image reference is refused. |
 | `check-only` | no | `false` | `true` runs only the log policy check (below) over the repository's tracked deployment files and stops: nothing is uploaded, analysed or built, and `generated` is `false`. With a `.maestro/check.yml`, every service and environment it lists is checked against the files it maps to them. |
 | `require-signed-build` | no | `false` | `true` fails the step when `signing-public-key` is empty. A workflow variable that is missing in a repository, fork or environment reads as empty, which would otherwise switch the signature check off. |
+| `drift-issue` | no | `false` | `true` keeps one GitHub issue per environment current with its builds' drift from the lock (see [The drift issue](#the-drift-issue)). Needs `github-token` with `issues: write`. A failure to write the issue warns and never fails the step. |
+| `github-token` | with `drift-issue` | | The token the drift issue is written with, usually `${{ secrets.GITHUB_TOKEN }}`; the job needs `permissions: issues: write`. |
+| `drift-issue-public` | no | `false` | `true` puts method names in the drift issue of a public repository too. Method names come from your bytecode, so by default a public repository's issue carries counts only. |
 | `report-deploy` | no | `false` | `true` reports, after your workflow's own deploy step, that this run deployed the build `build-job-id` names to `environment`, and stops: nothing is uploaded or built, and `service` and `jars` are not read. Maestro records it on the environment's trail as your CI's claim and shows it as the environment's Deployed link; it accepts only a completed build it made for that environment, and a repeat of the same run and attempt adds nothing. |
 | `build-job-id` | with `report-deploy` | | The build a deploy report names: the `job-id` output of the Maestro step that built what the workflow deployed. |
 | `require-deploy-report` | no | `false` | `true` fails a `report-deploy` run when Maestro does not record the report; otherwise the step warns and succeeds, so a deploy is never blocked by its report. |
@@ -331,6 +334,30 @@ named in a warning. Other services' drift is one count line, and their own runs 
 `No drift against lock vN.`; one built from the lock's own analysis, or one job-manager could not compare, says so
 as information, and one whose analysis was not made from this build's JARs says so in a warning. Drift never fails
 the step: `fail-on-warnings` applies to peer staleness only, and the build is still the lock's.
+
+### The drift issue
+
+With `drift-issue: true` and a `github-token`, the Action keeps one issue per environment in the workflow's
+repository, labelled `maestro-drift` and found again by a hidden marker naming the project and environment:
+
+- a build that drifts opens it, with a table of each drifting service: the methods the analysis now recommends that
+  the lock does not hold, and the locked methods no longer in the JAR, each with job-manager's full count and at most
+  twenty names;
+- each later build of the environment rewrites its body, and adds a comment only when the drift changed;
+- a build that shows no drift comments and closes it; a later drift opens a new one;
+- a build job-manager could not compare leaves it as it is.
+
+Method names come from your bytecode, so in a public repository the issue carries counts only unless
+`drift-issue-public` is `true`. The job needs:
+
+```yaml
+permissions:
+  contents: read
+  issues: write
+```
+
+and the step `github-token: ${{ secrets.GITHUB_TOKEN }}`. The token is masked, and a refusal from GitHub warns with
+its status only; the issue never fails the step.
 
 ### Release note
 

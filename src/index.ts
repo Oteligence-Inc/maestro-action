@@ -12,6 +12,7 @@ import { readAnalysisOfUpload } from './steps/analysisService';
 import { registerJarForEnv } from './steps/register';
 import { warnStalePeers } from './steps/staleness';
 import { reportDrift, reportNewSensitive } from './steps/drift';
+import { syncDriftIssue } from './steps/driftIssue';
 import { reportReleaseNote } from './steps/releaseNote';
 import { reportDeployRun } from './steps/reportDeployRun';
 import { logPolicyCheck } from './steps/ciCheck';
@@ -95,6 +96,12 @@ export async function run(): Promise<void> {
     // Before the build runs, so a build that fails still says how its inputs drifted from the lock.
     reportDrift(build.drift, analysisNames);
     reportNewSensitive(build.drift, analysisNames);
+    if (inputs.driftIssue) {
+      await syncDriftIssue(build.drift, {
+        token: inputs.githubToken, allowPublic: inputs.driftIssuePublic, projectUid, environment: inputs.environment,
+        service: inputs.service, buildJobId, env: process.env,
+      });
+    }
     reportReleaseNote(build.releaseNote);
     await pollJob(api, buildJobId, { timeoutSeconds: inputs.timeoutSeconds }); // [7b]
     const paths = await downloadArtifacts(api, buildJobId, inputs.service, analysisNames); // [8]
